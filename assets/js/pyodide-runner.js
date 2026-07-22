@@ -33,9 +33,11 @@
       statusCb && statusCb("Descargando el intérprete de Python (~10 MB, solo la primera vez)…");
       await loadPyodideScript();
       const py = await window.loadPyodide({ indexURL: PYODIDE_URL });
-      // stdout/stderr en vivo hacia el bloque de salida activo
-      py.setStdout({ batched: (msg) => appendText(currentOutputEl, msg, false) });
-      py.setStderr({ batched: (msg) => appendText(currentOutputEl, msg, true) });
+      // stdout/stderr en vivo hacia el bloque de salida activo.
+      // OJO: el callback "batched" entrega cada línea SIN el salto final; hay que
+      // volver a añadir "\n" o la salida saldría toda pegada en una sola línea.
+      py.setStdout({ batched: (msg) => appendText(currentOutputEl, msg + "\n", false) });
+      py.setStderr({ batched: (msg) => appendText(currentOutputEl, msg + "\n", true) });
       return py;
     })();
     return pyodidePromise;
@@ -49,7 +51,14 @@
     await py.loadPackage(need);
     need.forEach((p) => loadedPackages.add(p));
     if (need.includes("matplotlib")) {
-      await py.runPythonAsync("import matplotlib; matplotlib.use('AGG')");
+      // Backend sin ventana + show() como no-op silencioso (evita el UserWarning
+      // de AGG "cannot show the figure"). Las figuras abiertas se capturan al
+      // terminar en renderFigures(), así que show() no necesita hacer nada.
+      await py.runPythonAsync(
+        "import matplotlib; matplotlib.use('AGG')\n" +
+        "import matplotlib.pyplot as _plt\n" +
+        "_plt.show = lambda *a, **k: None"
+      );
     }
   }
 
@@ -139,8 +148,11 @@ _imgs
       await ensurePackages(py, pkgs, (m) => setStatus(outputEl, m));
       setStatus(outputEl, "Ejecutando el ejemplo…");
 
-      // Espacio de nombres nuevo por ejecución (reproducible, sin fugas entre bloques)
-      const ns = py.toPy({});
+      // Espacio de nombres nuevo por ejecución (reproducible, sin fugas entre bloques).
+      // __name__ = "__main__" para que el patrón  if __name__ == "__main__":  se
+      // ejecute igual que en la terminal; si no, el bloque main no correría y el
+      // ejemplo no imprimiría ni dibujaría nada.
+      const ns = py.toPy({ __name__: "__main__" });
       try {
         await py.runPythonAsync(code, { globals: ns });
       } finally {
