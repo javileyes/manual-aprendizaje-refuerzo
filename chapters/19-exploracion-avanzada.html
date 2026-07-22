@@ -634,12 +634,13 @@ Q-learning ε-greedy + bono por conteo (1/sqrt(N)):
         </div>
 
         <p>
-          Con esto cerramos el bloque de exploración. En el
-          <a href="20-rlhf.html">capítulo 20</a> daremos un salto que quizá no esperabas: veremos que buena
-          parte de la revolución de los <strong>grandes modelos de lenguaje</strong> descansa sobre el RL
-          que hemos ido construyendo. Alinear un modelo con las preferencias humanas (RLHF) es, en el
-          fondo, un problema de política, recompensa y exploración… solo que la «recompensa» la aprende
-          otra red a partir de lo que las personas prefieren.
+          Hasta aquí hemos empujado la exploración <strong>desde fuera</strong>, sumando bonos e
+          incentivos a la recompensa. En el <a href="20-maxent-empowerment.html">capítulo 20</a> la
+          metemos <strong>dentro del propio objetivo</strong>: veremos el <strong>RL de máxima
+          entropía</strong> (el alma de SAC, del <a href="17-control-continuo.html">capítulo 17</a>) y el
+          <strong>empowerment</strong>, dos maneras elegantes de que un agente explore, sea robusto y
+          «mantenga abiertas sus opciones» sin renunciar a la recompensa. De ahí saltaremos, ya sí, al
+          <strong>RLHF</strong> que hay detrás de los grandes modelos de lenguaje.
         </p>
 
         <div class="chapter-nav" id="chapter-nav"></div>

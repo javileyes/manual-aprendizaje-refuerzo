@@ -37,8 +37,9 @@
 
     { n: 18, part: 4, slug: "18-model-based",             title: "RL basado en modelo",                   desc: "Imaginar antes de actuar: Dyna-Q, AlphaZero, MuZero." },
     { n: 19, part: 4, slug: "19-exploracion-avanzada",    title: "Exploración avanzada",                  desc: "Curiosidad y motivación intrínseca (RND, ICM)." },
-    { n: 20, part: 4, slug: "20-rlhf",                    title: "RLHF: el RL detrás de los LLM",         desc: "Alinear modelos con preferencias humanas." },
-    { n: 21, part: 4, slug: "21-panorama",               title: "Panorama y buenas prácticas",           desc: "Evaluar bien, no engañarte, y hacia dónde va todo." },
+    { n: 20, part: 4, slug: "20-maxent-empowerment",     title: "Máxima entropía y empowerment",         desc: "Explorar y mantener opciones abiertas como parte del objetivo." },
+    { n: 21, part: 4, slug: "21-rlhf",                    title: "RLHF: el RL detrás de los LLM",         desc: "Alinear modelos con preferencias humanas." },
+    { n: 22, part: 4, slug: "22-panorama",               title: "Panorama y buenas prácticas",           desc: "Evaluar bien, no engañarte, y hacia dónde va todo." },
   ];
 
   window.RL_CH = CH;

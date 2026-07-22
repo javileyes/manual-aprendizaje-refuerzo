@@ -2,7 +2,7 @@
 Reproducibilidad en RL: por que NUNCA debes fiarte de una sola semilla.
 =======================================================================
 
-Capitulo 21 del Manual de RL. Este script entrena el MISMO agente de
+Capitulo 22 del Manual de RL. Este script entrena el MISMO agente de
 Q-Learning en el MISMO gridworld estocastico, pero con 20 semillas
 aleatorias distintas, y dibuja dos paneles:
 
@@ -19,7 +19,7 @@ varias semillas; nunca saques conclusiones de una unica ejecucion.
 
 Como ejecutarlo en tu terminal:
     pip install -r requirements.txt
-    python code/21-panorama/reproducibilidad_semillas.py
+    python code/22-panorama/reproducibilidad_semillas.py
 """
 
 import numpy as np

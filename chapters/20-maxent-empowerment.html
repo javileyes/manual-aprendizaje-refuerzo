@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>20. Máxima entropía y empowerment · Manual de RL</title>
+  <meta name="description" content="RL de máxima entropía (soft value iteration, el alma de SAC) y empowerment: explorar, ser robusto y mantener las opciones abiertas como parte del objetivo, con ejemplo en Python ejecutable." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="20">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 4 · Capítulo 20</span>
+        <h1>Máxima entropía y empowerment</h1>
+        <p class="lead">
+          En el <a href="19-exploracion-avanzada.html">capítulo 19</a> empujábamos la exploración
+          <em>desde fuera</em>, sumando bonos a la recompensa. Aquí hacemos algo más elegante: la
+          metemos <strong>dentro del propio objetivo</strong>. Verás el <strong>RL de máxima
+          entropía</strong> —la idea que da vida a SAC— y el <strong>empowerment</strong>, dos formas
+          de que un agente explore, sea robusto y «mantenga abiertas sus opciones»… sin renunciar a la
+          recompensa. Y un aviso importante: <strong>no es magia gratis</strong>.
+        </p>
+
+        <h2 id="la-idea">La idea: no seas más determinista de lo necesario</h2>
+        <p>
+          Cuando resolvíamos un MDP buscábamos <em>la</em> política óptima, normalmente
+          <strong>determinista</strong>: en cada estado, la mejor acción y punto. Pero comprometerse
+          tan pronto tiene inconvenientes. Si hay <strong>varias</strong> acciones casi igual de buenas,
+          quedarte con una sola y descartar el resto te hace frágil (si el mundo cambia un poco, tu
+          única jugada puede dejar de servir) y te cierra la exploración.
+        </p>
+        <p>
+          La alternativa es pedirle a la política que sea <strong>lo más indecisa posible mientras siga
+          siendo buena</strong>. Formalmente: que tenga la máxima <strong>entropía</strong> (aleatoriedad)
+          compatible con conseguir recompensa alta.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            El lema del RL de máxima entropía cabe en una frase:
+            <strong>«actúa tan aleatoriamente como puedas, siempre que sigas resolviendo la tarea».</strong>
+            Si dos caminos llevan igual de rápido a la meta, tómalos los dos (a medias). Si uno es
+            claramente mejor, tómalo casi siempre. La entropía no sustituye a la recompensa: la acompaña.
+          </p>
+        </div>
+
+        <h2 id="objetivo">El objetivo de máxima entropía</h2>
+        <p>
+          Recuerda la entropía de una distribución: mide su incertidumbre. Para una política
+          $\pi(\cdot\mid s)$ sobre las acciones,
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ Entropía de la política</div>
+          <p>$$\mathcal{H}\big(\pi(\cdot\mid s)\big) = -\sum_a \pi(a\mid s)\,\log \pi(a\mid s)$$</p>
+          <p class="math-note">
+            Vale $0$ si la política es determinista (toda la probabilidad en una acción) y es
+            <strong>máxima</strong> cuando reparte por igual entre las $|\mathcal{A}|$ acciones (entonces
+            $\mathcal{H} = \log|\mathcal{A}|$). Es «lo indecisa que está» la política en el estado $s$.
+          </p>
+        </div>
+        <p>
+          El RL clásico maximiza la recompensa acumulada. El RL de <strong>máxima entropía</strong> añade
+          un premio por mantener esa indecisión:
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ El objetivo de máxima entropía</div>
+          <p>$$J(\pi) = \sum_{t} \mathbb{E}_{(s_t,a_t)\sim\pi}\Big[\, r(s_t,a_t) \;+\; \alpha\,\mathcal{H}\big(\pi(\cdot\mid s_t)\big) \,\Big]$$</p>
+          <p class="math-note">
+            El primer término es la recompensa de siempre. El segundo premia la entropía de la política.
+            La <strong>temperatura</strong> $\alpha \ge 0$ gradúa el compromiso: cuánta aleatoriedad estás
+            dispuesto a «pagar». Con $\alpha = 0$ recuperas el RL normal; cuanto mayor es $\alpha$, más
+            valoras que la política se mantenga abierta.
+          </p>
+        </div>
+
+        <h3 id="soft">Bellman «suave» y la política softmax</h3>
+        <p>
+          Con este objetivo, las ecuaciones de Bellman del <a href="04-retornos-y-valor.html">capítulo 4</a>
+          cambian de una forma preciosa: el $\max$ se convierte en un <strong>máximo suave</strong>
+          (el <em>log-sum-exp</em>).
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ Valores y política óptima suaves</div>
+          <p>$$Q_{\text{soft}}(s,a) = r(s,a) + \gamma\,\mathbb{E}_{s'}\big[V_{\text{soft}}(s')\big]
+             \qquad
+             V_{\text{soft}}(s) = \alpha \log \sum_a \exp\!\Big(\tfrac{Q_{\text{soft}}(s,a)}{\alpha}\Big)$$</p>
+          <p>y la política óptima es un <strong>softmax</strong> sobre los valores (¡reaparece el softmax del
+          <a href="14-policy-gradient-reinforce.html">capítulo 14</a>!):</p>
+          <p>$$\boxed{\;\pi^\star(a\mid s) = \exp\!\Big(\tfrac{Q_{\text{soft}}(s,a) - V_{\text{soft}}(s)}{\alpha}\Big) \;\propto\; \exp\!\Big(\tfrac{Q_{\text{soft}}(s,a)}{\alpha}\Big)\;}$$</p>
+          <p class="math-note">
+            $V_{\text{soft}}$ es un «máximo blando»: cuando $\alpha \to 0$ se convierte en el
+            $\max_a Q(s,a)$ de siempre y la política se vuelve <em>greedy</em> (RL clásico); cuando
+            $\alpha \to \infty$ la política tiende a <strong>uniforme</strong>. La temperatura interpola
+            suavemente entre «óptimo determinista» y «puro azar».
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ La entropía no es gratis: es un compromiso</div>
+          <p>
+            Es tentador pensar «más entropía → mejor, porque abre posibilidades». <strong>Falso como regla
+            general.</strong> La entropía es un <em>regularizador con peso</em> $\alpha$, no un fin en sí
+            mismo. Si $\alpha$ es demasiado grande, el agente actúa casi al azar y <strong>sacrifica
+            recompensa</strong>: explora para siempre y no explota. En el ejemplo de abajo lo verás
+            numéricamente: el retorno se mantiene casi óptimo con $\alpha$ pequeño y luego se <em>desploma</em>.
+            Lo que quieres es <strong>la máxima entropía compatible con seguir siendo (casi) óptimo</strong>.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Esto ya lo has visto (y lo verás)</div>
+          <p>La máxima entropía no es un rincón exótico: vertebra varios capítulos del manual.</p>
+          <ul>
+            <li><strong>SAC</strong> (<a href="17-control-continuo.html">capítulo 17</a>) es <em>exactamente</em>
+            este objetivo para acciones continuas. Incluso <strong>autoajusta $\alpha$</strong> para mantener
+            una entropía objetivo, en vez de fijarla a mano.</li>
+            <li>El <strong>bono de entropía</strong> de A2C y PPO (capítulos
+            <a href="15-actor-critico.html">15</a> y <a href="16-ppo.html">16</a>), el término
+            $-c_2\,\mathcal{H}$, es una versión ligera de esta misma idea para que la política no colapse
+            antes de tiempo.</li>
+            <li>La <strong>penalización KL</strong> del <a href="21-rlhf.html">RLHF</a> (capítulo 21) es su
+            hermana: $-\beta\,\mathrm{KL}(\pi\,\|\,\pi_{\text{ref}})$. Si la referencia fuese uniforme,
+            $-\mathrm{KL}(\pi\,\|\,\text{uniforme})$ <em>es</em> la entropía (salvo una constante). Ahí
+            $\beta$ juega el papel de $\alpha$.</li>
+          </ul>
+        </div>
+
+        <h2 id="empowerment">Empowerment: mantener las opciones abiertas</h2>
+        <p>
+          La entropía de la política mide lo aleatoria que es tu <em>forma de actuar</em>. Pero hay una
+          intuición distinta y muy natural detrás de «abrir posibilidades»: estar en situaciones desde las
+          que puedes <strong>influir mucho en tu futuro</strong>, alcanzar muchos estados distintos según
+          lo que decidas. Eso es el <strong>empowerment</strong>.
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ Empowerment (control sobre el futuro)</div>
+          <p>$$\mathfrak{E}(s) = \max_{p(\mathbf{a})}\; I\big(\mathbf{A};\, S'\mid S=s\big)$$</p>
+          <p class="math-note">
+            $I(\mathbf{A};S')$ es la <strong>información mutua</strong> entre tu (secuencia de) acciones
+            $\mathbf{A}$ y el estado futuro $S'$: cuánta información transmite lo que haces a dónde acabas.
+            El empowerment es esa información mutua <em>maximizada</em> sobre tu forma de elegir acciones
+            (la «capacidad del canal» entre acciones y futuros). Intuitivamente: <strong>cuántos futuros
+            distintos y controlables tienes a tu alcance</strong> desde $s$. Un proxy sencillo cuando el
+            mundo es determinista: $\log_2$ del número de estados que puedes alcanzar en $k$ pasos.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 No confundas las dos cosas</div>
+          <p>
+            <strong>Entropía de acción</strong> ≠ <strong>empowerment</strong>. Agitar un mando al azar
+            contra una pared tiene <em>altísima entropía de acción</em> pero <strong>cero</strong>
+            posibilidades reales (acabas siempre igual). Quedarte quieto en un cruce con muchas salidas
+            tiene una política determinista (entropía de acción baja) pero <strong>mucho empowerment</strong>
+            (desde ahí puedes ir a muchos sitios). Tu intuición de «abre posibilidades» se parece más al
+            empowerment que a la entropía de la política.
+          </p>
+        </div>
+        <p>
+          El empowerment se usa como <strong>motivación intrínseca</strong> (un pariente de la curiosidad del
+          <a href="19-exploracion-avanzada.html">capítulo 19</a>): un agente que busca estados de alto
+          empowerment tiende a evitar callejones sin salida, a no «morir», y a mantenerse en zonas del mundo
+          donde sus acciones importan — todo ello <em>sin</em> una recompensa externa que se lo diga.
+        </p>
+
+        <h3 id="estados">Un primo cercano: la entropía de estados</h3>
+        <p>
+          Hay una tercera versión de «diversidad»: maximizar la entropía de la <strong>distribución de
+          estados visitados</strong> (no de las acciones). Es decir, «visita el mayor abanico de situaciones
+          posible». Se usa en exploración sin recompensa y en el <strong>descubrimiento de habilidades</strong>
+          (aprender comportamientos variados y distinguibles antes de saber cuál será la tarea). Comparte el
+          espíritu del capítulo 19: cubrir el mundo en vez de quedarte en una esquina.
+        </p>
+
+        <h2 id="algoritmo">El algoritmo: iteración de valor suave</h2>
+        <p>Para un MDP pequeño y conocido, calcular la política de máxima entropía es casi idéntico a la
+        iteración de valor del <a href="05-programacion-dinamica.html">capítulo 5</a>, cambiando el $\max$
+        por su versión suave:</p>
+        <ol>
+          <li>Inicializa $V(s) \leftarrow 0$ para todo estado.</li>
+          <li>Repite hasta converger, para cada estado $s$:
+            <ul>
+              <li>$Q(s,a) \leftarrow r(s,a) + \gamma\, V(s')$ para cada acción.</li>
+              <li>$V(s) \leftarrow \alpha \log \sum_a \exp\big(Q(s,a)/\alpha\big)$ (máximo suave).</li>
+            </ul>
+          </li>
+          <li>Devuelve la política $\pi(a\mid s) = \operatorname{softmax}_a\big(Q(s,a)/\alpha\big)$.</li>
+        </ol>
+        <p>(Para acciones continuas no puedes recorrer todas las acciones ni calcular el <em>log-sum-exp</em>
+        exactamente: ahí entra SAC, que aproxima todo con redes neuronales. La idea de fondo es esta.)</p>
+
+        <h2 id="ejemplo">En Python: el compromiso y el empowerment</h2>
+        <p>
+          Vamos a un gridworld abierto de $7\times 7$ donde hay <strong>muchos caminos igual de cortos</strong>
+          hasta la meta (esquina inferior derecha; cada paso cuesta $-1$). Hacemos tres cosas: (1) barremos la
+          temperatura $\alpha$ y medimos el <strong>retorno real</strong> y la <strong>entropía</strong> de la
+          política resultante para ver el compromiso; (2) miramos cómo reparte la política la probabilidad
+          cuando hay empate; y (3) calculamos el <strong>empowerment</strong> de cada casilla.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">maxent_empowerment.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+Capítulo 20 — RL de máxima entropía y empowerment.
+
+Dos ideas sobre "explorar y mantener opciones abiertas", ilustradas en un
+gridworld abierto donde hay MUCHOS caminos óptimos hasta la meta:
+
+  1) RL de MÁXIMA ENTROPÍA (soft value iteration). Maximiza recompensa + entropía
+     de la política. La temperatura alpha gradúa el compromiso:
+       - alpha -&gt; 0  : recuperamos el óptimo determinista de siempre.
+       - alpha grande: la política se vuelve más aleatoria (explora/robusta)...
+                       pero sacrifica recompensa. Es un COMPROMISO, no algo gratis.
+     La política óptima es un softmax sobre los valores:  pi(a|s) ∝ exp(Q(s,a)/alpha).
+
+  2) EMPOWERMENT: cuántos estados futuros distintos puede alcanzar el agente
+     (aquí, un proxy: log2 del nº de estados alcanzables en k pasos). Formaliza
+     "mantener opciones abiertas": el centro tiene más futuro posible que una esquina.
+
+Ejecutar:
+    python code/20-maxent-empowerment/maxent_empowerment.py
+"""
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ---------- Gridworld abierto (muchos caminos óptimos a la meta) ----------
+H, W = 7, 7
+GOAL = (H - 1, W - 1)
+GAMMA = 0.99
+ACTIONS = [(-1, 0), (1, 0), (0, -1), (0, 1)]     # arriba, abajo, izquierda, derecha
+A_NAMES = ["arriba", "abajo", "izquierda", "derecha"]
+nS, nA = H * W, 4
+
+def idx(r, c): return r * W + c
+def rc(s): return divmod(s, W)
+GOAL_S = idx(*GOAL)
+
+def siguiente(s, a):
+    """Estado resultante de aplicar la acción a en s (chocar con el muro = quedarse)."""
+    r, c = rc(s)
+    dr, dc = ACTIONS[a]
+    nr = min(max(r + dr, 0), H - 1)
+    nc = min(max(c + dc, 0), W - 1)
+    return idx(nr, nc)
+
+# Tabla de estado-siguiente (transiciones deterministas): NEXT[s, a] -&gt; s'
+NEXT = np.array([[siguiente(s, a) for a in range(nA)] for s in range(nS)])
+
+# ---------- Utilidades numéricamente estables ----------
+def logsumexp(x, axis):
+    m = np.max(x, axis=axis, keepdims=True)
+    return (m + np.log(np.sum(np.exp(x - m), axis=axis, keepdims=True))).squeeze(axis)
+
+def softmax(x, axis):
+    m = np.max(x, axis=axis, keepdims=True)
+    e = np.exp(x - m)
+    return e / np.sum(e, axis=axis, keepdims=True)
+
+# ---------- Iteración de valor SUAVE (máxima entropía) ----------
+def soft_value_iteration(alpha, iters=600):
+    """Bellman suave: V(s) = alpha * logsumexp_a( Q(s,a)/alpha ).
+    Devuelve V, Q y la política softmax pi(a|s) = softmax_a(Q(s,a)/alpha)."""
+    V = np.zeros(nS)
+    for _ in range(iters):
+        Q = -1.0 + GAMMA * V[NEXT]                 # recompensa -1 por paso
+        newV = alpha * logsumexp(Q / alpha, axis=1)  # "max suave"
+        newV[GOAL_S] = 0.0                          # meta absorbente
+        if np.max(np.abs(newV - V)) &lt; 1e-10:
+            V = newV
+            break
+        V = newV
+    Q = -1.0 + GAMMA * V[NEXT]
+    pol = softmax(Q / alpha, axis=1)
+    return V, Q, pol
+
+# ---------- Iteración de valor DURA (óptimo determinista, alpha -&gt; 0) ----------
+def hard_value_iteration(iters=600):
+    V = np.zeros(nS)
+    for _ in range(iters):
+        Q = -1.0 + GAMMA * V[NEXT]
+        newV = np.max(Q, axis=1)
+        newV[GOAL_S] = 0.0
+        if np.max(np.abs(newV - V)) &lt; 1e-10:
+            V = newV
+            break
+        V = newV
+    return V
+
+# ---------- Evaluar el RETORNO REAL de una política (sin el premio de entropía) ----------
+def evaluar_politica(pol, iters=5000):
+    V = np.zeros(nS)
+    for _ in range(iters):
+        newV = np.sum(pol * (-1.0 + GAMMA * V[NEXT]), axis=1)
+        newV[GOAL_S] = 0.0
+        if np.max(np.abs(newV - V)) &lt; 1e-10:
+            V = newV
+            break
+        V = newV
+    return V
+
+def entropia_por_estado(pol):
+    return -np.sum(pol * np.log(pol + 1e-12), axis=1)
+
+# ---------- 1) El compromiso recompensa &lt;-&gt; entropía ----------
+V_opt = hard_value_iteration()
+retorno_opt = V_opt[idx(0, 0)]
+print(f"Retorno óptimo determinista (alpha -&gt; 0): {retorno_opt:.2f}\n")
+
+alphas = [0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 1.0]
+retornos, entropias = [], []
+print(f"{'alpha':&gt;6}  {'retorno real':&gt;12}  {'entropía media':&gt;14}")
+print("-" * 36)
+for a in alphas:
+    _, _, pol = soft_value_iteration(a)
+    retorno = evaluar_politica(pol)[idx(0, 0)]
+    H_media = entropia_por_estado(pol)[np.arange(nS) != GOAL_S].mean()
+    retornos.append(retorno)
+    entropias.append(H_media)
+    print(f"{a:6.2f}  {retorno:12.2f}  {H_media:14.3f}")
+
+# La política reparte probabilidad cuando hay varias acciones igual de buenas:
+_, _, pol_demo = soft_value_iteration(0.1)
+s0 = idx(0, 0)
+print(f"\nEn el estado inicial (0,0) con alpha=0.1, la política soft reparte:")
+for a in range(nA):
+    print(f"  {A_NAMES[a]:&gt;10}: {pol_demo[s0, a]:.2f}")
+print("(dos caminos igual de cortos -&gt; reparte entre 'abajo' y 'derecha')")
+
+# ---------- 2) Empowerment: nº de futuros alcanzables ----------
+def empowerment(k=4):
+    emp = np.zeros(nS)
+    for s in range(nS):
+        alcanzables = {s}
+        for _ in range(k):
+            nuevos = set()
+            for u in alcanzables:
+                for a in range(nA):
+                    nuevos.add(int(NEXT[u, a]))
+            alcanzables |= nuevos
+        emp[s] = np.log2(len(alcanzables))
+    return emp.reshape(H, W)
+
+EMP = empowerment(4)
+print(f"\nEmpowerment (log2 de estados alcanzables en 4 pasos):")
+print(f"  esquina (0,0): {EMP[0, 0]:.2f}   centro ({H // 2},{W // 2}): {EMP[H // 2, W // 2]:.2f}")
+print("El centro 'abre' más posibilidades que una esquina, aunque la esquina no dé menos recompensa.")
+
+# ---------- Gráficas ----------
+fig1, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.2))
+ax1.semilogx(alphas, retornos, "o-", color="#4f46e5")
+ax1.axhline(retorno_opt, ls="--", color="#94a3b8", label="óptimo determinista")
+ax1.set_xlabel("temperatura α (más entropía →)")
+ax1.set_ylabel("retorno real")
+ax1.set_title("Con más entropía se pierde recompensa")
+ax1.legend(fontsize=8); ax1.grid(alpha=0.3)
+
+ax2.semilogx(alphas, entropias, "o-", color="#059669")
+ax2.axhline(np.log(nA), ls="--", color="#94a3b8", label="máxima (uniforme)")
+ax2.set_xlabel("temperatura α")
+ax2.set_ylabel("entropía media de la política")
+ax2.set_title("...pero la política es más diversa")
+ax2.legend(fontsize=8); ax2.grid(alpha=0.3)
+plt.tight_layout()
+
+fig2, (ax3, ax4) = plt.subplots(1, 2, figsize=(11, 4.4))
+H_estado = entropia_por_estado(pol_demo).reshape(H, W)
+H_estado[GOAL] = np.nan
+im3 = ax3.imshow(H_estado, cmap="viridis")
+ax3.set_title("Entropía de la política por estado (α=0.1)")
+ax3.text(GOAL[1], GOAL[0], "META", ha="center", va="center", color="white", fontsize=8, fontweight="bold")
+plt.colorbar(im3, ax=ax3, fraction=0.046)
+
+im4 = ax4.imshow(EMP, cmap="magma")
+ax4.set_title("Empowerment (opciones futuras)")
+for (r, c), v in np.ndenumerate(EMP):
+    ax4.text(c, r, f"{v:.1f}", ha="center", va="center", color="white", fontsize=7)
+plt.colorbar(im4, ax=ax4, fraction=0.046)
+plt.tight_layout()
+plt.show()</code></pre>
+        </div>
+
+        <p>
+          Al ejecutarlo verás dos cosas muy elocuentes. En la <strong>tabla</strong>, el retorno se mantiene
+          casi óptimo ($\approx -11.4$) mientras $\alpha$ es pequeño —la política gana diversidad
+          <em>casi gratis</em>— y luego se <strong>desploma</strong> hacia $-100$ (una política casi uniforme
+          que ya no llega a la meta). Fíjate en un detalle bonito: la entropía <strong>no baja a cero</strong>
+          ni con $\alpha \to 0$, porque hay caminos genuinamente empatados y la política reparte $0{,}50/0{,}50$
+          entre «abajo» y «derecha» en el estado inicial: la máxima entropía <em>resuelve los empates
+          conservándolos todos</em>. Y en las gráficas, el <strong>mapa de empowerment</strong> muestra que el
+          centro ($\approx 5{,}2$) «abre» más futuros que una esquina ($\approx 3{,}9$), aunque ninguna casilla
+          dé más recompensa que otra.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Cambia la meta a una casilla central en vez de la esquina, o mete un muro que cree un
+            <em>cuello de botella</em>, y vuelve a mirar el mapa de empowerment: las casillas junto al cuello
+            de botella pierden empowerment (desde ahí tienes menos futuros). Prueba también a subir $\alpha$
+            por encima de $1$ y observa cómo el retorno cae al suelo de $-100$.
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>Como todos los ejemplos «desde cero», usa solo numpy y matplotlib:</p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># instala las dependencias del manual</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># ejecuta el ejemplo (abre dos ventanas con las gráficas)</span>
+<span class="prompt">$</span> python code/20-maxent-empowerment/maxent_empowerment.py
+<span class="comment">Retorno óptimo determinista (alpha -> 0): -11.36
+
+ alpha  retorno real  entropía media
+------------------------------------
+  0.01        -11.36           0.466
+  ...
+  1.00       -100.00           1.370</span></pre>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>El <strong>RL de máxima entropía</strong> maximiza recompensa <em>más</em> entropía de la
+            política: $J(\pi) = \sum_t \mathbb{E}[\,r + \alpha\,\mathcal{H}(\pi)\,]$.</li>
+            <li>Su solución es una política <strong>softmax</strong> $\pi^\star \propto \exp(Q_{\text{soft}}/\alpha)$
+            y un Bellman con <strong>máximo suave</strong> (log-sum-exp). La temperatura $\alpha$ interpola entre
+            óptimo determinista ($\alpha\to 0$) y azar ($\alpha\to\infty$).</li>
+            <li>Es un <strong>compromiso</strong>, no algo gratis: demasiada entropía sacrifica recompensa.
+            Quieres la máxima entropía que <em>no</em> te cueste (casi) recompensa.</li>
+            <li>Vertebra <strong>SAC</strong> (cap. 17), el <strong>bono de entropía</strong> (caps. 15–16) y es
+            hermana de la <strong>KL</strong> del RLHF (cap. 21).</li>
+            <li>El <strong>empowerment</strong> —información mutua entre acciones y futuros— formaliza «mantener
+            las opciones abiertas»; es distinto de la entropía de acción y sirve como motivación intrínseca.</li>
+          </ul>
+        </div>
+
+        <p>
+          Hemos visto que «premiar la indecisión» y «buscar el control sobre el futuro» son formas
+          principiadas de explorar y ser robusto. En el <a href="21-rlhf.html">capítulo 21</a> reaparecerá
+          la prima de la entropía —la penalización KL— en el corazón del <strong>RLHF</strong>: el RL que
+          alinea a los grandes modelos de lenguaje con las preferencias humanas.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

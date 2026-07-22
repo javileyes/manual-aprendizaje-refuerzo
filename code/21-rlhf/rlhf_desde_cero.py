@@ -29,7 +29,7 @@ colapso.
 
 Cómo ejecutarlo:
     pip install -r requirements.txt
-    python code/20-rlhf/rlhf_desde_cero.py
+    python code/21-rlhf/rlhf_desde_cero.py
 
 Solo necesita numpy y matplotlib, así que también corre en el navegador (Pyodide).
 """

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>20. RLHF: el aprendizaje por refuerzo detrás de los LLM · Manual de RL</title>
+  <title>21. RLHF: el aprendizaje por refuerzo detrás de los LLM · Manual de RL</title>
   <meta name="description" content="Cómo se alinean modelos como ChatGPT con preferencias humanas: modelo de recompensa de Bradley-Terry, PPO con penalización KL, y las alternativas modernas DPO y GRPO. Con un RLHF de juguete en numpy, ejecutable." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
   <link rel="stylesheet" href="../assets/css/styles.css" />
@@ -15,7 +15,7 @@
   </script>
   <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 </head>
-<body data-chapter="20">
+<body data-chapter="21">
   <div class="progress-bar"></div>
   <div class="topbar">
     <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
@@ -29,7 +29,7 @@
     <div class="content-wrap">
       <main class="content">
 
-        <span class="chapter-eyebrow">Parte 4 · Capítulo 20</span>
+        <span class="chapter-eyebrow">Parte 4 · Capítulo 21</span>
         <h1>RLHF: el aprendizaje por refuerzo detrás de los LLM</h1>
         <p class="lead">
           Todo el manual ha construido una idea: un agente que maximiza recompensa. Pero, ¿y si
@@ -308,7 +308,7 @@ colapso.
 
 Cómo ejecutarlo:
     pip install -r requirements.txt
-    python code/20-rlhf/rlhf_desde_cero.py
+    python code/21-rlhf/rlhf_desde_cero.py
 
 Solo necesita numpy y matplotlib, así que también corre en el navegador (Pyodide).
 """
@@ -555,7 +555,7 @@ if __name__ == "__main__":
 <span class="prompt">$</span> pip install -r requirements.txt
 
 <span class="comment"># 3) ejecuta el ejemplo</span>
-<span class="prompt">$</span> python code/20-rlhf/rlhf_desde_cero.py
+<span class="prompt">$</span> python code/21-rlhf/rlhf_desde_cero.py
 <span class="comment">Correlación r_theta vs r*     : 0.823
 Mejor respuesta ESTIMADA       : #5  (r_theta = +1.58, pero r* = +0.39)
 E[r*] con KL óptima (beta ~ 0.25)     : +0.611
@@ -658,7 +658,7 @@ E[r*] sin freno KL (beta -> 0, colapso) : +0.388</span></pre>
 
         <p>
           Hemos cerrado el círculo: el mismo RL de un robot en un pasillo es el que alinea a los
-          modelos de lenguaje que usas cada día. En el <a href="21-panorama.html">capítulo 21</a>,
+          modelos de lenguaje que usas cada día. En el <a href="22-panorama.html">capítulo 22</a>,
           el último, damos un paso atrás para hablar de <strong>buenas prácticas</strong>: cómo evaluar
           bien, cómo no engañarte con tus propias métricas —el <em>reward hacking</em> reaparecerá— y
           hacia dónde va el campo.

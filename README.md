@@ -9,7 +9,7 @@ El objetivo: que termines entendiendo *de verdad* las matemáticas y los algorit
 desde los bandidos multibrazo hasta PPO y el RLHF que hay detrás de los grandes
 modelos de lenguaje— apoyándote siempre en explicaciones intuitivas y ejemplos.
 
-- **21 capítulos** en 5 partes, del bucle agente-entorno a RLHF.
+- **22 capítulos** en 5 partes, del bucle agente-entorno a RLHF.
 - **27 scripts de Python**, todos ejecutados y verificados.
 - Los algoritmos profundos van en **doble versión**: una *desde cero* en NumPy
   (ejecutable en el navegador) y otra idiomática con **PyTorch + Gymnasium**.
@@ -141,7 +141,7 @@ AprendizajeRefuerzo/
 **Parte 1 · Tabular** — 5) Programación dinámica · 6) Monte Carlo · 7) TD(0) · 8) SARSA · 9) Q-Learning · 10) TD(λ)
 **Parte 2 · Deep RL** — 11) Aproximación de funciones · 12) DQN · 13) Mejoras de DQN
 **Parte 3 · Política** — 14) REINFORCE · 15) Actor-Crítico · 16) PPO · 17) Control continuo
-**Parte 4 · Fronteras** — 18) Model-based · 19) Exploración avanzada · 20) RLHF · 21) Panorama
+**Parte 4 · Fronteras** — 18) Model-based · 19) Exploración avanzada · 20) Máxima entropía y empowerment · 21) RLHF · 22) Panorama
 
 Empieza por [`chapters/01-que-es-rl.html`](chapters/01-que-es-rl.html).
 

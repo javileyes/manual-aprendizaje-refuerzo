@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>21. Panorama, buenas prácticas y hacia dónde ir · Manual de RL</title>
+  <title>22. Panorama, buenas prácticas y hacia dónde ir · Manual de RL</title>
   <meta name="description" content="Cierre del manual: por qué el RL es frágil y ruidoso, cómo evaluar sin engañarte (varias semillas, media ± desviación), cuándo usar RL y hacia dónde va el campo." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
   <link rel="stylesheet" href="../assets/css/styles.css" />
@@ -15,7 +15,7 @@
   </script>
   <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 </head>
-<body data-chapter="21">
+<body data-chapter="22">
   <div class="progress-bar"></div>
   <div class="topbar">
     <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
@@ -29,11 +29,11 @@
     <div class="content-wrap">
       <main class="content">
 
-        <span class="chapter-eyebrow">Parte 4 · Capítulo 21</span>
+        <span class="chapter-eyebrow">Parte 4 · Capítulo 22</span>
         <h1>Panorama, buenas prácticas y hacia dónde ir</h1>
         <p class="lead">
           Has recorrido veinte capítulos: del bucle agente–entorno a los bandidos, de Bellman a
-          Q-Learning, de DQN a PPO y SAC, y hasta el <a href="20-rlhf.html">RLHF</a> que hay detrás
+          Q-Learning, de DQN a PPO y SAC, y hasta el <a href="21-rlhf.html">RLHF</a> que hay detrás
           de los grandes modelos de lenguaje. Toca cerrar con lo que ningún paper te cuenta con
           claridad: el RL es <strong>poderoso pero frágil y ruidoso</strong>. Este capítulo va de
           cómo <strong>evaluar sin engañarte</strong>, cuándo (y cuándo no) usar RL, y hacia dónde
@@ -177,7 +177,7 @@
 Reproducibilidad en RL: por que NUNCA debes fiarte de una sola semilla.
 =======================================================================
 
-Capitulo 21 del Manual de RL. Este script entrena el MISMO agente de
+Capitulo 22 del Manual de RL. Este script entrena el MISMO agente de
 Q-Learning en el MISMO gridworld estocastico, pero con 20 semillas
 aleatorias distintas, y dibuja dos paneles:
 
@@ -194,7 +194,7 @@ varias semillas; nunca saques conclusiones de una unica ejecucion.
 
 Como ejecutarlo en tu terminal:
     pip install -r requirements.txt
-    python code/21-panorama/reproducibilidad_semillas.py
+    python code/22-panorama/reproducibilidad_semillas.py
 """
 
 import numpy as np
@@ -378,7 +378,7 @@ if __name__ == "__main__":
 <span class="prompt">$</span> pip install -r requirements.txt
 
 <span class="comment"># 3) ejecuta el ejemplo</span>
-<span class="prompt">$</span> python code/21-panorama/reproducibilidad_semillas.py
+<span class="prompt">$</span> python code/22-panorama/reproducibilidad_semillas.py
 <span class="comment">Q-Learning en gridworld estocastico 5x5 | 20 semillas
 ------------------------------------------------------------
 Retorno final (media de los ultimos 50 episodios) entre semillas:
@@ -437,7 +437,7 @@ Retorno final (media de los ultimos 50 episodios) entre semillas:
               <tr><td><strong>RL multi-agente</strong></td><td>Varios agentes que aprenden a la vez, cooperando o compitiendo. El entorno deja de ser estacionario porque los demás también cambian.</td></tr>
               <tr><td><strong>RL jerárquico</strong></td><td>Descomponer una tarea larga en <em>subobjetivos</em> (opciones, habilidades): un nivel alto decide «qué» y uno bajo ejecuta «cómo».</td></tr>
               <tr><td><strong>RL basado en modelo</strong></td><td>Aprender un modelo del mundo y planificar «imaginando» transiciones. Enlaza con el <a href="18-model-based.html">capítulo 18</a> (Dyna-Q, MuZero) y con la eficiencia en datos.</td></tr>
-              <tr><td><strong>RL para razonamiento en LLM</strong></td><td>Más allá del <a href="20-rlhf.html">RLHF</a>: usar recompensas de <em>corrección</em> (por ejemplo, si una demostración matemática es válida) para que los modelos aprendan a razonar paso a paso.</td></tr>
+              <tr><td><strong>RL para razonamiento en LLM</strong></td><td>Más allá del <a href="21-rlhf.html">RLHF</a>: usar recompensas de <em>corrección</em> (por ejemplo, si una demostración matemática es válida) para que los modelos aprendan a razonar paso a paso.</td></tr>
             </tbody>
           </table>
         </div>
