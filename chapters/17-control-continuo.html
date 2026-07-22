@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>17. Control continuo: DDPG, TD3 y SAC · Manual de RL</title>
+  <meta name="description" content="Acciones continuas con métodos off-policy actor-crítico: DDPG (actor determinista + crítico), TD3 (doble crítico y suavizado) y SAC (política estocástica de máxima entropía). Con un DDPG desde cero en numpy." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="17">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 3 · Capítulo 17</span>
+        <h1>Control continuo: DDPG, TD3 y SAC</h1>
+        <p class="lead">
+          Hasta ahora casi todas nuestras acciones eran <strong>discretas</strong>: ir a la
+          izquierda o a la derecha, empujar o soltar. Pero el mundo físico es continuo: el
+          <strong>par</strong> de un motor, el <strong>ángulo</strong> de un volante, el
+          <strong>empuje</strong> de un cohete. En este capítulo aprendemos a elegir acciones
+          <em>reales</em> con la familia off-policy actor-crítico más influyente:
+          <strong>DDPG</strong>, su versión endurecida <strong>TD3</strong> y la reina de la
+          robustez, <strong>SAC</strong>.
+        </p>
+
+        <h2 id="el-problema">El problema: no hay <em>max</em> sobre infinitas acciones</h2>
+        <p>
+          Piensa en cómo funcionaban <a href="09-q-learning.html">Q-Learning</a> y
+          <a href="12-dqn.html">DQN</a>. En cada estado calculábamos $\max_a Q(s,a)$: mirábamos
+          todas las acciones, comparábamos sus valores y nos quedábamos con la mejor. Eso es
+          trivial con 2, 4 o 18 acciones. Pero si la acción es el par de un motor —un número real
+          en, digamos, $[-2, 2]$ N·m—, hay <strong>infinitas</strong> acciones. No puedes
+          recorrerlas una a una para encontrar el máximo.
+        </p>
+        <p>
+          En el <a href="14-policy-gradient-reinforce.html">gradiente de política</a> y en
+          <a href="16-ppo.html">PPO</a> ya esquivamos ese problema: la política producía
+          directamente una distribución (por ejemplo, una gaussiana sobre el par), sin necesitar
+          ningún <em>max</em>. Aquellos métodos eran <strong>on-policy</strong>: cada actualización
+          usaba datos recién recogidos con la política actual y luego los tiraba. Aquí buscamos algo
+          distinto: métodos <strong>off-policy</strong>, que reutilizan experiencia vieja guardada
+          en un <em>buffer de repetición</em> —como DQN— pero para acciones continuas. Ese es el
+          hueco que llenan DDPG, TD3 y SAC.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Imagina que aparcas un coche. No evalúas «los infinitos ángulos posibles del volante»
+            para elegir el mejor. Tienes un <strong>instinto</strong> (gira un poco a la derecha) y
+            un <strong>juicio</strong> de si la situación pinta bien o mal. La idea de este capítulo
+            es exactamente esa división de trabajo: un <strong>actor</strong> que propone la acción
+            directamente —tu instinto— y un <strong>crítico</strong> que puntúa lo buena que es esa
+            acción en ese estado —tu juicio—. El crítico le enseña al actor en qué dirección afinar
+            el instinto.
+          </p>
+        </div>
+
+        <h2 id="ddpg">DDPG: actor determinista + crítico $Q$</h2>
+        <p>
+          <strong>DDPG</strong> (<em>Deep Deterministic Policy Gradient</em>) combina tres ideas que
+          ya conoces: la arquitectura <a href="15-actor-critico.html">actor-crítico</a>, el
+          <em>buffer de repetición</em> y las <em>redes objetivo</em> de <a href="12-dqn.html">DQN</a>,
+          y una novedad: el actor es <strong>determinista</strong>. En lugar de una distribución,
+          produce <em>una</em> acción concreta.
+        </p>
+        <ul>
+          <li>El <strong>actor</strong> $\mu_\theta(s)$ es una red que, dado el estado $s$, devuelve
+              directamente la acción (un vector real). $\theta$ son sus pesos.</li>
+          <li>El <strong>crítico</strong> $Q_\phi(s,a)$ es otra red que estima el valor de tomar la
+              acción $a$ en el estado $s$. $\phi$ son sus pesos.</li>
+        </ul>
+        <p>
+          El crítico se entrena igual que en DQN, con un objetivo de <a href="07-td-aprendizaje.html">diferencia
+          temporal</a>. La única diferencia es que, donde DQN ponía $\max_{a'} Q(s',a')$, aquí no
+          podemos hacer el máximo: lo <strong>sustituimos por la acción que propone el actor</strong>,
+          $\mu(s')$. El actor <em>es</em> nuestro sustituto barato del argmax.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Objetivo del crítico (regresión TD)</div>
+          <p>$$y \;=\; r \;+\; \gamma\, Q_{\phi'}\!\big(s',\, \mu_{\theta'}(s')\big), \qquad
+             L(\phi) \;=\; \mathbb{E}_{(s,a,r,s')\sim\mathcal{D}}\Big[\big(Q_\phi(s,a) - y\big)^2\Big]$$</p>
+          <p class="math-note">
+            $r$ es la recompensa, $\gamma\in[0,1]$ el descuento y $s'$ el estado siguiente.
+            $\mathcal{D}$ es el <strong>buffer de repetición</strong> (experiencias pasadas).
+            $\phi'$ y $\theta'$ son los pesos de las <strong>redes objetivo</strong>, copias lentas
+            de $\phi$ y $\theta$ que estabilizan el blanco $y$ (como en DQN). Minimizamos el error
+            cuadrático medio entre $Q_\phi(s,a)$ y el objetivo $y$. Fíjate: ningún $\max$; en su
+            lugar, $\mu_{\theta'}(s')$.
+          </p>
+        </div>
+
+        <h3>El gradiente de política determinista (DPG)</h3>
+        <p>
+          ¿Y cómo entrenamos al actor? Queremos que $\mu_\theta$ elija, en cada estado, la acción
+          que el crítico puntúa más alto. Es decir, queremos <strong>maximizar</strong> $Q_\phi(s,
+          \mu_\theta(s))$. Como $Q_\phi$ y $\mu_\theta$ son ambas derivables, podemos empujar los
+          pesos del actor en la dirección que sube ese valor. Eso es el <strong>teorema del gradiente
+          de política determinista</strong> (Silver et al., 2014):
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Gradiente de política determinista</div>
+          <p>$$\nabla_\theta J(\theta) \;=\; \mathbb{E}_{s\sim\mathcal{D}}\Big[\,
+             \nabla_a Q_\phi(s,a)\big|_{a=\mu_\theta(s)} \; \nabla_\theta \mu_\theta(s)\,\Big]$$</p>
+          <p class="math-note">
+            $J(\theta) = \mathbb{E}_{s}[\,Q_\phi(s,\mu_\theta(s))\,]$ es lo que el actor maximiza.
+            El gradiente se lee con la <strong>regla de la cadena</strong>:
+            $\nabla_a Q_\phi(s,a)$ dice «en qué dirección del espacio de acciones aumenta el valor»,
+            evaluado en la acción actual $a=\mu_\theta(s)$; y $\nabla_\theta \mu_\theta(s)$ (la
+            jacobiana del actor) traduce ese empujón sobre la acción a un empujón sobre los pesos
+            $\theta$. En la práctica: haces <em>backprop</em> a través del crítico hasta su
+            <strong>entrada de acción</strong>, y sigues propagando por el actor.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 La imagen mental de la cadena crítico → actor</div>
+          <p>
+            El crítico es un «paisaje» $Q_\phi(s,\cdot)$ sobre el espacio de acciones. En el punto
+            $a=\mu_\theta(s)$ calculas la <strong>pendiente</strong> $\nabla_a Q$: hacia dónde subir.
+            El actor entonces mueve sus pesos para que su salida se desplace un poco cuesta arriba en
+            ese paisaje. Iteración a iteración, la acción del actor «trepa» hacia el máximo del
+            crítico, sin haber tenido que probar infinitas acciones. En el ejemplo en numpy verás
+            este encadenamiento explícito en una sola función.
+          </p>
+        </div>
+
+        <h3>Explorar cuando el actor es determinista</h3>
+        <p>
+          Un actor determinista tiene un problema evidente: si en un estado siempre devuelve la
+          misma acción, nunca prueba alternativas y no puede descubrir algo mejor. La solución de
+          DDPG es sencilla: al <em>actuar</em> en el entorno (no al entrenar) le sumamos
+          <strong>ruido</strong> a la acción.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Acción de exploración</div>
+          <p>$$a \;=\; \operatorname{clip}\big(\mu_\theta(s) + \epsilon,\; a_{\min},\; a_{\max}\big),
+             \qquad \epsilon \sim \mathcal{N}(0,\sigma^2)$$</p>
+          <p class="math-note">
+            $\epsilon$ es ruido gaussiano de desviación $\sigma$ (el DDPG original usaba ruido
+            correlacionado de Ornstein–Uhlenbeck, pero un gaussiano simple suele bastar).
+            $\operatorname{clip}$ recorta la acción a su rango válido $[a_{\min}, a_{\max}]$. Es
+            habitual ir <strong>reduciendo</strong> $\sigma$ a lo largo del entrenamiento: mucha
+            exploración al principio, casi ninguna al final.
+          </p>
+        </div>
+
+        <figure class="figure">
+          <svg viewBox="0 0 640 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diagrama del bucle actor-crítico continuo de DDPG">
+            <defs>
+              <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#4f46e5" />
+              </marker>
+              <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#0ea5e9" />
+              </marker>
+            </defs>
+            <rect x="40" y="40" width="170" height="58" rx="12" fill="#4f46e5" />
+            <text x="125" y="66" text-anchor="middle" fill="#fff" font-size="17" font-family="sans-serif" font-weight="700">Actor</text>
+            <text x="125" y="85" text-anchor="middle" fill="#dfe3ff" font-size="13" font-family="sans-serif">μ(s) → acción</text>
+            <rect x="40" y="160" width="170" height="58" rx="12" fill="#0ea5e9" />
+            <text x="125" y="186" text-anchor="middle" fill="#fff" font-size="17" font-family="sans-serif" font-weight="700">Crítico</text>
+            <text x="125" y="205" text-anchor="middle" fill="#e4f5ff" font-size="13" font-family="sans-serif">Q(s, a) → valor</text>
+            <rect x="440" y="100" width="170" height="58" rx="12" fill="#059669" />
+            <text x="525" y="126" text-anchor="middle" fill="#fff" font-size="17" font-family="sans-serif" font-weight="700">Entorno</text>
+            <text x="525" y="145" text-anchor="middle" fill="#dcfce7" font-size="13" font-family="sans-serif">r, s′</text>
+            <!-- actor -> entorno (accion) -->
+            <path d="M210,66 C330,66 330,112 438,120" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow)" />
+            <text x="325" y="58" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">acción + ruido</text>
+            <!-- entorno -> critico/buffer -->
+            <path d="M440,140 C330,150 300,190 212,190" fill="none" stroke="#0ea5e9" stroke-width="2.5" marker-end="url(#arrow2)" />
+            <text x="322" y="205" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">r, s′ → buffer</text>
+            <!-- critico -> actor (gradiente) -->
+            <path d="M108,160 C108,140 108,120 118,100" fill="none" stroke="#dc2626" stroke-width="2.5" marker-end="url(#arrow)" />
+            <text x="150" y="132" text-anchor="middle" fill="#dc2626" font-size="12.5" font-family="sans-serif">∇ₐQ</text>
+          </svg>
+          <figcaption>El actor propone la acción; el entorno responde con $r$ y $s'$ (que van al buffer); el crítico aprende $Q$ y, con $\nabla_a Q$, le indica al actor cómo mejorar.</figcaption>
+        </figure>
+
+        <h3>El algoritmo DDPG, paso a paso</h3>
+        <ol>
+          <li>Inicializa el actor $\mu_\theta$ y el crítico $Q_\phi$. Crea copias objetivo
+              $\theta' \leftarrow \theta$, $\phi' \leftarrow \phi$. Vacía el buffer $\mathcal{D}$.</li>
+          <li>En cada paso, actúa con $a = \operatorname{clip}(\mu_\theta(s) + \epsilon)$, observa
+              $r$ y $s'$, y guarda $(s,a,r,s')$ en $\mathcal{D}$.</li>
+          <li>Muestrea un <em>minibatch</em> de $\mathcal{D}$ y calcula el objetivo
+              $y = r + \gamma\,Q_{\phi'}(s',\mu_{\theta'}(s'))$.</li>
+          <li>Actualiza el crítico minimizando $(Q_\phi(s,a) - y)^2$.</li>
+          <li>Actualiza el actor con el gradiente DPG:
+              $\nabla_\theta J = \nabla_a Q_\phi\,\nabla_\theta \mu_\theta$.</li>
+          <li>Desliza las redes objetivo con una <strong>actualización suave</strong> (Polyak):
+              $\theta' \leftarrow \tau\theta + (1-\tau)\theta'$ (e igual para $\phi'$), con
+              $\tau \ll 1$.</li>
+        </ol>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ DDPG es potente pero frágil</div>
+          <p>
+            DDPG tiene fama de <strong>inestable</strong> y muy sensible a los hiperparámetros. El
+            culpable principal es que el crítico tiende a <strong>sobreestimar</strong> los valores:
+            como el actor se entrena para maximizar $Q_\phi$, busca sistemáticamente las acciones
+            donde el crítico se equivoca <em>por arriba</em>, y ese error se realimenta. TD3 nace
+            precisamente para corregir esto.
+          </p>
+        </div>
+
+        <h2 id="td3">TD3: arreglar la sobreestimación</h2>
+        <p>
+          <strong>TD3</strong> (<em>Twin Delayed DDPG</em>) es DDPG con tres parches quirúrgicos.
+          No cambia la idea de fondo —actor determinista + crítico—, solo la hace mucho más estable.
+        </p>
+
+        <h3>1. Doble crítico y el truco del mínimo</h3>
+        <p>
+          En lugar de un crítico, TD3 entrena <strong>dos</strong>, $Q_{\phi_1}$ y $Q_{\phi_2}$, con
+          pesos iniciales distintos. Para formar el objetivo TD toma el <strong>mínimo</strong> de
+          los dos. La intuición: si un crítico sobreestima por casualidad, el otro probablemente no
+          lo haga tanto; quedarnos con el menor recorta el optimismo. Es el mismo espíritu que
+          <a href="13-mejoras-dqn.html">Double DQN</a>, llevado al caso continuo.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Objetivo con doble crítico recortado</div>
+          <p>$$y \;=\; r \;+\; \gamma\, \min_{i\in\{1,2\}} Q_{\phi'_i}\!\big(s',\, \tilde{a}\big),
+             \qquad \tilde{a} \;=\; \mu_{\theta'}(s') + \operatorname{clip}(\epsilon, -c, c)$$</p>
+          <p class="math-note">
+            $\min_{i} Q_{\phi'_i}$ toma el <strong>menor</strong> de los dos valores objetivo:
+            así se combate la sobreestimación. $\tilde{a}$ es la acción objetivo con
+            <strong>suavizado</strong> (ver abajo): $\epsilon\sim\mathcal{N}(0,\tilde\sigma^2)$
+            recortado a $[-c,c]$. Ambos críticos se entrenan hacia <em>este mismo</em> objetivo $y$.
+          </p>
+        </div>
+
+        <h3>2. Actualizaciones retardadas del actor</h3>
+        <p>
+          Un crítico ruidoso guía mal al actor. TD3 actualiza el crítico en cada paso, pero el actor
+          y las redes objetivo solo cada $d$ pasos (típicamente $d=2$). Así el actor «persigue» un
+          crítico que ya se ha asentado un poco, en vez de uno que tiembla.
+        </p>
+
+        <h3>3. Suavizado de la política objetivo</h3>
+        <p>
+          Es el $\tilde{a}$ de la fórmula: al calcular el objetivo se le añade un poco de ruido a la
+          acción del actor objetivo. Esto evita que el crítico desarrolle picos estrechos y falsos
+          (regiones muy estrechas de valor altísimo que el actor explotaría). Suavizar el objetivo
+          equivale a decir «acciones parecidas deberían valer parecido», una regularización muy
+          sensata.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 TD3 en una frase</div>
+          <p>
+            TD3 = DDPG + <strong>dos críticos y su mínimo</strong> (menos sobreestimación) +
+            <strong>actor retardado</strong> (menos ruido en la guía) + <strong>suavizado del
+            objetivo</strong> (crítico más liso). Tres cambios pequeños, un salto enorme de
+            estabilidad.
+          </p>
+        </div>
+
+        <h2 id="sac">SAC: política estocástica de máxima entropía</h2>
+        <p>
+          <strong>SAC</strong> (<em>Soft Actor-Critic</em>) da un giro conceptual. Vuelve a una
+          política <strong>estocástica</strong> —una distribución sobre acciones, como en PPO— pero
+          la entrena off-policy con doble crítico, y cambia el objetivo: no solo maximiza la
+          recompensa, sino también la <strong>entropía</strong> de la política.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Objetivo de máxima entropía</div>
+          <p>$$J(\pi) \;=\; \sum_{t} \mathbb{E}_{(s_t,a_t)\sim\rho_\pi}\Big[\, r(s_t,a_t)
+             \;+\; \alpha\, \mathcal{H}\big(\pi(\cdot\mid s_t)\big)\,\Big]$$</p>
+          <p class="math-note">
+            $\mathcal{H}(\pi(\cdot\mid s)) = \mathbb{E}_{a\sim\pi}[-\log \pi(a\mid s)]$ es la
+            <strong>entropía</strong> de la política en el estado $s$: cuánta «indecisión» o
+            aleatoriedad tiene. $\alpha > 0$ es la <strong>temperatura</strong>, que fija el
+            equilibrio entre acumular recompensa y mantenerse aleatorio. $\rho_\pi$ es la
+            distribución de estados-acciones que induce $\pi$. Con $\alpha\to 0$ recuperamos el RL
+            de siempre; con $\alpha$ grande, la política busca ser lo más aleatoria posible sin
+            dejar de ganar recompensa.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 ¿Para qué maximizar la entropía?</div>
+          <p>
+            Premiar la entropía tiene dos efectos maravillosos. Primero, <strong>explora mejor</strong>:
+            la política no colapsa antes de tiempo sobre una única acción; mantiene abiertas varias
+            opciones buenas hasta estar segura. Segundo, es <strong>más robusta</strong>: si hay
+            varias formas casi igual de buenas de resolver la tarea, SAC las reparte en vez de
+            apostarlo todo a una, lo que la hace resistente a perturbaciones. Es la razón por la que
+            SAC suele ser el método <em>por defecto</em> en robótica continua.
+          </p>
+        </div>
+
+        <h3>Crítico «suave» y política óptima</h3>
+        <p>
+          El crítico de SAC estima un valor $Q$ que ya incluye el bonus de entropía de los pasos
+          futuros. Su objetivo TD hereda el doble crítico de TD3 —el $\min$— y le resta el término
+          de entropía del siguiente paso:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Objetivo del crítico suave</div>
+          <p>$$y \;=\; r \;+\; \gamma\Big(\, \min_{i\in\{1,2\}} Q_{\phi'_i}(s',a')
+             \;-\; \alpha\,\log \pi_\theta(a'\mid s')\,\Big), \qquad a' \sim \pi_\theta(\cdot\mid s')$$</p>
+          <p class="math-note">
+            $a'$ se <strong>muestrea</strong> de la política actual en $s'$ (no es determinista).
+            El término $-\alpha\log\pi_\theta(a'\mid s')$ es, en esperanza, el bonus de entropía:
+            recompensa que la acción siguiente sea «incierta». Como en TD3, el $\min$ de los dos
+            críticos objetivo frena la sobreestimación.
+          </p>
+        </div>
+
+        <h3>El truco de reparametrización</h3>
+        <p>
+          Para entrenar al actor necesitamos derivar a través de un <strong>muestreo</strong>: la
+          acción se saca al azar de la distribución del actor, y muestrear no es, en principio, una
+          operación derivable respecto de los parámetros. El <strong>truco de reparametrización</strong>
+          lo resuelve escribiendo la acción como una función determinista de los parámetros más un
+          ruido independiente:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Reparametrización y pérdida del actor</div>
+          <p>$$a_\theta(\epsilon, s) \;=\; \tanh\!\big(\mu_\theta(s) + \sigma_\theta(s)\odot\epsilon\big),
+             \qquad \epsilon \sim \mathcal{N}(0, I)$$</p>
+          <p>$$J_\pi(\theta) \;=\; \mathbb{E}_{s\sim\mathcal{D},\,\epsilon}\Big[\,
+             \alpha\,\log \pi_\theta\big(a_\theta(\epsilon,s)\mid s\big)
+             \;-\; \min_{i\in\{1,2\}} Q_{\phi_i}\big(s, a_\theta(\epsilon,s)\big)\,\Big]$$</p>
+          <p class="math-note">
+            $\mu_\theta(s)$ y $\sigma_\theta(s)$ son la media y la desviación que produce el actor;
+            $\odot$ es el producto elemento a elemento. Al mover el azar a $\epsilon$ (que no depende
+            de $\theta$), el gradiente <strong>sí</strong> fluye por $\mu_\theta$ y $\sigma_\theta$.
+            El $\tanh$ «aplasta» la acción a un rango acotado (luego se reescala al rango real). La
+            pérdida $J_\pi$ empuja a maximizar $Q$ y, a la vez, la entropía (el término
+            $\alpha\log\pi$). Minimizarla es el ascenso de política de SAC.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ La corrección del <em>tanh</em> en la densidad</div>
+          <p>
+            Como aplicamos $\tanh$ a una gaussiana, la densidad de la acción resultante <strong>no</strong>
+            es la de la gaussiana original: hay que corregirla con el jacobiano del cambio de
+            variable. En la práctica se resta un término
+            $\sum_i \log\!\big(1 - \tanh^2(u_i)\big)$ al log-verosímil de la gaussiana. Es un detalle
+            fácil de olvidar y que, omitido, hace que SAC no aprenda bien; en el código de PyTorch
+            está resuelto en la línea de la corrección.
+          </p>
+        </div>
+
+        <h3>Temperatura automática</h3>
+        <p>
+          ¿Cuánto vale $\alpha$? Elegirlo a mano es delicado. La versión moderna de SAC lo
+          <strong>aprende</strong>: fija una entropía objetivo $\mathcal{H}_0$ (por convención,
+          $-\dim(\mathcal{A})$, es decir, menos el número de dimensiones de la acción) y ajusta
+          $\alpha$ para que la entropía real de la política ronde ese valor.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Ajuste de la temperatura</div>
+          <p>$$J(\alpha) \;=\; \mathbb{E}_{a\sim\pi}\Big[\,-\alpha\big(\log \pi_\theta(a\mid s)
+             + \mathcal{H}_0\big)\,\Big]$$</p>
+          <p class="math-note">
+            Si la política es <em>demasiado</em> aleatoria (entropía por encima de $\mathcal{H}_0$),
+            este objetivo baja $\alpha$; si es demasiado determinista, lo sube. En el código se
+            optimiza sobre $\log\alpha$ (para garantizar $\alpha>0$) con su propio Adam.
+          </p>
+        </div>
+
+        <h2 id="comparativa">Los tres, de un vistazo</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th></th><th>DDPG</th><th>TD3</th><th>SAC</th></tr></thead>
+            <tbody>
+              <tr><td>Política</td><td>determinista $\mu(s)$</td><td>determinista $\mu(s)$</td><td>estocástica $\pi(\cdot\mid s)$</td></tr>
+              <tr><td>Nº de críticos</td><td>1</td><td>2 (mínimo)</td><td>2 (mínimo)</td></tr>
+              <tr><td>Exploración</td><td>ruido externo</td><td>ruido externo</td><td>entropía interna</td></tr>
+              <tr><td>Objetivo extra</td><td>—</td><td>suavizado + actor retardado</td><td>máxima entropía</td></tr>
+              <tr><td>Robustez</td><td>frágil</td><td>buena</td><td>muy buena</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Los tres son <strong>off-policy</strong> (buffer de repetición), <strong>actor-crítico</strong>
+          y sirven para acciones <strong>continuas</strong>. La progresión histórica —DDPG (2015) →
+          TD3 (2018) → SAC (2018)— es una lección preciosa de ingeniería: cada método arregla un
+          defecto concreto del anterior.
+        </p>
+
+        <h2 id="ejemplo">Ejemplo: DDPG desde cero en numpy</h2>
+        <p>
+          Nada aclara tanto como programarlo. El código de abajo implementa un DDPG
+          <strong>mínimo y completo</strong> usando solo numpy: sin PyTorch, sin autograd. Incluso
+          la <strong>retropropagación</strong> del actor y del crítico, y un optimizador
+          <strong>Adam</strong>, están hechos a mano. El entorno es un juguete continuo: un punto en
+          el plano que debe <strong>alcanzar el origen</strong>; la acción es un vector de velocidad
+          en $[-1,1]^2$.
+        </p>
+        <p>
+          Presta atención a la función <code>actualiza</code>: ahí verás el gradiente DPG en acción.
+          Hacemos <em>forward</em> del crítico sobre $(s, \mu(s))$, retropropagamos con un gradiente
+          de salida de $-1$ (porque queremos <em>maximizar</em> $Q$), nos quedamos con la parte del
+          gradiente que corresponde a la <strong>acción</strong> y la encadenamos al actor. Es el
+          $\nabla_a Q\,\nabla_\theta\mu$ del teorema, línea a línea.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">ddpg_desde_cero.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+DDPG (Deep Deterministic Policy Gradient) DESDE CERO con numpy.
+
+Implementa un DDPG mínimo, sin librerías de deep learning, sobre un entorno
+continuo diminuto codificado a mano: un punto que debe "alcanzar" el objetivo
+(el origen) en un plano 2D. La acción es continua: un vector de velocidad en
+[-1, 1]^2. Como las acciones son infinitas, no podemos hacer max_a sobre ellas:
+en su lugar, un ACTOR determinista mu(s) propone la acción y un CRÍTICO Q(s, a)
+la evalúa.
+
+Todo está hecho a mano con numpy:
+  1) El entorno continuo (física trivial: p &lt;- p + dt * a).
+  2) Dos redes MLP (actor y crítico) con paso hacia delante y RETROPROPAGACIÓN
+     manual, más un optimizador Adam artesanal.
+  3) El bucle DDPG completo: buffer de repetición, redes objetivo con
+     actualización suave (Polyak) y ruido gaussiano para explorar.
+
+El gradiente de política determinista (teorema DPG) dice:
+    grad_theta J = E[ grad_a Q(s, a)|_{a=mu(s)} * grad_theta mu(s) ]
+Es decir: propagamos hacia atrás a través del crítico para saber "en qué
+dirección mover la acción" y luego a través del actor para saber "cómo mover
+sus pesos". Eso es exactamente lo que hace la función `actualiza`.
+
+Al terminar dibuja:
+  - El retorno por episodio (debe SUBIR: de vagar sin rumbo a ir al objetivo).
+  - El campo vectorial del actor mu(s), que debería apuntar hacia el origen.
+
+Cómo ejecutarlo en tu terminal:
+    pip install -r requirements.txt
+    python code/17-control-continuo/ddpg_desde_cero.py
+
+Solo necesita numpy y matplotlib, así que también corre en el navegador (Pyodide).
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+# ---------------------------------------------------------------------------
+# 1) El entorno: alcanzar el origen en un plano 2D con acción continua
+# ---------------------------------------------------------------------------
+class Reacher2D:
+    """Un punto en [-1,1]^2 debe llegar al origen. Acción = velocidad continua."""
+
+    DT = 0.1            # cuánto avanza por paso a velocidad máxima
+    MAX_PASOS = 30      # duración fija del episodio
+
+    def __init__(self, rng):
+        self.rng = rng
+        self.p = np.zeros(2)
+        self.t = 0
+
+    def reset(self):
+        # Arranca en un punto aleatorio de un anillo alrededor del objetivo.
+        ang = self.rng.uniform(0.0, 2.0 * np.pi)
+        rad = self.rng.uniform(0.5, 0.95)
+        self.p = np.array([rad * np.cos(ang), rad * np.sin(ang)])
+        self.t = 0
+        return self.p.copy()
+
+    def step(self, a):
+        a = np.clip(a, -1.0, 1.0)                 # la acción vive en [-1, 1]^2
+        self.p = np.clip(self.p + self.DT * a, -1.0, 1.0)
+        self.t += 1
+        recompensa = -float(np.linalg.norm(self.p))   # premio = -distancia al origen
+        terminado = self.t &gt;= self.MAX_PASOS          # fin por límite de tiempo
+        return self.p.copy(), recompensa, terminado
+
+
+# ---------------------------------------------------------------------------
+# 2) Un MLP con retropropagación y Adam, hechos a mano
+# ---------------------------------------------------------------------------
+class MLP:
+    """Perceptrón multicapa con ocultas ReLU y salida 'tanh' o 'lineal'.
+
+    Guarda las activaciones en el paso hacia delante para poder retropropagar.
+    `backward` devuelve además el gradiente respecto de la ENTRADA, que es lo
+    que DDPG necesita para encadenar crítico -&gt; actor.
+    """
+
+    def __init__(self, tamanos, salida, rng):
+        self.salida = salida               # 'tanh' (actor) o 'lineal' (crítico)
+        self.W, self.b = [], []
+        for i in range(len(tamanos) - 1):
+            limite = 1.0 / np.sqrt(tamanos[i])
+            self.W.append(rng.uniform(-limite, limite, (tamanos[i], tamanos[i + 1])))
+            self.b.append(np.zeros(tamanos[i + 1]))
+        # Estado de Adam (un momento por parámetro).
+        self.mW = [np.zeros_like(w) for w in self.W]
+        self.vW = [np.zeros_like(w) for w in self.W]
+        self.mb = [np.zeros_like(b) for b in self.b]
+        self.vb = [np.zeros_like(b) for b in self.b]
+        self.paso_t = 0
+
+    def forward(self, x):
+        self.a_cache = [x]                 # activaciones (a_0 = entrada)
+        self.z_cache = []                  # preactivaciones
+        h = x
+        L = len(self.W)
+        for i in range(L):
+            z = h @ self.W[i] + self.b[i]
+            self.z_cache.append(z)
+            if i &lt; L - 1:
+                h = np.maximum(0.0, z)     # ReLU en las capas ocultas
+            elif self.salida == "tanh":
+                h = np.tanh(z)             # salida acotada en (-1, 1)
+            else:
+                h = z                      # salida lineal (valor Q)
+            self.a_cache.append(h)
+        return h
+
+    def backward(self, grad_salida):
+        """Retropropaga `grad_salida` (dL/d_salida). Rellena gW, gb y devuelve dL/d_entrada."""
+        L = len(self.W)
+        self.gW = [None] * L
+        self.gb = [None] * L
+        g = grad_salida
+        for i in reversed(range(L)):
+            z = self.z_cache[i]
+            if i == L - 1:
+                if self.salida == "tanh":
+                    g = g * (1.0 - np.tanh(z) ** 2)   # derivada de tanh
+                # salida lineal: derivada 1, g no cambia
+            else:
+                g = g * (z &gt; 0.0)                      # derivada de ReLU
+            self.gW[i] = self.a_cache[i].T @ g
+            self.gb[i] = g.sum(axis=0)
+            g = g @ self.W[i].T                        # gradiente hacia la capa previa
+        return g                                       # dL/d_entrada
+
+    def adam(self, lr, b1=0.9, b2=0.999, eps=1e-8):
+        """Un paso de descenso de Adam usando los gradientes de `backward`."""
+        self.paso_t += 1
+        corr1 = 1.0 - b1 ** self.paso_t
+        corr2 = 1.0 - b2 ** self.paso_t
+        for i in range(len(self.W)):
+            self.mW[i] = b1 * self.mW[i] + (1 - b1) * self.gW[i]
+            self.vW[i] = b2 * self.vW[i] + (1 - b2) * self.gW[i] ** 2
+            self.W[i] -= lr * (self.mW[i] / corr1) / (np.sqrt(self.vW[i] / corr2) + eps)
+            self.mb[i] = b1 * self.mb[i] + (1 - b1) * self.gb[i]
+            self.vb[i] = b2 * self.vb[i] + (1 - b2) * self.gb[i] ** 2
+            self.b[i] -= lr * (self.mb[i] / corr1) / (np.sqrt(self.vb[i] / corr2) + eps)
+
+
+def copia_dura(destino, origen):
+    """Copia todos los pesos de `origen` en `destino` (para inicializar objetivos)."""
+    for i in range(len(destino.W)):
+        destino.W[i] = origen.W[i].copy()
+        destino.b[i] = origen.b[i].copy()
+
+
+def actualiza_suave(destino, origen, tau):
+    """Polyak: destino &lt;- tau*origen + (1-tau)*destino (redes objetivo lentas)."""
+    for i in range(len(destino.W)):
+        destino.W[i] = tau * origen.W[i] + (1 - tau) * destino.W[i]
+        destino.b[i] = tau * origen.b[i] + (1 - tau) * destino.b[i]
+
+
+# ---------------------------------------------------------------------------
+# 3) Buffer de repetición (experiencias pasadas para aprender off-policy)
+# ---------------------------------------------------------------------------
+class Buffer:
+    def __init__(self, cap, dim_s, dim_a):
+        self.s = np.zeros((cap, dim_s))
+        self.a = np.zeros((cap, dim_a))
+        self.r = np.zeros((cap, 1))
+        self.s2 = np.zeros((cap, dim_s))
+        self.cap, self.i, self.n = cap, 0, 0
+
+    def add(self, s, a, r, s2):
+        i = self.i
+        self.s[i], self.a[i], self.r[i], self.s2[i] = s, a, r, s2
+        self.i = (i + 1) % self.cap
+        self.n = min(self.n + 1, self.cap)
+
+    def sample(self, batch, rng):
+        idx = rng.integers(0, self.n, size=batch)
+        return self.s[idx], self.a[idx], self.r[idx], self.s2[idx]
+
+
+# ---------------------------------------------------------------------------
+# 4) El corazón de DDPG: una actualización de crítico + actor
+# ---------------------------------------------------------------------------
+def actualiza(actor, critico, actor_obj, critico_obj, lote, gamma, lr_a, lr_c):
+    s, a, r, s2 = lote
+    dim_s = s.shape[1]
+    batch = s.shape[0]
+
+    # --- (a) Crítico: regresión hacia el objetivo TD y = r + gamma * Q'(s', mu'(s')) ---
+    a2 = actor_obj.forward(s2)                         # acción objetivo
+    q_obj = critico_obj.forward(np.hstack([s2, a2]))   # Q'(s', a2)
+    y = r + gamma * q_obj                              # sin término terminal: tarea continua
+    q = critico.forward(np.hstack([s, a]))             # Q(s, a) actual
+    grad_q = 2.0 * (q - y) / batch                     # dL/dQ del ECM
+    critico.backward(grad_q)
+    critico.adam(lr_c)
+
+    # --- (b) Actor: ascenso del gradiente de política determinista (DPG) ---
+    # Loss_actor = -mean Q(s, mu(s)); minimizarla = maximizar Q.
+    a_pred = actor.forward(s)                          # mu(s)
+    critico.forward(np.hstack([s, a_pred]))            # Q(s, mu(s)) (nuevo forward)
+    grad_in = critico.backward(-np.ones((batch, 1)) / batch)  # dLoss/d[s, a]
+    grad_a = grad_in[:, dim_s:]                        # nos quedamos con dLoss/da
+    actor.backward(grad_a)                             # ...y lo encadenamos al actor
+    actor.adam(lr_a)
+
+
+# ---------------------------------------------------------------------------
+# 5) Bucle de entrenamiento
+# ---------------------------------------------------------------------------
+def entrena(n_episodios=60, gamma=0.95, tau=0.01, lr_a=1e-3, lr_c=2e-3,
+            batch=64, oculta=32, inicio_aleatorio=300, semilla=0):
+    rng = np.random.default_rng(semilla)
+    env = Reacher2D(rng)
+    dim_s, dim_a = 2, 2
+
+    actor = MLP([dim_s, oculta, oculta, dim_a], "tanh", rng)
+    critico = MLP([dim_s + dim_a, oculta, oculta, 1], "lineal", rng)
+    actor_obj = MLP([dim_s, oculta, oculta, dim_a], "tanh", rng)
+    critico_obj = MLP([dim_s + dim_a, oculta, oculta, 1], "lineal", rng)
+    copia_dura(actor_obj, actor)
+    copia_dura(critico_obj, critico)
+
+    buffer = Buffer(20000, dim_s, dim_a)
+    retornos = np.zeros(n_episodios)
+    pasos_totales = 0
+
+    for ep in range(n_episodios):
+        s = env.reset()
+        # El ruido de exploración decae: mucho al principio, poco al final.
+        sigma = 0.30 - 0.25 * ep / max(1, n_episodios - 1)
+        total = 0.0
+        terminado = False
+        while not terminado:
+            if pasos_totales &lt; inicio_aleatorio:
+                a = rng.uniform(-1.0, 1.0, size=dim_a)     # arranque puramente aleatorio
+            else:
+                a = actor.forward(s[None, :])[0]           # mu(s) determinista
+                a = a + rng.normal(0.0, sigma, size=dim_a)  # + ruido gaussiano
+                a = np.clip(a, -1.0, 1.0)
+
+            s2, r, terminado = env.step(a)
+            buffer.add(s, a, r, s2)
+            s = s2
+            total += r
+            pasos_totales += 1
+
+            if buffer.n &gt;= max(batch, 256):
+                lote = buffer.sample(batch, rng)
+                actualiza(actor, critico, actor_obj, critico_obj,
+                          lote, gamma, lr_a, lr_c)
+                actualiza_suave(actor_obj, actor, tau)
+                actualiza_suave(critico_obj, critico, tau)
+
+        retornos[ep] = total
+
+    return retornos, actor
+
+
+# ---------------------------------------------------------------------------
+# 6) Evaluación de la política determinista (sin ruido)
+# ---------------------------------------------------------------------------
+def evaluar(actor, n=20, semilla=123):
+    rng = np.random.default_rng(semilla)
+    env = Reacher2D(rng)
+    totales = []
+    for _ in range(n):
+        s = env.reset()
+        total, terminado = 0.0, False
+        while not terminado:
+            a = actor.forward(s[None, :])[0]      # sin ruido: pura explotación
+            s, r, terminado = env.step(a)
+            total += r
+        totales.append(total)
+    return float(np.mean(totales))
+
+
+# ---------------------------------------------------------------------------
+# 7) Gráficas: retorno por episodio y campo vectorial del actor
+# ---------------------------------------------------------------------------
+def graficar(retornos, actor):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.4))
+
+    # (a) Curva de aprendizaje.
+    ep = np.arange(1, len(retornos) + 1)
+    ax1.plot(ep, retornos, color="#94a3b8", lw=1, label="retorno por episodio")
+    if len(retornos) &gt;= 5:
+        k = 5
+        suave = np.convolve(retornos, np.ones(k) / k, mode="valid")
+        ax1.plot(ep[k - 1:], suave, color="#4f46e5", lw=2.2, label="media móvil (5)")
+    ax1.set_xlabel("episodio")
+    ax1.set_ylabel("retorno (suma de -distancias)")
+    ax1.set_title("Curva de aprendizaje de DDPG")
+    ax1.legend(loc="lower right")
+    ax1.grid(alpha=0.25)
+
+    # (b) Campo vectorial del actor: mu(s) debería apuntar al origen.
+    g = np.linspace(-0.95, 0.95, 11)
+    X, Y = np.meshgrid(g, g)
+    estados = np.column_stack([X.ravel(), Y.ravel()])
+    A = actor.forward(estados)
+    U = A[:, 0].reshape(X.shape)
+    V = A[:, 1].reshape(Y.shape)
+    ax2.quiver(X, Y, U, V, color="#0ea5e9", pivot="mid")
+    ax2.plot(0, 0, "o", color="#dc2626", ms=10, label="objetivo")
+    ax2.set_xlim(-1.1, 1.1)
+    ax2.set_ylim(-1.1, 1.1)
+    ax2.set_aspect("equal")
+    ax2.set_xlabel("x")
+    ax2.set_ylabel("y")
+    ax2.set_title("Política aprendida  mu(s)")
+    ax2.legend(loc="upper right")
+
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    retornos, actor = entrena()
+    print(f"Retorno episodio 1   : {retornos[0]:7.2f}  (aún explorando)")
+    print(f"Retorno último ep.   : {retornos[-1]:7.2f}")
+    media_ini = retornos[:5].mean()
+    media_fin = retornos[-5:].mean()
+    print(f"Media primeros 5 ep. : {media_ini:7.2f}")
+    print(f"Media últimos 5 ep.  : {media_fin:7.2f}")
+    print(f"Política determinista: {evaluar(actor):7.2f}  (retorno medio, 20 arranques)")
+    graficar(retornos, actor)
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong> (la primera vez tarda unos segundos en descargar Python).
+          Verás dos cosas. La <strong>curva de aprendizaje</strong> parte de retornos muy negativos
+          —el punto vaga sin rumbo mientras explora— y sube con rapidez a medida que el actor aprende
+          a apuntar al objetivo; el retorno se acerca a cero (distancia casi nula). Y el
+          <strong>campo vectorial</strong> del actor $\mu(s)$ muestra, de un golpe de vista, la
+          política aprendida: flechas que apuntan hacia el origen desde cualquier punto del plano.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Sube el ruido inicial de exploración (la $\sigma$ de <code>sigma</code>) o retrásalo:
+            demasiado poco y el actor se queda «ciego» a mejores acciones; demasiado y aprende
+            despacio. Prueba a poner un solo crítico (ya lo es) frente a promediar dos y observa la
+            estabilidad. Cambia <code>gamma</code> a $0.99$ o el número de episodios y mira cómo se
+            mueve la curva. Con <code>oculta=8</code> la red apenas tiene capacidad; con
+            <code>oculta=64</code>, aprende más fino pero más lento.
+          </p>
+        </div>
+
+        <h2 id="sac-torch">SAC «de verdad» con PyTorch</h2>
+        <p>
+          El DDPG en numpy es perfecto para entender las tuercas, pero para un problema real
+          querrás autograd y un entorno estándar. Aquí tienes un <strong>SAC completo</strong> con
+          PyTorch y Gymnasium sobre <strong>Pendulum-v1</strong> (un péndulo invertido: el estado es
+          $(\cos\vartheta, \sin\vartheta, \dot\vartheta)$ y la acción es el par en $[-2,2]$). Incluye
+          el doble crítico con mínimo, la reparametrización con corrección del $\tanh$, las redes
+          objetivo con Polyak y el ajuste automático de la temperatura.
+        </p>
+        <p class="pyodide-banner">
+          ⌨️ Este ejemplo usa <code>torch</code> y <code>gymnasium</code>, demasiado pesados para el
+          navegador: <strong>se ejecuta en tu terminal</strong>, no tiene botón «Ejecutar». Descárgalo
+          o cópialo y córrelo como se indica más abajo.
+        </p>
+
+        <div class="code-example">
+          <div class="code-header">
+            <span class="file-name">sac_torch.py</span>
+            <div class="code-actions">
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+SAC (Soft Actor-Critic) con PyTorch sobre Pendulum-v1  (SOLO TERMINAL)
+=====================================================================
+
+Versión "de verdad" de SAC, el método off-policy actor-crítico de MÁXIMA
+ENTROPÍA, sobre el clásico de control continuo Pendulum-v1 de Gymnasium. El
+objetivo no es solo maximizar la recompensa, sino la recompensa MÁS la entropía
+de la política:
+        J(pi) = E[ sum_t r_t + alpha * H(pi(.|s_t)) ]
+El término de entropía empuja a la política a mantenerse lo más aleatoria
+posible mientras resuelve la tarea: explora mejor y es más robusta.
+
+Ingredientes clave (todos presentes abajo):
+  * Política ESTOCÁSTICA gaussiana con squashing tanh y TRUCO DE
+    REPARAMETRIZACIÓN (rsample): a = tanh(mu + sigma * epsilon), con
+    epsilon ~ N(0, I). Así el gradiente fluye a través del muestreo.
+  * DOBLE CRÍTICO (dos redes Q) y se toma el MÍNIMO para el objetivo, lo que
+    combate la sobreestimación (idea heredada de TD3).
+  * Redes objetivo con actualización suave (Polyak).
+  * Ajuste AUTOMÁTICO de la temperatura alpha hacia una entropía objetivo
+    (por convención, -dim_accion).
+
+Pendulum-v1: estado de 3 números (cos, sen, velocidad angular), acción continua
+= par aplicado en [-2, 2]. La recompensa es negativa; un agente resuelto ronda
+un retorno de -200 o mejor (más cercano a 0). Es demasiado pesado para el
+navegador: se ejecuta en tu terminal.
+
+Cómo ejecutarlo:
+    pip install -r requirements.txt
+    python code/17-control-continuo/sac_torch.py
+"""
+
+import random
+import collections
+
+import numpy as np
+import gymnasium as gym
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.distributions import Normal
+
+LOG_STD_MIN, LOG_STD_MAX = -20.0, 2.0
+
+
+# ---------------------------------------------------------------------------
+# Buffer de repetición
+# ---------------------------------------------------------------------------
+class Buffer:
+    def __init__(self, cap):
+        self.mem = collections.deque(maxlen=cap)
+
+    def add(self, s, a, r, s2, d):
+        self.mem.append((s, a, r, s2, d))
+
+    def sample(self, n):
+        lote = random.sample(self.mem, n)
+        s, a, r, s2, d = zip(*lote)
+        t = lambda x: torch.as_tensor(np.array(x), dtype=torch.float32)
+        return (t(s), t(a), t(r).unsqueeze(1), t(s2), t(d).unsqueeze(1))
+
+    def __len__(self):
+        return len(self.mem)
+
+
+# ---------------------------------------------------------------------------
+# Actor gaussiano con squashing tanh (política estocástica)
+# ---------------------------------------------------------------------------
+class Actor(nn.Module):
+    def __init__(self, dim_s, dim_a, a_high, oculta=256):
+        super().__init__()
+        self.cuerpo = nn.Sequential(
+            nn.Linear(dim_s, oculta), nn.ReLU(),
+            nn.Linear(oculta, oculta), nn.ReLU(),
+        )
+        self.mu = nn.Linear(oculta, dim_a)
+        self.log_std = nn.Linear(oculta, dim_a)
+        # Escala para llevar tanh(.) in (-1,1) al rango real de la acción.
+        self.register_buffer("escala", torch.as_tensor(a_high, dtype=torch.float32))
+
+    def forward(self, s):
+        h = self.cuerpo(s)
+        mu = self.mu(h)
+        log_std = self.log_std(h).clamp(LOG_STD_MIN, LOG_STD_MAX)
+        return mu, log_std
+
+    def muestrea(self, s):
+        """Devuelve (accion, log_prob) con el truco de reparametrización."""
+        mu, log_std = self(s)
+        std = log_std.exp()
+        dist = Normal(mu, std)
+        u = dist.rsample()                       # reparametrización: mu + std * eps
+        y = torch.tanh(u)                        # squashing a (-1, 1)
+        accion = y * self.escala
+        # Corrección del cambio de variable tanh en la densidad (regla del jacobiano).
+        log_prob = dist.log_prob(u) - torch.log(self.escala * (1 - y.pow(2)) + 1e-6)
+        log_prob = log_prob.sum(dim=1, keepdim=True)
+        return accion, log_prob
+
+
+# ---------------------------------------------------------------------------
+# Crítico Q(s, a)  (usaremos dos copias independientes)
+# ---------------------------------------------------------------------------
+class Critico(nn.Module):
+    def __init__(self, dim_s, dim_a, oculta=256):
+        super().__init__()
+        self.red = nn.Sequential(
+            nn.Linear(dim_s + dim_a, oculta), nn.ReLU(),
+            nn.Linear(oculta, oculta), nn.ReLU(),
+            nn.Linear(oculta, 1),
+        )
+
+    def forward(self, s, a):
+        return self.red(torch.cat([s, a], dim=1))
+
+
+def actualiza_suave(destino, origen, tau):
+    for p_obj, p in zip(destino.parameters(), origen.parameters()):
+        p_obj.data.mul_(1 - tau).add_(tau * p.data)
+
+
+# ---------------------------------------------------------------------------
+# Entrenamiento
+# ---------------------------------------------------------------------------
+def entrena(pasos_totales=20000, inicio_aprendizaje=1000, batch=256,
+            gamma=0.99, tau=0.005, lr=3e-4, semilla=0):
+    random.seed(semilla)
+    np.random.seed(semilla)
+    torch.manual_seed(semilla)
+
+    env = gym.make("Pendulum-v1")
+    dim_s = env.observation_space.shape[0]
+    dim_a = env.action_space.shape[0]
+    a_high = env.action_space.high              # [2.0] en Pendulum
+
+    actor = Actor(dim_s, dim_a, a_high)
+    q1 = Critico(dim_s, dim_a)
+    q2 = Critico(dim_s, dim_a)
+    q1_obj = Critico(dim_s, dim_a)
+    q2_obj = Critico(dim_s, dim_a)
+    q1_obj.load_state_dict(q1.state_dict())
+    q2_obj.load_state_dict(q2.state_dict())
+
+    opt_actor = torch.optim.Adam(actor.parameters(), lr=lr)
+    opt_q = torch.optim.Adam(list(q1.parameters()) + list(q2.parameters()), lr=lr)
+
+    # Temperatura alpha ajustada automáticamente hacia una entropía objetivo.
+    entropia_objetivo = -float(dim_a)
+    log_alpha = torch.zeros(1, requires_grad=True)
+    opt_alpha = torch.optim.Adam([log_alpha], lr=lr)
+
+    buffer = Buffer(100_000)
+    s, _ = env.reset(seed=semilla)
+    retorno_ep, retornos = 0.0, []
+
+    for paso in range(1, pasos_totales + 1):
+        # --- Recoger experiencia ---
+        if paso &lt; inicio_aprendizaje:
+            a = env.action_space.sample()                 # arranque aleatorio
+        else:
+            with torch.no_grad():
+                a, _ = actor.muestrea(torch.as_tensor(s, dtype=torch.float32)[None])
+            a = a[0].numpy()
+
+        s2, r, term, trunc, _ = env.step(a)
+        # Para bootstrapping distinguimos fin real (term) de corte por tiempo (trunc):
+        # Pendulum nunca "termina" de verdad, así que d=0 y siempre se hace bootstrap.
+        buffer.add(s, a, r, s2, float(term))
+        s = s2
+        retorno_ep += r
+
+        if term or trunc:
+            retornos.append(retorno_ep)
+            s, _ = env.reset()
+            retorno_ep = 0.0
+
+        # --- Aprender ---
+        if len(buffer) &gt;= max(batch, inicio_aprendizaje):
+            bs, ba, br, bs2, bd = buffer.sample(batch)
+            alpha = log_alpha.exp()
+
+            # (1) Crítico: objetivo con doble Q (mínimo) y bonus de entropía.
+            with torch.no_grad():
+                a2, logp2 = actor.muestrea(bs2)
+                q_obj = torch.min(q1_obj(bs2, a2), q2_obj(bs2, a2)) - alpha * logp2
+                y = br + gamma * (1 - bd) * q_obj
+            loss_q = F.mse_loss(q1(bs, ba), y) + F.mse_loss(q2(bs, ba), y)
+            opt_q.zero_grad()
+            loss_q.backward()
+            opt_q.step()
+
+            # (2) Actor: maximizar Q - alpha*logp (reparametrización).
+            a_pi, logp = actor.muestrea(bs)
+            q_pi = torch.min(q1(bs, a_pi), q2(bs, a_pi))
+            loss_actor = (alpha.detach() * logp - q_pi).mean()
+            opt_actor.zero_grad()
+            loss_actor.backward()
+            opt_actor.step()
+
+            # (3) Temperatura: acerca la entropía de la política a la objetivo.
+            loss_alpha = -(log_alpha * (logp + entropia_objetivo).detach()).mean()
+            opt_alpha.zero_grad()
+            loss_alpha.backward()
+            opt_alpha.step()
+
+            # (4) Redes objetivo, actualización suave.
+            actualiza_suave(q1_obj, q1, tau)
+            actualiza_suave(q2_obj, q2, tau)
+
+        if paso % 2000 == 0 and retornos:
+            media = np.mean(retornos[-10:])
+            print(f"paso {paso:6d} | retorno medio (últimos 10 ep.) = {media:8.1f} "
+                  f"| alpha = {log_alpha.exp().item():.3f}")
+
+    env.close()
+    return actor
+
+
+if __name__ == "__main__":
+    entrena()
+</code></pre>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          El DDPG en numpy corre en el navegador y también en tu terminal; el SAC con PyTorch,
+          solo en terminal. Descarga los archivos con «Descargar .py» (o cópialos) y ejecútalos así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual (incluye torch y gymnasium)</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) DDPG desde cero (ligero, solo numpy + matplotlib)</span>
+<span class="prompt">$</span> python code/17-control-continuo/ddpg_desde_cero.py
+<span class="comment">Retorno episodio 1   :  ~ -20   (aún explorando)
+Retorno último ep.   :  ~  -3
+Política determinista:  ~  -2   (retorno medio, 20 arranques)</span>
+
+<span class="comment"># 4) SAC con PyTorch sobre Pendulum-v1 (tarda unos minutos)</span>
+<span class="prompt">$</span> python code/17-control-continuo/sac_torch.py
+<span class="comment">paso  20000 | retorno medio (últimos 10 ep.) = ~ -180 | alpha = ...</span></pre>
+        </div>
+
+        <h2 id="hacia-18">Hacia las fronteras del campo</h2>
+        <p>
+          Con este capítulo cerramos la <strong>Parte 3</strong>: ya sabes optimizar la política
+          directamente, con crítico y para acciones continuas. Fíjate en algo que todos estos
+          métodos comparten con casi todo lo anterior: son <strong>libres de modelo</strong>
+          (<em>model-free</em>). El agente nunca aprende <em>cómo</em> funciona el entorno; solo
+          aprende a actuar a base de probar. Es robusto, pero derrocha experiencia: hacen falta
+          muchísimas interacciones.
+        </p>
+        <p>
+          ¿Y si el agente <strong>aprendiera un modelo</strong> del entorno y lo usara para
+          <em>imaginar</em> consecuencias antes de actuar? Esa es la puerta que abre el
+          <a href="18-model-based.html">capítulo 18</a>: RL <strong>basado en modelo</strong>, desde
+          Dyna-Q hasta AlphaZero y MuZero. Entramos en las fronteras del campo.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>Con acciones <strong>continuas</strong> no hay $\max_a$: el <strong>actor</strong>
+                propone la acción y el <strong>crítico</strong> $Q(s,a)$ la evalúa.</li>
+            <li><strong>DDPG</strong>: actor determinista $\mu_\theta$, entrenado con el gradiente
+                DPG $\nabla_a Q\,\nabla_\theta\mu$; explora con ruido; es off-policy con buffer y
+                redes objetivo. Potente pero frágil.</li>
+            <li><strong>TD3</strong>: dos críticos y su <strong>mínimo</strong> (menos
+                sobreestimación), actor <strong>retardado</strong> y <strong>suavizado</strong> del
+                objetivo. DDPG estabilizado.</li>
+            <li><strong>SAC</strong>: política <strong>estocástica</strong> que maximiza recompensa
+                <em>más</em> <strong>entropía</strong>; usa reparametrización, doble crítico y
+                temperatura automática. Explora mejor y es muy robusto.</li>
+            <li>Los tres son <strong>off-policy, actor-crítico y continuos</strong>; cada uno
+                corrige un defecto del anterior.</li>
+            <li>Todos son <strong>libres de modelo</strong>: el puente al
+                <a href="18-model-based.html">capítulo 18</a>, donde el agente aprenderá un modelo
+                del entorno.</li>
+          </ul>
+        </div>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

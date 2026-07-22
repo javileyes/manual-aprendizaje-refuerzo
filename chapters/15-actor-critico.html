@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>15. Métodos Actor-Crítico (A2C) · Manual de RL</title>
+  <meta name="description" content="Actor-Crítico y A2C: un crítico aprende V(s) como baseline y el error TD estima la ventaja para reducir la varianza de REINFORCE. Con GAE, entropía y ejemplos en Python ejecutables." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="15">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 3 · Capítulo 15</span>
+        <h1>Métodos Actor-Crítico (A2C)</h1>
+        <p class="lead">
+          En el <a href="14-policy-gradient-reinforce.html">capítulo anterior</a> aprendimos a
+          optimizar la política directamente con REINFORCE. Funciona, pero sufre de un mal crónico:
+          <strong>mucha varianza</strong>. La cura es contratar a un segundo aprendiz —un
+          <strong>crítico</strong>— que estime lo bueno que es cada estado y sirva de referencia.
+          Actor y crítico trabajando juntos son la familia <strong>Actor-Crítico</strong>, y su
+          versión síncrona más popular es <strong>A2C</strong>.
+        </p>
+
+        <h2 id="varianza">Dónde nos quedamos: REINFORCE y su varianza</h2>
+        <p>
+          Recuerda la idea del gradiente de política. Queremos ajustar los parámetros $\theta$ de
+          la política $\pi_\theta(a\mid s)$ para maximizar el retorno esperado, y el teorema del
+          gradiente de política nos dice cómo:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El gradiente de política (recordatorio)</div>
+          <p>$$\nabla_\theta J(\theta) = \mathbb{E}_\pi\big[\nabla_\theta \log \pi_\theta(A_t\mid S_t)\,G_t\big]$$</p>
+          <p class="math-note">
+            Aquí $\pi_\theta(a\mid s)$ es la probabilidad de elegir la acción $a$ en el estado $s$;
+            $\nabla_\theta \log \pi_\theta$ indica en qué dirección mover $\theta$ para hacer esa
+            acción más probable; y $G_t = \sum_{k\ge 0}\gamma^k R_{t+k+1}$ es el <strong>retorno</strong>
+            (recompensa futura descontada por $\gamma\in[0,1]$). El estimador de REINFORCE reemplaza
+            la esperanza $\mathbb{E}_\pi$ por muestras: juega episodios enteros y usa el $G_t$ observado.
+          </p>
+        </div>
+
+        <p>
+          Ahí está el problema. $G_t$ es una estimación <em>Monte Carlo</em>: la suma de <em>todas</em>
+          las recompensas hasta el final del episodio. Cada una de ellas trae su propio azar —el de la
+          política, el del entorno—, y todo ese ruido se acumula. El gradiente resultante apunta, de
+          media, en la dirección correcta, pero <strong>tiembla muchísimo</strong> de un episodio a
+          otro. Aprender con una señal temblorosa es lento y frágil.
+        </p>
+
+        <p>
+          Ya vimos un primer remedio: restar una <strong>línea base</strong> (<em>baseline</em>) $b(s)$
+          que no dependa de la acción. Lo mágico es que esto <strong>no introduce sesgo</strong>:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Una línea base no cambia la media, pero recorta la varianza</div>
+          <p>$$\nabla_\theta J(\theta) = \mathbb{E}_\pi\big[\nabla_\theta \log \pi_\theta(A_t\mid S_t)\,(G_t - b(S_t))\big]$$</p>
+          <p class="math-note">
+            El término extra desaparece en la esperanza porque
+            $\mathbb{E}_{a\sim\pi}\!\big[\nabla_\theta \log \pi_\theta(a\mid s)\,b(s)\big]
+            = b(s)\,\nabla_\theta \sum_a \pi_\theta(a\mid s) = b(s)\,\nabla_\theta 1 = 0$.
+            La pregunta es qué $b(s)$ elegir. La respuesta que minimiza la varianza está muy cerca
+            del <strong>valor del estado</strong> $V(s)$: el retorno que <em>esperamos</em> desde $s$.
+          </p>
+        </div>
+
+        <p>
+          En REINFORCE no teníamos $V(s)$ a mano. La idea que define este capítulo es sencilla y
+          poderosa: <strong>vamos a aprenderlo</strong> con un segundo modelo que corre en paralelo a
+          la política. A ese modelo lo llamamos el <strong>crítico</strong>.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Imagina a un actor en el escenario y a un crítico entre el público. El <strong>actor</strong>
+            actúa: decide qué hacer en cada momento (es la política). El <strong>crítico</strong> no
+            mueve un dedo, solo <strong>juzga</strong>: «esta escena pinta bien» o «esto va fatal» (es
+            la función de valor). Después de cada gesto, el crítico le susurra al actor cuánto mejor o
+            peor de lo esperado ha salido la cosa, y el actor ajusta su interpretación. Ninguno de los
+            dos sabría hacer el trabajo solo; juntos aprenden rapidísimo.
+          </p>
+        </div>
+
+        <h2 id="dos-papeles">Los dos papeles: actor y crítico</h2>
+        <p>
+          Formalicemos los personajes. Tendremos dos funciones aprendibles, con parámetros distintos:
+        </p>
+        <ul>
+          <li><strong>Actor</strong> $\pi_\theta(a\mid s)$: la política. Recibe un estado y devuelve
+          una distribución sobre acciones. Es <em>quien actúa</em>.</li>
+          <li><strong>Crítico</strong> $V_w(s)$: una estimación de la función de valor
+          $V^\pi(s)$. Recibe un estado y devuelve un número: cómo de bueno es. Es <em>quien evalúa</em>.</li>
+        </ul>
+        <p>
+          Ambos pueden ser lineales (como en nuestro primer ejemplo) o redes neuronales (como en el
+          de PyTorch). Y se retroalimentan: el crítico le da al actor una señal de aprendizaje de baja
+          varianza, mientras que el actor, al jugar, genera los datos con los que el crítico mejora su
+          puntería. Es un bucle cooperativo.
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="0 0 680 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diagrama del bucle actor-crítico">
+            <defs>
+              <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#64748b" />
+              </marker>
+            </defs>
+            <!-- Entorno arriba -->
+            <rect x="260" y="24" width="160" height="52" rx="12" fill="#059669" />
+            <text x="340" y="56" text-anchor="middle" fill="#fff" font-size="19" font-family="sans-serif" font-weight="700">Entorno</text>
+            <!-- Actor abajo izquierda -->
+            <rect x="60" y="168" width="170" height="52" rx="12" fill="#4f46e5" />
+            <text x="145" y="193" text-anchor="middle" fill="#fff" font-size="18" font-family="sans-serif" font-weight="700">Actor</text>
+            <text x="145" y="210" text-anchor="middle" fill="#dbe2ff" font-size="12.5" font-family="sans-serif">política π(a|s)</text>
+            <!-- Crítico abajo derecha -->
+            <rect x="450" y="168" width="170" height="52" rx="12" fill="#0ea5e9" />
+            <text x="535" y="193" text-anchor="middle" fill="#fff" font-size="18" font-family="sans-serif" font-weight="700">Crítico</text>
+            <text x="535" y="210" text-anchor="middle" fill="#e0f2fe" font-size="12.5" font-family="sans-serif">valor V(s)</text>
+            <!-- Actor -> Entorno -->
+            <path d="M175,168 C205,120 235,95 268,78" fill="none" stroke="#64748b" stroke-width="2.3" marker-end="url(#arrow)" />
+            <text x="176" y="120" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">acción a</text>
+            <!-- Entorno -> Crítico -->
+            <path d="M412,78 C448,95 478,120 505,166" fill="none" stroke="#64748b" stroke-width="2.3" marker-end="url(#arrow)" />
+            <text x="512" y="118" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">estado s′, r</text>
+            <!-- Crítico -> Actor (señal delta) -->
+            <path d="M450,200 C360,225 300,225 232,200" fill="none" stroke="#a855f7" stroke-width="2.6" marker-end="url(#arrow)" />
+            <text x="340" y="243" text-anchor="middle" fill="#a855f7" font-size="13.5" font-family="sans-serif" font-weight="600">error TD δ  ≈  ventaja</text>
+          </svg>
+          <figcaption>El bucle actor-crítico. El actor decide, el entorno responde, el crítico convierte la respuesta en un error TD $\delta$ que sirve de señal para ambos.</figcaption>
+        </figure>
+
+        <h2 id="ventaja">La ventaja: ¿cuánto mejor que la media?</h2>
+        <p>
+          La pieza central es la <strong>función de ventaja</strong>. Antes definimos dos valores: el
+          valor de un estado $V^\pi(s)$ y el valor de tomar una acción concreta en él,
+          $Q^\pi(s,a)$. La ventaja es, sencillamente, su diferencia.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Función de ventaja</div>
+          <p>$$A^\pi(s,a) = Q^\pi(s,a) - V^\pi(s)$$</p>
+          <p class="math-note">
+            $Q^\pi(s,a) = \mathbb{E}_\pi[G_t \mid S_t=s, A_t=a]$ es el retorno esperado si en $s$
+            tomo la acción $a$ y después sigo la política $\pi$. $V^\pi(s) = \mathbb{E}_{a\sim\pi}[Q^\pi(s,a)]$
+            es el retorno esperado del estado <em>promediando</em> sobre las acciones que $\pi$ suele
+            tomar. Por tanto $A^\pi(s,a)$ mide <strong>cuánto mejor (o peor) que la media</strong> es
+            elegir $a$ en $s$: si $A&gt;0$, esa acción supera a lo que el estado da de media; si $A&lt;0$,
+            queda por debajo.
+          </p>
+        </div>
+
+        <p>
+          Esto es exactamente la señal que queremos para el actor. En vez de empujar hacia arriba la
+          probabilidad de una acción por su retorno bruto $G_t$ (que puede ser un número enorme y
+          ruidoso), la empujamos por su <strong>ventaja</strong>: acciones mejores que la media suben,
+          acciones peores bajan, y las mediocres apenas se tocan. La media se convierte en el punto de
+          referencia, y por eso restar $V(s)$ centra la señal alrededor de cero.
+        </p>
+
+        <h2 id="error-td">El error TD como estimador de la ventaja</h2>
+        <p>
+          Bonito, pero no conocemos $Q^\pi$ ni $V^\pi$ exactos. Aquí entra la magia de las
+          <a href="07-td-aprendizaje.html">diferencias temporales</a>. No necesitamos esperar al final
+          del episodio: tras <em>un solo paso</em> ya tenemos una recompensa real $R_{t+1}$ y un estado
+          siguiente $S_{t+1}$. Con ellos formamos el <strong>error TD</strong>:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El error TD estima la ventaja</div>
+          <p>$$\delta_t = R_{t+1} + \gamma\,V_w(S_{t+1}) - V_w(S_t)$$</p>
+          <p class="math-note">
+            $R_{t+1}$ es la recompensa recibida; $V_w(S_t)$ es lo que el crítico creía que valía el
+            estado actual; y $R_{t+1} + \gamma V_w(S_{t+1})$ es una estimación <em>mejorada</em> de ese
+            valor, ya con un dato real dentro. La clave: si el crítico fuese exacto,
+            $\mathbb{E}\big[R_{t+1} + \gamma V^\pi(S_{t+1}) \mid S_t=s, A_t=a\big] = Q^\pi(s,a)$, y por
+            tanto $\mathbb{E}[\delta_t \mid s,a] = Q^\pi(s,a) - V^\pi(s) = A^\pi(s,a)$. Es decir, el
+            error TD es una <strong>muestra de la ventaja</strong>, pero usando una sola recompensa en
+            lugar del retorno entero: mucha menos varianza.
+          </p>
+        </div>
+
+        <p>
+          Ese mismo $\delta_t$ le sirve al crítico para mejorar. Si $\delta_t &gt; 0$, el estado valía más
+          de lo que pensaba y debe subir su estimación; si $\delta_t &lt; 0$, bajarla. Es la actualización
+          de TD(0) de toda la vida:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Actualización del crítico (TD)</div>
+          <p>$$w \leftarrow w + \alpha_v\,\delta_t\,\nabla_w V_w(S_t)$$</p>
+          <p class="math-note">
+            $\alpha_v$ es la tasa de aprendizaje del crítico. Para un crítico lineal
+            $V_w(s) = w^\top\phi(s)$ se tiene $\nabla_w V_w(s) = \phi(s)$, así que la regla se reduce a
+            $w \leftarrow w + \alpha_v\,\delta_t\,\phi(S_t)$. Estamos minimizando el error TD al
+            cuadrado por descenso de gradiente.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Bootstrapping: una espada de doble filo</div>
+          <p>
+            Fíjate en que $\delta_t$ usa $V_w(S_{t+1})$, la <em>propia</em> estimación del crítico
+            (bootstrapping). Esto reduce la varianza, pero mete <strong>sesgo</strong>: si el crítico
+            aún es malo, la ventaja estimada está sesgada. Es el eterno compromiso sesgo-varianza que
+            ya vimos entre Monte Carlo (sin sesgo, mucha varianza) y TD (algo de sesgo, poca varianza).
+            En un instante veremos cómo <strong>GAE</strong> nos da un mando para regularlo.
+          </p>
+        </div>
+
+        <h2 id="gradiente">El gradiente actor-crítico</h2>
+        <p>
+          Ya tenemos todas las piezas. Sustituimos el retorno bruto del gradiente de política por la
+          ventaja, y la ventaja por su estimación de baja varianza, el error TD:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Gradiente y actualización del actor</div>
+          <p>$$\nabla_\theta J(\theta) = \mathbb{E}_\pi\big[\nabla_\theta \log \pi_\theta(A_t\mid S_t)\,A^\pi(S_t,A_t)\big]
+          \;\approx\; \mathbb{E}_\pi\big[\nabla_\theta \log \pi_\theta(A_t\mid S_t)\,\delta_t\big]$$</p>
+          <p class="math-note">
+            De aquí sale la regla de actualización del actor, un paso de ascenso de gradiente:
+            $\theta \leftarrow \theta + \alpha_\pi\,\delta_t\,\nabla_\theta \log \pi_\theta(A_t\mid S_t)$,
+            con $\alpha_\pi$ la tasa de aprendizaje del actor. El signo de $\delta_t$ decide la
+            dirección: acción con ventaja positiva $\Rightarrow$ hazla más probable; con ventaja
+            negativa $\Rightarrow$ hazla menos probable.
+          </p>
+        </div>
+
+        <p>
+          Comparado con REINFORCE, hemos cambiado <em>una</em> cosa: el multiplicador. Antes era $G_t$
+          (todo el retorno, alta varianza); ahora es $\delta_t$ (un paso más el juicio del crítico,
+          baja varianza). Ese pequeño cambio es la diferencia entre aprender a trompicones y aprender
+          con soltura.
+        </p>
+
+        <h2 id="gae">GAE: el mando entre sesgo y varianza</h2>
+        <p>
+          El error TD de un paso ($\delta_t$) tiene poca varianza pero se apoya del todo en un crítico
+          imperfecto: es algo sesgado. En el otro extremo, usar el retorno completo $G_t - V(S_t)$ no
+          tiene sesgo pero recupera la varianza que queríamos evitar. ¿Y si pudiéramos elegir un punto
+          intermedio? Eso hace la <strong>Estimación Generalizada de la Ventaja</strong> (GAE), con un
+          parámetro $\lambda\in[0,1]$.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ GAE (Generalized Advantage Estimation)</div>
+          <p>$$A_t^{\text{GAE}(\gamma,\lambda)} = \sum_{l=0}^{\infty}(\gamma\lambda)^l\,\delta_{t+l}
+          \qquad\text{con}\qquad \delta_t = R_{t+1} + \gamma\,V_w(S_{t+1}) - V_w(S_t)$$</p>
+          <p class="math-note">
+            Es una suma descontada de errores TD futuros, con factor $\gamma\lambda$. Se calcula muy
+            fácil hacia atrás con la recurrencia
+            $A_t = \delta_t + \gamma\lambda\,A_{t+1}$. El parámetro $\lambda$ es el mando:
+            $\lambda=0$ deja solo el primer término, $A_t=\delta_t$ (TD de un paso); $\lambda=1$ da
+            $A_t = \sum_{l\ge 0}\gamma^l\delta_{t+l} = G_t - V_w(S_t)$ (la ventaja Monte Carlo). Valores
+            intermedios como $\lambda=0.95$ mezclan lo mejor de ambos.
+          </p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>$\lambda$</th><th>Ventaja usada</th><th>Sesgo</th><th>Varianza</th></tr></thead>
+            <tbody>
+              <tr><td>$0$</td><td>$\delta_t$ (TD un paso)</td><td>Alto (depende del crítico)</td><td>Baja</td></tr>
+              <tr><td>$0.9$–$0.97$</td><td>Mezcla de errores TD</td><td>Moderado</td><td>Moderada</td></tr>
+              <tr><td>$1$</td><td>$G_t - V(s)$ (Monte Carlo)</td><td>Nulo</td><td>Alta</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="entropia">Entropía: no dejes de explorar</h2>
+        <p>
+          Un peligro del actor es que se vuelva <strong>demasiado seguro demasiado pronto</strong>: si
+          concentra toda la probabilidad en una acción antes de tiempo, deja de explorar y se puede
+          quedar atascado en una política mediocre. El truco habitual es premiar la <strong>entropía</strong>
+          de la política: cuanto más «indecisa» (uniforme) sea, más entropía tiene.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Bono de entropía</div>
+          <p>$$H\big(\pi(\cdot\mid s)\big) = -\sum_a \pi(a\mid s)\,\log \pi(a\mid s)$$</p>
+          <p class="math-note">
+            Añadimos $\beta\,H(\pi(\cdot\mid s))$ al objetivo (con $\beta$ pequeño, p. ej. $0.01$). Al
+            maximizarlo, empujamos suavemente la política hacia distribuciones más repartidas, lo que
+            mantiene viva la exploración. A medida que aprende, la ventaja acaba imponiéndose y la
+            política se afila igualmente.
+          </p>
+        </div>
+
+        <h2 id="algoritmo">El algoritmo A2C, paso a paso</h2>
+        <p>Juntando todo, un paso de actor-crítico es así:</p>
+        <ol>
+          <li>Inicializa el actor $\pi_\theta$ y el crítico $V_w$ (pesos a cero o pequeños).</li>
+          <li>Observa el estado $s$ y muestrea una acción $a \sim \pi_\theta(\cdot\mid s)$.</li>
+          <li>Ejecuta $a$; observa la recompensa $r$ y el estado siguiente $s'$.</li>
+          <li>Calcula el error TD $\delta = r + \gamma\,V_w(s') - V_w(s)$ (usa $V_w(s')=0$ si $s'$ es terminal).</li>
+          <li><strong>Crítico</strong>: $w \leftarrow w + \alpha_v\,\delta\,\nabla_w V_w(s)$.</li>
+          <li><strong>Actor</strong>: $\theta \leftarrow \theta + \alpha_\pi\,\delta\,\nabla_\theta \log \pi_\theta(a\mid s)$ (más el término de entropía).</li>
+          <li>$s \leftarrow s'$ y vuelve al paso 2.</li>
+        </ol>
+        <p>
+          La versión «síncrona por lotes» (<strong>A2C</strong>) hace lo mismo pero acumulando varios
+          pasos o episodios, estimando la ventaja con GAE y aplicando <em>una</em> actualización con
+          todo el lote. Es más estable y aprovecha mejor el hardware. La verás en el ejemplo de PyTorch.
+        </p>
+
+        <h2 id="numpy">A2C desde cero en numpy</h2>
+        <p>
+          Nada como programarlo para creérselo. Vamos a enfrentar A2C contra REINFORCE en un entorno
+          minúsculo, un <strong>pasillo de 11 casillas</strong> con dos metas: la de la izquierda paga
+          $+0.2$ y la de la derecha $+1.0$. Empiezas en el centro, así que la política óptima es
+          <em>ir siempre a la derecha</em>. El detalle que lo hace interesante: a cada paso le sumamos
+          <strong>ruido</strong> a la recompensa, imitando un entorno estocástico. Ese ruido es veneno
+          para REINFORCE (que lo acumula en el retorno) y casi inofensivo para A2C (cuyo crítico
+          aprende a preverlo y solo arrastra el ruido de un paso).
+        </p>
+        <p>
+          El actor es un <strong>softmax lineal</strong> sobre <em>features</em> one-hot del estado y
+          el crítico es un <strong>valor lineal</strong>. Dibujamos el retorno «limpio» (sin ruido) por
+          episodio, promediado sobre varias semillas, con una banda de $\pm 1$ desviación típica.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">actor_critico_desde_cero.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+Actor-Crítico de un paso (A2C) DESDE CERO con numpy.
+
+Entrenamos dos agentes sobre el mismo entorno (un pasillo con dos metas y una
+recompensa RUIDOSA) para comparar la VARIANZA de sus curvas de aprendizaje:
+
+  * A2C  : actor softmax lineal + crítico lineal. Usa el error TD
+           delta = r + gamma*V(s') - V(s) como estimador de la ventaja.
+           Solo arrastra el ruido de UN paso por actualización.
+  * REINFORCE : el mismo actor, pero SIN crítico; usa el retorno Monte Carlo
+                G_t completo (sin baseline), que acumula el ruido de TODA la
+                trayectoria.
+
+Para que la comparación sea justa, el entrenamiento usa la recompensa ruidosa,
+pero la métrica que dibujamos es el retorno LIMPIO (sin ruido): así la curva
+refleja la calidad de la política, no el azar de las recompensas. El crítico de
+A2C aprende a predecir ese ruido y lo cancela vía la ventaja, de modo que su
+curva sube antes y con bandas mucho más estrechas.
+
+Cómo ejecutarlo:
+    pip install -r requirements.txt
+    python code/15-actor-critico/actor_critico_desde_cero.py
+
+Solo necesita numpy y matplotlib, así que también corre en el navegador (Pyodide).
+"""
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- El entorno: un pasillo de 11 casillas [0..10] con dos metas ---
+# La casilla 0 (izquierda) da +0.2 y la casilla 10 (derecha) da +1.0.
+# Empezamos en el centro (5): ambas metas están a 5 pasos, pero la derecha
+# premia 5 veces más, así que la política óptima es ir siempre a la derecha.
+# A cada paso le sumamos ruido gaussiano: imita un entorno con recompensa
+# estocástica, el escenario donde un crítico (baseline) marca la diferencia.
+N = 11           # número de casillas
+INICIO = 5       # casilla de partida (centro)
+IZQ, DER = 0, 1  # acciones: 0 = izquierda, 1 = derecha
+R_IZQ, R_DER = 0.2, 1.0
+GAMMA = 0.99
+SIGMA = 0.5      # desviación del ruido de recompensa (media cero)
+MAX_PASOS = 150  # tope de seguridad por episodio
+
+
+def paso(s, a):
+    """Dinámica del entorno: devuelve (s_siguiente, recompensa_limpia, terminado)."""
+    s2 = s + 1 if a == DER else s - 1
+    if s2 == 0:
+        return s2, R_IZQ, True    # meta izquierda (premio pequeño)
+    if s2 == N - 1:
+        return s2, R_DER, True    # meta derecha (premio grande)
+    return s2, 0.0, False         # casilla intermedia, sin premio
+
+
+def phi(s):
+    """Codificación one-hot del estado: un vector de features lineal."""
+    v = np.zeros(N)
+    v[s] = 1.0
+    return v
+
+
+def softmax(x):
+    """Softmax numéricamente estable."""
+    z = x - x.max()
+    e = np.exp(z)
+    return e / e.sum()
+
+
+def entrena_a2c(semilla, n_epis, alpha_pi, alpha_v):
+    """A2C de un paso. W: pesos del actor (N x 2). wv: pesos del crítico (N)."""
+    rng = np.random.default_rng(semilla)
+    W = np.zeros((N, 2))
+    wv = np.zeros(N)
+    retornos = np.zeros(n_epis)
+    ident = np.eye(2)  # filas = one-hot de cada acción
+
+    for ep in range(n_epis):
+        s = INICIO
+        g_limpio, descuento, terminado, pasos = 0.0, 1.0, False, 0
+        while not terminado and pasos &lt; MAX_PASOS:
+            f = phi(s)
+            p = softmax(f @ W)               # política pi(.|s)
+            a = rng.choice(2, p=p)
+            s2, r_limpia, terminado = paso(s, a)
+            r = r_limpia + SIGMA * rng.standard_normal()  # recompensa ruidosa
+
+            # Crítico: estima V(s) y V(s'); el error TD es la ventaja.
+            v_s = wv @ f
+            v_s2 = 0.0 if terminado else wv @ phi(s2)
+            delta = r + GAMMA * v_s2 - v_s
+
+            # Actualización del crítico (descenso sobre el error TD al cuadrado).
+            wv += alpha_v * delta * f
+
+            # Actualización del actor (ascenso de gradiente de política).
+            # grad log pi(a|s) = phi(s) ⊗ (e_a - p)
+            grad_log = np.outer(f, ident[a] - p)
+            W += alpha_pi * delta * grad_log
+
+            g_limpio += descuento * r_limpia  # métrica: retorno SIN ruido
+            descuento *= GAMMA
+            s = s2
+            pasos += 1
+        retornos[ep] = g_limpio
+    return retornos
+
+
+def entrena_reinforce(semilla, n_epis, alpha_pi):
+    """REINFORCE (Monte Carlo, sin baseline): el mismo actor, sin crítico."""
+    rng = np.random.default_rng(semilla)
+    W = np.zeros((N, 2))
+    retornos = np.zeros(n_epis)
+    ident = np.eye(2)
+
+    for ep in range(n_epis):
+        # 1) Generamos un episodio completo, guardando recompensa ruidosa y limpia.
+        estados, acciones, r_ruido, r_limpia = [], [], [], []
+        s, terminado, pasos = INICIO, False, 0
+        while not terminado and pasos &lt; MAX_PASOS:
+            p = softmax(phi(s) @ W)
+            a = rng.choice(2, p=p)
+            s2, rl, terminado = paso(s, a)
+            estados.append(s)
+            acciones.append(a)
+            r_ruido.append(rl + SIGMA * rng.standard_normal())
+            r_limpia.append(rl)
+            s = s2
+            pasos += 1
+
+        # 2) Retorno Monte Carlo G_t (con ruido) hacia atrás: el actor lo usa entero.
+        T = len(r_ruido)
+        Gs = np.zeros(T)
+        G = 0.0
+        for t in reversed(range(T)):
+            G = r_ruido[t] + GAMMA * G
+            Gs[t] = G
+
+        # 3) Ascenso de gradiente con el retorno COMPLETO (sin línea base).
+        for t in range(T):
+            f = phi(estados[t])
+            p = softmax(f @ W)
+            grad_log = np.outer(f, ident[acciones[t]] - p)
+            W += alpha_pi * Gs[t] * grad_log
+
+        # 4) Retorno LIMPIO para la métrica (no interviene en el aprendizaje).
+        g_limpio = 0.0
+        for t in reversed(range(T)):
+            g_limpio = r_limpia[t] + GAMMA * g_limpio
+        retornos[ep] = g_limpio
+    return retornos
+
+
+def media_movil(x, w):
+    """Media móvil de ventana w (modo 'valid')."""
+    nucleo = np.ones(w) / w
+    return np.convolve(x, nucleo, mode="valid")
+
+
+def main():
+    n_semillas = 8
+    n_epis = 400
+    ventana = 15
+
+    # Entrenamos ambos métodos con varias semillas para medir la varianza.
+    ac = np.array([entrena_a2c(s, n_epis, alpha_pi=0.15, alpha_v=0.30)
+                   for s in range(n_semillas)])
+    rf = np.array([entrena_reinforce(100 + s, n_epis, alpha_pi=0.15)
+                   for s in range(n_semillas)])
+
+    # Suavizamos cada corrida y agregamos media y desviación entre semillas.
+    ac_s = np.array([media_movil(fila, ventana) for fila in ac])
+    rf_s = np.array([media_movil(fila, ventana) for fila in rf])
+    eje = np.arange(ac_s.shape[1]) + ventana
+
+    ac_mu, ac_sd = ac_s.mean(0), ac_s.std(0)
+    rf_mu, rf_sd = rf_s.mean(0), rf_s.std(0)
+
+    # Resumen numérico por consola (últimos 50 episodios).
+    # Óptimo = ir siempre a la derecha: la meta está a (N-1-INICIO)=5 pasos y la
+    # recompensa R_DER llega en ese último paso, descontada gamma^(pasos-1)=gamma^4.
+    optimo = GAMMA ** (N - 2 - INICIO) * R_DER
+    print(f"Retorno óptimo aprox. (ir siempre a la derecha): {optimo:.3f}")
+    print(f"A2C        -&gt; retorno final medio = {ac[:, -50:].mean():.3f}"
+          f"   (banda media entre semillas = {ac_sd.mean():.3f})")
+    print(f"REINFORCE  -&gt; retorno final medio = {rf[:, -50:].mean():.3f}"
+          f"   (banda media entre semillas = {rf_sd.mean():.3f})")
+
+    # Gráfica comparativa: línea = media entre semillas, banda = ±1 desviación.
+    plt.figure(figsize=(8, 4.6))
+    plt.plot(eje, rf_mu, color="#d97706", label="REINFORCE (sin baseline)")
+    plt.fill_between(eje, rf_mu - rf_sd, rf_mu + rf_sd, color="#d97706", alpha=0.20)
+    plt.plot(eje, ac_mu, color="#4f46e5", label="A2C (crítico como baseline)")
+    plt.fill_between(eje, ac_mu - ac_sd, ac_mu + ac_sd, color="#4f46e5", alpha=0.20)
+    plt.axhline(optimo, color="#059669", ls="--", lw=1, label="óptimo")
+    plt.xlabel("Episodio")
+    plt.ylabel("Retorno limpio (sin ruido) por episodio")
+    plt.title("A2C reduce la varianza frente a REINFORCE")
+    plt.legend(loc="lower right")
+    plt.grid(alpha=0.25)
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong>. Al terminar verás dos curvas y una consola. La de
+          <strong>A2C</strong> (azul) sube deprisa hasta rozar el retorno óptimo (cerca de $0.95$) y su
+          banda es estrecha: todas las semillas aprenden parecido. La de <strong>REINFORCE</strong>
+          (naranja) se queda bastante por debajo y con una banda mucho más ancha: el ruido acumulado en
+          el retorno ahoga la pequeña diferencia entre ir a la izquierda o a la derecha. Ese contraste
+          es, en una imagen, para qué sirve un crítico.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Sube <code>SIGMA</code> de $0.5$ a $1.5$ y vuelve a ejecutar: el ruido crece y REINFORCE se
+            hunde aún más, mientras A2C aguanta. Después prueba <code>SIGMA = 0.0</code> (sin ruido):
+            ¿ves cómo la ventaja se estrecha? Sin ruido, el retorno Monte Carlo no es tan malo, y por eso
+            el crítico luce menos. La lección: <strong>cuanto más ruidoso el mundo, más te salva el
+            crítico</strong>.
+          </p>
+        </div>
+
+        <h2 id="pytorch">A2C con PyTorch sobre CartPole</h2>
+        <p>
+          Con la intuición firme, subamos de nivel. El siguiente ejemplo usa <strong>PyTorch</strong> y
+          <strong>Gymnasium</strong> sobre <em>CartPole-v1</em> (equilibrar un poste sobre un carrito).
+          La arquitectura es la típica de A2C: una sola red con un <strong>tronco compartido</strong> y
+          <strong>dos cabezas</strong>, una para los logits de la política (actor) y otra para el valor
+          (crítico). Estimamos la ventaja con <strong>GAE</strong> y añadimos el bono de entropía.
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Este ejemplo se ejecuta en tu terminal</div>
+          <p>
+            <code>torch</code> y <code>gymnasium</code> son demasiado pesados para el navegador, así que
+            este bloque <strong>no tiene botón «Ejecutar»</strong>. Cópialo o descárgalo y lánzalo en tu
+            máquina siguiendo las instrucciones de más abajo.
+          </p>
+        </div>
+
+        <div class="code-example">
+          <div class="code-header">
+            <span class="file-name">a2c_torch.py</span>
+            <div class="code-actions">
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+A2C (Advantage Actor-Critic) con PyTorch sobre CartPole-v1.
+
+Este ejemplo NO corre en el navegador: torch y gymnasium son demasiado pesados.
+Ejecútalo en tu terminal.
+
+Idea:
+  * Una sola red con un tronco compartido y DOS cabezas:
+      - la cabeza del ACTOR produce los logits de la política pi(a|s);
+      - la cabeza del CRÍTICO estima el valor V(s).
+  * En cada iteración recogemos un LOTE de episodios completos, estimamos la
+    VENTAJA con GAE (Generalized Advantage Estimation) y hacemos UNA actualización
+    on-policy que mejora actor y crítico a la vez.
+  * GAE interpola entre el error TD de un paso (lambda=0: poca varianza pero
+    algo de sesgo) y el retorno Monte Carlo (lambda=1: sin sesgo pero mucha
+    varianza). lambda=0.95 suele ser un buen compromiso.
+  * Añadimos un bonus de ENTROPÍA para mantener la exploración.
+
+Cómo ejecutarlo:
+    pip install -r requirements.txt
+    python code/15-actor-critico/a2c_torch.py
+
+El máximo por episodio es 500 pasos. Verás que A2C aprende en menos de un minuto
+a mantener el poste durante cientos de pasos, pero su curva OSCILA y no se clava
+en el máximo: esa inestabilidad de los pasos grandes de actor-crítico es justo lo
+que PPO (capítulo 16) domestica. Clavar un 500 estable con este código básico
+cuesta, a propósito.
+"""
+from collections import deque
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.distributions import Categorical
+
+import gymnasium as gym
+
+
+class ActorCritico(nn.Module):
+    """Tronco compartido + dos cabezas: política (actor) y valor (crítico)."""
+
+    def __init__(self, dim_obs, n_acciones, oculto=128):
+        super().__init__()
+        self.tronco = nn.Sequential(
+            nn.Linear(dim_obs, oculto), nn.Tanh(),
+            nn.Linear(oculto, oculto), nn.Tanh(),
+        )
+        self.cabeza_pi = nn.Linear(oculto, n_acciones)  # logits de la política
+        self.cabeza_v = nn.Linear(oculto, 1)            # V(s)
+
+    def forward(self, x):
+        h = self.tronco(x)
+        return self.cabeza_pi(h), self.cabeza_v(h).squeeze(-1)
+
+
+def calcula_gae(recompensas, valores, v_ultimo, gamma, lam):
+    """
+    Ventaja generalizada (GAE) para UN episodio.
+      delta_t = r_t + gamma*V(s_{t+1}) - V(s_t)
+      A_t     = sum_l (gamma*lambda)^l * delta_{t+l}
+    'v_ultimo' es V del estado que sigue al último paso: 0 si el episodio TERMINÓ
+    de verdad (el poste cayó) o V(s_final) si solo se truncó por límite de tiempo.
+    Devuelve (ventajas, retornos) con retornos = ventajas + valores.
+    """
+    T = len(recompensas)
+    ventajas = np.zeros(T, dtype=np.float32)
+    gae = 0.0
+    for t in reversed(range(T)):
+        v_siguiente = v_ultimo if t == T - 1 else valores[t + 1]
+        delta = recompensas[t] + gamma * v_siguiente - valores[t]
+        gae = delta + gamma * lam * gae
+        ventajas[t] = gae
+    retornos = ventajas + valores
+    return ventajas, retornos
+
+
+def main():
+    semilla = 0
+    torch.manual_seed(semilla)
+    np.random.seed(semilla)
+
+    env = gym.make("CartPole-v1")
+    dim_obs = env.observation_space.shape[0]
+    n_acciones = env.action_space.n
+
+    modelo = ActorCritico(dim_obs, n_acciones)
+    optimizador = torch.optim.Adam(modelo.parameters(), lr=3e-3)
+
+    gamma, lam = 0.99, 0.95     # descuento y lambda de GAE
+    coef_valor = 0.5            # peso de la pérdida del crítico
+    coef_entropia = 0.01        # peso del bonus de entropía
+    pasos_por_lote = 2000       # transiciones (en episodios completos) por update
+    max_actualizaciones = 500
+
+    historial = []                 # retorno de cada episodio terminado
+    ventana_100 = deque(maxlen=100)
+    mejor_media = 0.0
+
+    for it in range(max_actualizaciones):
+        obs_b, act_b, adv_b, ret_b = [], [], [], []
+        pasos = 0
+
+        # --- 1) Recolectar un lote de episodios completos con la política actual ---
+        while pasos &lt; pasos_por_lote:
+            obs, _ = env.reset()
+            e_obs, e_act, e_rew, e_val = [], [], [], []
+            while True:
+                obs_t = torch.as_tensor(obs, dtype=torch.float32)
+                with torch.no_grad():
+                    logits, valor = modelo(obs_t)
+                accion = Categorical(logits=logits).sample()
+                obs2, recompensa, terminado, truncado, _ = env.step(accion.item())
+
+                e_obs.append(obs)
+                e_act.append(accion.item())
+                e_rew.append(recompensa)
+                e_val.append(valor.item())
+                obs = obs2
+                if terminado or truncado:
+                    break
+
+            # Bootstrap: 0 si el poste cayó; V(s_final) si solo se truncó.
+            if truncado and not terminado:
+                with torch.no_grad():
+                    _, v_fin = modelo(torch.as_tensor(obs2, dtype=torch.float32))
+                v_ultimo = v_fin.item()
+            else:
+                v_ultimo = 0.0
+
+            ventajas, retornos = calcula_gae(
+                np.array(e_rew, dtype=np.float32),
+                np.array(e_val, dtype=np.float32),
+                v_ultimo, gamma, lam,
+            )
+            obs_b += e_obs
+            act_b += e_act
+            adv_b += list(ventajas)
+            ret_b += list(retornos)
+
+            retorno_ep = float(sum(e_rew))
+            historial.append(retorno_ep)
+            ventana_100.append(retorno_ep)
+            pasos += len(e_rew)
+
+        # --- 2) Una actualización on-policy (actor + crítico + entropía) ---
+        obs_t = torch.as_tensor(np.array(obs_b), dtype=torch.float32)
+        act_t = torch.as_tensor(np.array(act_b), dtype=torch.int64)
+        adv_t = torch.as_tensor(np.array(adv_b), dtype=torch.float32)
+        ret_t = torch.as_tensor(np.array(ret_b), dtype=torch.float32)
+        adv_t = (adv_t - adv_t.mean()) / (adv_t.std() + 1e-8)  # normalizar
+
+        logits, valores = modelo(obs_t)
+        dist = Categorical(logits=logits)
+        logp = dist.log_prob(act_t)
+
+        perdida_actor = -(logp * adv_t).mean()           # gradiente de política
+        perdida_critico = F.mse_loss(valores, ret_t)     # ajuste del crítico
+        entropia = dist.entropy().mean()                 # exploración
+        perdida = perdida_actor + coef_valor * perdida_critico - coef_entropia * entropia
+
+        optimizador.zero_grad()
+        perdida.backward()
+        nn.utils.clip_grad_norm_(modelo.parameters(), 0.5)
+        optimizador.step()
+
+        # --- 3) Registro del progreso ---
+        media = float(np.mean(ventana_100))
+        mejor_media = max(mejor_media, media)
+        if it % 10 == 0:
+            print(f"act {it:4d} | episodios {len(historial):5d} | "
+                  f"media(100) = {media:6.1f}")
+
+    env.close()
+    print(f"\nEntrenamiento terminado. Mejor media(100) = {mejor_media:.0f} pasos "
+          f"(de un máximo de 500).")
+    print("A2C aprende deprisa, pero su rendimiento oscila: esa inestabilidad de "
+          "los pasos grandes es justo lo que PPO (capítulo 16) domestica.")
+
+    # --- Gráfica opcional de la curva de aprendizaje ---
+    try:
+        import matplotlib.pyplot as plt
+        h = np.array(historial, dtype=np.float32)
+        if len(h) &gt;= 10:
+            suave = np.convolve(h, np.ones(10) / 10, mode="valid")
+            plt.figure(figsize=(8, 4.5))
+            plt.plot(h, color="#c7d2fe", lw=1, label="retorno por episodio")
+            plt.plot(np.arange(len(suave)) + 10, suave, color="#4f46e5",
+                     lw=2, label="media móvil (10)")
+            plt.axhline(475, color="#059669", ls="--", lw=1, label="referencia 475")
+            plt.xlabel("Episodio")
+            plt.ylabel("Retorno (pasos que el poste aguanta)")
+            plt.title("A2C sobre CartPole-v1")
+            plt.legend()
+            plt.tight_layout()
+            plt.show()
+    except Exception as e:
+        print("(sin gráfica:", e, ")")
+
+
+if __name__ == "__main__":
+    main()
+</code></pre>
+        </div>
+
+        <p>
+          Al ejecutarlo verás cómo la media de pasos que aguanta el poste sube con rapidez de $\sim 20$
+          a varios cientos en menos de un minuto. Pero también notarás algo revelador: la curva
+          <strong>sube y baja</strong>, oscila, no se queda clavada en el máximo de $500$. Esa
+          inestabilidad no es un fallo tuyo: es la naturaleza de A2C.
+        </p>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          El primer ejemplo también funciona fuera del navegador, y el segundo <em>solo</em> ahí.
+          Descarga los archivos (o cópialos) y lánzalos así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual (numpy, matplotlib, torch, gymnasium)</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3a) A2C desde cero (numpy): compara varianza con REINFORCE</span>
+<span class="prompt">$</span> python code/15-actor-critico/actor_critico_desde_cero.py
+
+<span class="comment"># 3b) A2C con PyTorch sobre CartPole-v1 (tarda ~1 min)</span>
+<span class="prompt">$</span> python code/15-actor-critico/a2c_torch.py</pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 El ejemplo «en el navegador» usa <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>
+          (Python compilado a WebAssembly) y necesita conexión la primera vez. El ejemplo con
+          <code>torch</code> y <code>gymnasium</code> es demasiado pesado para el navegador: por eso te
+          damos el archivo <code>.py</code> listo para tu terminal.
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El talón de Aquiles: pasos inestables</div>
+          <p>
+            Actor-crítico reduce la varianza, pero introduce un peligro nuevo. Como el actor y el
+            crítico se persiguen mutuamente (el actor cambia la política, lo que cambia los datos con
+            los que aprende el crítico, lo que cambia la ventaja que guía al actor...), un paso
+            <strong>demasiado grande</strong> puede desbaratar una buena política de golpe. Por eso su
+            rendimiento oscila. La solución no es dejar de dar pasos, sino darlos <strong>con red de
+            seguridad</strong>: limitar cuánto puede cambiar la política en cada actualización. Ese es
+            justo el tema del <a href="16-ppo.html">capítulo 16, PPO</a>.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>El <strong>actor</strong> es la política $\pi_\theta(a\mid s)$ (quien actúa); el
+            <strong>crítico</strong> es el valor $V_w(s)$ (quien evalúa). Juntos forman Actor-Crítico.</li>
+            <li>El crítico actúa como <strong>línea base aprendida</strong>, lo que recorta la varianza
+            de REINFORCE sin añadir sesgo a la media del gradiente.</li>
+            <li>La <strong>ventaja</strong> $A(s,a)=Q(s,a)-V(s)$ dice «cuánto mejor que la media» es una
+            acción. Se estima barato con el <strong>error TD</strong> $\delta = r + \gamma V(s') - V(s)$.</li>
+            <li>El gradiente actor-crítico es $\mathbb{E}[\nabla_\theta \log \pi_\theta(a\mid s)\,\delta]$;
+            el crítico se ajusta por TD con el mismo $\delta$.</li>
+            <li><strong>GAE</strong> con $\lambda$ es el mando entre sesgo (TD, $\lambda=0$) y varianza
+            (Monte Carlo, $\lambda=1$); la <strong>entropía</strong> mantiene la exploración.</li>
+            <li>A2C aprende deprisa pero sus pasos pueden ser <strong>inestables</strong>: ese problema
+            lo resuelve PPO.</li>
+          </ul>
+        </div>
+
+        <p>
+          Has visto por qué un crítico transforma un gradiente de política tembloroso en una señal
+          firme. Pero también su punto débil: sin control, los pasos grandes de actor-crítico pueden
+          arruinar el progreso. En el <a href="16-ppo.html">próximo capítulo</a> conoceremos
+          <strong>PPO</strong>, el algoritmo que pone un cinturón de seguridad a estos pasos y se ha
+          convertido en el caballo de batalla del RL moderno —desde robots hasta el ajuste de modelos
+          de lenguaje.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

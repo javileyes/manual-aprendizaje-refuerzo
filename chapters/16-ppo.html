@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>16. PPO: optimización de política proximal · Manual de RL</title>
+  <meta name="description" content="PPO (Proximal Policy Optimization): el objetivo recortado que da pasos grandes pero seguros, ventajas con GAE y varias épocas por lote. Con PPO desde cero en NumPy y una versión con PyTorch sobre CartPole." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="16">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 3 · Capítulo 16</span>
+        <h1>PPO: optimización de política proximal</h1>
+        <p class="lead">
+          Si tuvieras que elegir <em>un solo</em> algoritmo de gradiente de política para llevarte a
+          una isla desierta, ese sería <strong>PPO</strong> (<em>Proximal Policy Optimization</em>).
+          Es el caballo de batalla del RL moderno: entrena robots, juega a videojuegos y afina modelos
+          de lenguaje (el <em>PPO</em> de <a href="20-rlhf.html">RLHF</a>). Su idea es tan sencilla como
+          poderosa: dar pasos <strong>grandes</strong> para aprender rápido, pero <strong>seguros</strong>
+          para no descarrilar. Y lo consigue con un truco casi elemental: <em>recortar</em> cuánto puede
+          cambiar la política de una vez.
+        </p>
+
+        <h2 id="por-que">El problema: los datos caducan</h2>
+        <p>
+          En el <a href="15-actor-critico.html">capítulo anterior</a> vimos Actor-Crítico: un actor que
+          propone acciones y un crítico que estima la ventaja $A_t$ para reducir la varianza del gradiente.
+          Todos los métodos de gradiente de política que hemos visto comparten un rasgo incómodo: son
+          <strong>on-policy</strong>. Recogen datos con la política actual, hacen <em>un</em> paso de
+          gradiente y tiran esos datos a la basura. Es un desperdicio: interactuar con el entorno suele ser
+          lo más caro de todo.
+        </p>
+        <p>
+          La tentación evidente es reutilizar cada lote de experiencia para hacer <em>muchos</em> pasos de
+          gradiente. Pero ahí acecha un peligro. En cuanto la política cambia un poco, los datos que
+          recogimos con la política <em>vieja</em> dejan de describir lo que haría la política
+          <em>nueva</em>. Si insistimos en optimizar sobre datos caducados, el gradiente nos empuja hacia
+          una política que quizá sea desastrosa: el entrenamiento se desestabiliza y, a veces, colapsa sin
+          remedio.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Imagina que ajustas una receta probándola. Cocinas, la pruebas, y decides «le falta sal».
+            Lo sensato es añadir <em>una pizca</em> y volver a probar. Lo insensato es echar tres cucharadas
+            de golpe: puede que te hayas pasado tantísimo que ahora no sabes si el problema es la sal o que
+            has arruinado el plato. PPO es el cocinero prudente: usa la información («falta sal») para
+            corregir, pero <strong>limita el tamaño de la corrección</strong> para que la prueba siga
+            siendo válida.
+          </p>
+        </div>
+
+        <h2 id="trpo">De la región de confianza al recorte</h2>
+        <p>
+          La solución rigurosa a este problema es la <strong>región de confianza</strong> (TRPO,
+          <em>Trust Region Policy Optimization</em>): maximiza la mejora esperada pero con una restricción
+          dura, que la nueva política no se aleje de la vieja más de un umbral, medido con la divergencia
+          de Kullback–Leibler $\mathrm{KL}(\pi_{\text{old}} \,\|\, \pi_\theta) \le \delta$. Funciona muy
+          bien, pero exige matemáticas incómodas: una optimización con restricción, gradientes conjugados y
+          productos Hessiano-vector. Mucha maquinaria.
+        </p>
+        <p>
+          PPO nace de una pregunta pragmática: <em>¿y si conseguimos casi el mismo efecto sin la
+          restricción dura, con un objetivo que se optimice con Adam y punto?</em> La respuesta es
+          <strong>recortar</strong> (<em>clipping</em>) el objetivo para quitarle al optimizador el
+          incentivo de alejarse demasiado. Sin restricciones, sin Hessianos: solo un $\min$ y un recorte.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La promesa de PPO</div>
+          <ul>
+            <li>Reutiliza cada lote durante <strong>varias épocas</strong> de descenso de gradiente.</li>
+            <li>Limita cuánto cambia la política con un <strong>recorte</strong> barato, no con una
+              restricción cara.</li>
+            <li>Es <strong>estable</strong> y poco sensible a los hiperparámetros: por eso se ha vuelto el
+              método por defecto.</li>
+          </ul>
+        </div>
+
+        <h2 id="ratio">El ratio de probabilidades</h2>
+        <p>
+          Para medir «cuánto ha cambiado la política» en una acción concreta, PPO usa el
+          <strong>ratio de probabilidades</strong>. Congelamos la política que recogió los datos y la
+          llamamos <em>vieja</em>, $\pi_{\theta_{\text{old}}}$. La política que estamos optimizando es
+          $\pi_\theta$. Para una transición $(s_t, a_t)$ del lote definimos:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El ratio $r_t(\theta)$</div>
+          <p>$$r_t(\theta) = \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{\text{old}}}(a_t \mid s_t)}$$</p>
+          <p class="math-note">
+            $\pi_\theta(a_t\mid s_t)$ es la probabilidad que la política <em>actual</em> asigna a la acción
+            $a_t$ en el estado $s_t$; $\pi_{\theta_{\text{old}}}(a_t\mid s_t)$ es la de la política
+            <em>vieja</em> (fija durante toda la actualización). Al empezar las épocas $\theta=\theta_{\text{old}}$,
+            así que $r_t=1$. Si al optimizar la nueva política hace $a_t$ <strong>más</strong> probable,
+            $r_t\gt 1$; si la hace <strong>menos</strong> probable, $r_t\lt 1$.
+          </p>
+        </div>
+
+        <p>
+          El objetivo «ingenuo» del gradiente de política se puede escribir como
+          $\hat{\mathbb{E}}_t\!\left[r_t(\theta)\,\hat A_t\right]$: sube la probabilidad de las acciones con
+          ventaja positiva ($\hat A_t>0$) y bájala en las de ventaja negativa. El problema es que nada
+          impide que $r_t$ se dispare. Si una acción tuvo $\hat A_t$ muy grande, el optimizador querrá hacer
+          $r_t$ enorme, alejándose muchísimo de $\pi_{\text{old}}$… justo lo que queremos evitar.
+        </p>
+
+        <h2 id="clip">El objetivo recortado</h2>
+        <p>
+          Aquí está el corazón de PPO. En lugar de optimizar $r_t\,\hat A_t$ sin freno, optimizamos su
+          versión <strong>recortada</strong>:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El objetivo recortado (clipped surrogate)</div>
+          <p>$$L^{\text{CLIP}}(\theta) = \hat{\mathbb{E}}_t\!\left[\min\!\Big(r_t(\theta)\,\hat A_t,\;\; \operatorname{clip}\!\big(r_t(\theta),\,1-\epsilon,\,1+\epsilon\big)\,\hat A_t\Big)\right]$$</p>
+          <p class="math-note">
+            $\hat A_t$ es la ventaja estimada (cuánto mejor que la media fue $a_t$); $\epsilon$ es el
+            <strong>radio del recorte</strong> (típicamente $0{,}2$); $\operatorname{clip}(x, 1-\epsilon, 1+\epsilon)$
+            devuelve $x$ recortado al intervalo $[1-\epsilon,\,1+\epsilon]$; y $\hat{\mathbb{E}}_t[\cdot]$ es
+            la media sobre las transiciones del lote. Maximizamos $L^{\text{CLIP}}$.
+          </p>
+        </div>
+
+        <p>
+          El $\min$ entre el término sin recortar y el recortado hace que $L^{\text{CLIP}}$ sea siempre una
+          cota <strong>pesimista</strong> (inferior) del objetivo sin recortar. Para entender por qué eso da
+          «pasos seguros», hay que separar los dos casos según el signo de la ventaja.
+        </p>
+
+        <h3>Caso $\hat A_t &gt; 0$: la acción fue buena</h3>
+        <p>
+          Queremos subir su probabilidad, es decir, empujar $r_t$ por encima de $1$. El término sin recortar
+          $r_t\hat A_t$ crece sin límite con $r_t$, pero el recortado se congela en $(1+\epsilon)\hat A_t$.
+          Como tomamos el mínimo, en cuanto $r_t$ supera $1+\epsilon$ el objetivo se aplana: <strong>deja de
+          haber incentivo</strong> para seguir subiendo la probabilidad. El optimizador ya no gana nada
+          alejándose más.
+        </p>
+
+        <h3>Caso $\hat A_t &lt; 0$: la acción fue mala</h3>
+        <p>
+          Queremos bajar su probabilidad, empujando $r_t$ por debajo de $1$. Ahora el recorte pone un
+          <strong>suelo</strong> en $1-\epsilon$: por debajo, el objetivo se aplana y deja de premiar que
+          hundamos aún más la probabilidad.
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="0 0 680 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="El objetivo recortado de PPO según el signo de la ventaja">
+            <!-- Panel izquierdo: A > 0 -->
+            <g fill="currentColor">
+              <text x="178" y="26" text-anchor="middle" font-size="15" font-weight="700" font-family="sans-serif">Ventaja Aₜ &gt; 0</text>
+              <!-- zona sin gradiente -->
+              <rect x="225" y="55" width="80" height="195" fill="#94a3b8" opacity="0.14"/>
+              <!-- ejes -->
+              <line x1="55" y1="250" x2="305" y2="250" stroke="currentColor" stroke-width="1.4" opacity="0.6"/>
+              <line x1="55" y1="250" x2="55" y2="50" stroke="currentColor" stroke-width="1.4" opacity="0.6"/>
+              <!-- curva L^CLIP: sube y se aplana en 1+eps -->
+              <polyline points="60,205 225,80 300,80" fill="none" stroke="#4f46e5" stroke-width="3"/>
+              <!-- lineas de referencia -->
+              <line x1="165" y1="250" x2="165" y2="130" stroke="currentColor" stroke-dasharray="4 4" stroke-width="1" opacity="0.45"/>
+              <line x1="225" y1="250" x2="225" y2="80" stroke="currentColor" stroke-dasharray="4 4" stroke-width="1" opacity="0.45"/>
+              <text x="165" y="267" text-anchor="middle" font-size="12" font-family="sans-serif" opacity="0.8">1</text>
+              <text x="225" y="267" text-anchor="middle" font-size="12" font-family="sans-serif" opacity="0.8">1+ε</text>
+              <text x="303" y="267" text-anchor="end" font-size="12.5" font-family="sans-serif" opacity="0.85">rₜ(θ)</text>
+              <text x="48" y="58" text-anchor="end" font-size="12.5" font-family="sans-serif" opacity="0.85">Lᶜˡⁱᵖ</text>
+              <text x="264" y="120" text-anchor="middle" font-size="11" font-family="sans-serif" opacity="0.75">sin</text>
+              <text x="264" y="134" text-anchor="middle" font-size="11" font-family="sans-serif" opacity="0.75">gradiente</text>
+            </g>
+            <!-- Panel derecho: A < 0 -->
+            <g transform="translate(360,0)" fill="currentColor">
+              <text x="178" y="26" text-anchor="middle" font-size="15" font-weight="700" font-family="sans-serif">Ventaja Aₜ &lt; 0</text>
+              <rect x="55" y="55" width="50" height="195" fill="#94a3b8" opacity="0.14"/>
+              <line x1="55" y1="90" x2="305" y2="90" stroke="currentColor" stroke-width="1.4" opacity="0.6"/>
+              <line x1="55" y1="90" x2="55" y2="270" stroke="currentColor" stroke-width="1.4" opacity="0.6"/>
+              <!-- curva: plana y luego baja sin freno -->
+              <polyline points="60,120 105,120 300,225" fill="none" stroke="#0ea5e9" stroke-width="3"/>
+              <line x1="105" y1="90" x2="105" y2="200" stroke="currentColor" stroke-dasharray="4 4" stroke-width="1" opacity="0.45"/>
+              <line x1="165" y1="90" x2="165" y2="200" stroke="currentColor" stroke-dasharray="4 4" stroke-width="1" opacity="0.45"/>
+              <text x="105" y="285" text-anchor="middle" font-size="12" font-family="sans-serif" opacity="0.8">1−ε</text>
+              <text x="165" y="285" text-anchor="middle" font-size="12" font-family="sans-serif" opacity="0.8">1</text>
+              <text x="303" y="285" text-anchor="end" font-size="12.5" font-family="sans-serif" opacity="0.85">rₜ(θ)</text>
+              <text x="80" y="145" text-anchor="middle" font-size="11" font-family="sans-serif" opacity="0.75">sin grad.</text>
+              <text x="245" y="185" text-anchor="middle" font-size="11" font-family="sans-serif" opacity="0.75">sigue penalizando</text>
+            </g>
+          </svg>
+          <figcaption>
+            El objetivo recortado $L^{\text{CLIP}}$ frente al ratio $r_t$. A la izquierda ($\hat A_t&gt;0$)
+            se aplana al pasar $1+\epsilon$: no hay premio por subir más. A la derecha ($\hat A_t&lt;0$) se
+            aplana por debajo de $1-\epsilon$, pero <strong>no</strong> por arriba: si la política empeoró y
+            subió una acción mala, el objetivo la sigue penalizando para corregirla.
+          </figcaption>
+        </figure>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La asimetría clave</div>
+          <p>
+            El recorte solo elimina el incentivo de seguir <em>en la dirección que ya nos ha beneficiado</em>.
+            Pero nunca frena la <strong>corrección</strong>: si un paso previo dentro de las mismas épocas se
+            pasó de frenada (subió una acción mala, o bajó una buena), el término sin recortar <em>sí</em>
+            tiene gradiente y tira de vuelta hacia la región segura. Recortar «solo cuando conviene» es lo que
+            hace de PPO una región de confianza <em>de pobre</em>, sin el coste de TRPO.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El recorte no es una garantía dura</div>
+          <p>
+            A diferencia de TRPO, PPO no <em>garantiza</em> que la KL entre la política vieja y la nueva
+            quede acotada: solo quita el incentivo de moverse mucho. Con demasiadas épocas o un $\epsilon$
+            grande, la política todavía puede alejarse en exceso. Por eso en la práctica se vigila la KL y a
+            veces se detiene la actualización si crece de más. El recorte es una salvaguarda barata y eficaz,
+            no un candado.
+          </p>
+        </div>
+
+        <h2 id="gae">La ventaja con GAE</h2>
+        <p>
+          PPO necesita una estimación de la ventaja $\hat A_t$ que sea a la vez de baja varianza y poco
+          sesgada. Para eso usa <strong>GAE</strong> (<em>Generalized Advantage Estimation</em>), que
+          conocimos con el <a href="15-actor-critico.html">crítico</a>. La idea: en vez de quedarnos con el
+          error TD de un solo paso (poca varianza pero mucho sesgo) o con el retorno
+          Monte Carlo completo (sin sesgo pero mucha varianza), mezclamos todos los horizontes con un peso
+          que decae, controlado por $\lambda$.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Ventaja generalizada</div>
+          <p>Primero, el <strong>error TD</strong> de cada paso, donde $V$ es el crítico:</p>
+          <p>$$\delta_t = r_t + \gamma\, V(s_{t+1}) - V(s_t)$$</p>
+          <p>Y la ventaja GAE es una suma descontada de esos errores hacia el futuro:</p>
+          <p>$$\hat A_t = \sum_{l=0}^{\infty} (\gamma\lambda)^l\, \delta_{t+l} = \delta_t + \gamma\lambda\,\hat A_{t+1}$$</p>
+          <p class="math-note">
+            $\gamma\in[0,1]$ es el descuento; $\lambda\in[0,1]$ regula el compromiso sesgo–varianza
+            ($\lambda=0$ da el TD de un paso, $\lambda=1$ da Monte Carlo). La forma recursiva de la derecha
+            es la que se implementa: se calcula hacia atrás en un solo barrido. El objetivo de regresión del
+            crítico es entonces $\hat G_t = \hat A_t + V(s_t)$.
+          </p>
+        </div>
+
+        <h2 id="perdida">La pérdida total</h2>
+        <p>
+          PPO optimiza la política y el crítico a la vez, minimizando una única pérdida con tres términos:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Pérdida conjunta de PPO</div>
+          <p>$$L(\theta) = \underbrace{-\,L^{\text{CLIP}}(\theta)}_{\text{política}} \;+\; c_1\underbrace{\hat{\mathbb{E}}_t\!\big[(V_\theta(s_t) - \hat G_t)^2\big]}_{\text{valor}} \;-\; c_2\underbrace{\hat{\mathbb{E}}_t\!\big[H(\pi_\theta(\cdot\mid s_t))\big]}_{\text{entropía}}$$</p>
+          <p class="math-note">
+            El primer término es el objetivo recortado con signo negativo (maximizar $L^{\text{CLIP}}$ =
+            minimizar $-L^{\text{CLIP}}$). El segundo hace que el crítico $V_\theta$ ajuste su predicción al
+            objetivo $\hat G_t$; $c_1$ pesa su importancia (típico $0{,}5$). El tercero es un
+            <strong>bonus de entropía</strong>: $H(\pi) = -\sum_a \pi(a\mid s)\log\pi(a\mid s)$ mide cuán
+            «indecisa» es la política; restarla (con $c_2$ pequeño, p. ej. $0{,}01$) premia mantener algo de
+            aleatoriedad y evita que la política colapse demasiado pronto en una sola acción.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Normaliza las ventajas</div>
+          <p>
+            Un detalle que en la práctica marca la diferencia: antes de usar $\hat A_t$ en la pérdida, se
+            normaliza el lote (o cada minibatch) restando su media y dividiendo por su desviación típica. Así
+            la escala del gradiente no depende de la magnitud de las recompensas y el $\epsilon$ del recorte
+            significa lo mismo en cualquier problema. Sin esta normalización, PPO es bastante más frágil.
+          </p>
+        </div>
+
+        <h2 id="algoritmo">El algoritmo, paso a paso</h2>
+        <p>Reuniéndolo todo, un ciclo de PPO es así:</p>
+        <ol>
+          <li><strong>Recoge un rollout</strong>: con la política actual (que congelamos como
+            $\pi_{\theta_{\text{old}}}$), juega $T$ pasos y guarda estados, acciones, recompensas, las
+            log-probabilidades $\log\pi_{\theta_{\text{old}}}(a_t\mid s_t)$ y los valores $V(s_t)$.</li>
+          <li><strong>Calcula las ventajas</strong> $\hat A_t$ con GAE y los objetivos del crítico
+            $\hat G_t = \hat A_t + V(s_t)$.</li>
+          <li><strong>Normaliza</strong> las ventajas del lote.</li>
+          <li><strong>Optimiza $K$ épocas</strong> sobre el mismo lote, troceándolo en <em>minibatches</em>.
+            En cada minibatch: recomputa $r_t(\theta)$, la pérdida recortada, la del valor y la entropía, y
+            da un paso de Adam sobre la pérdida total (con recorte de la norma del gradiente).</li>
+          <li>La política recién optimizada pasa a ser la «vieja» y <strong>vuelve al paso 1</strong>.</li>
+        </ol>
+
+        <h2 id="desde-cero">PPO desde cero, en Python</h2>
+        <p>
+          Vamos a implementarlo con lo mínimo imprescindible: un actor <em>softmax lineal</em> y un crítico
+          <em>lineal</em>, sobre un pequeño <strong>gridworld</strong> $5\times5$ (inicio arriba-izquierda,
+          meta abajo-derecha, coste $-1$ por paso). Al ser todo lineal con estados <em>one-hot</em>, podemos
+          escribir los gradientes a mano y el ejemplo corre en un par de segundos, también en el navegador.
+        </p>
+        <p>
+          El detalle bonito está en el gradiente del objetivo recortado. Como
+          $\frac{\partial}{\partial\theta}\,r_t\hat A_t = \hat A_t\, r_t\, \nabla_\theta\log\pi_\theta(a_t\mid s_t)$,
+          basta con anular ese gradiente exactamente en la región plana:
+          $\hat A_t\ge 0$ con $r_t\gt 1+\epsilon$, o $\hat A_t\lt 0$ con $r_t\lt 1-\epsilon$. Fíjate en la variable
+          <code>plano</code> del código: es justo esa condición.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">ppo_desde_cero.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+PPO desde cero (solo NumPy + Matplotlib)
+========================================
+
+Implementa PPO (Proximal Policy Optimization) con el objetivo RECORTADO
+(clipped surrogate), ventajas por GAE y VARIAS EPOCAS de ascenso de gradiente
+por cada lote de datos, sobre un pequeno gridworld 5x5. Todo con actor y critico
+LINEALES para que las derivadas se puedan escribir a mano y el ejemplo corra en
+segundos (incluso en el navegador con Pyodide).
+
+Piezas del algoritmo:
+  * Actor:   pi_theta(a|s) = softmax_a( phi(s) . theta[:, a] ),  phi(s) one-hot.
+  * Critico: V_w(s) = phi(s) . w  (lineal).
+  * Ratio:   r_t(theta) = pi_theta(a|s) / pi_theta_old(a|s).
+  * Objetivo recortado:
+        L^CLIP = E[ min( r_t * A_t , clip(r_t, 1-eps, 1+eps) * A_t ) ].
+  * Ventaja: GAE(gamma, lambda) calculada por episodio.
+  * Perdida total = -L^CLIP + c1 * perdida_valor - c2 * bonus_entropia,
+    optimizada durante K epocas sobre el MISMO lote (reutilizamos los datos).
+
+Como el actor y el critico son lineales y no comparten parametros, actualizamos
+theta (subiendo L^CLIP + c2*H) y w (bajando el error del critico) por separado;
+es equivalente a minimizar la perdida total conjunta con el peso c1 absorbido en
+el paso de aprendizaje del critico.
+
+Que veras al ejecutarlo:
+  * Por consola, el retorno medio por iteracion sube (se hace menos negativo)
+    hasta acercarse al optimo (el camino mas corto = 8 pasos, retorno -8).
+  * Una grafica con el retorno por iteracion y su media movil, claramente
+    creciente hacia la linea del optimo.
+
+Como ejecutarlo en tu terminal:
+    pip install -r requirements.txt
+    python code/16-ppo/ppo_desde_cero.py
+
+Solo necesita numpy y matplotlib, asi que tambien corre en el navegador (Pyodide).
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+# --- El entorno: gridworld 5x5 -------------------------------------------
+# Estados 0..24 (fila = s // 5, columna = s % 5). Inicio: 0 (arriba-izq).
+# Meta: 24 (abajo-der). Acciones: 0=arriba 1=abajo 2=izquierda 3=derecha.
+# Recompensa: -1 por paso (buscamos el camino mas corto). La meta es terminal.
+LADO = 5
+N_ESTADOS = LADO * LADO
+N_ACCIONES = 4
+INICIO = 0
+META = N_ESTADOS - 1
+OPTIMO = -2 * (LADO - 1)          # camino mas corto = 8 pasos -&gt; retorno -8
+
+
+def paso(estado, accion):
+    """Dinamica del entorno: devuelve (nuevo_estado, recompensa, terminado)."""
+    fila, col = divmod(estado, LADO)
+    if accion == 0:                  # arriba
+        fila = max(fila - 1, 0)
+    elif accion == 1:                # abajo
+        fila = min(fila + 1, LADO - 1)
+    elif accion == 2:                # izquierda
+        col = max(col - 1, 0)
+    else:                            # derecha
+        col = min(col + 1, LADO - 1)
+    nuevo = fila * LADO + col
+    return nuevo, -1.0, (nuevo == META)
+
+
+def softmax_filas(z):
+    """Softmax numericamente estable aplicado por filas (z de forma (B, A))."""
+    z = z - z.max(axis=1, keepdims=True)
+    e = np.exp(z)
+    return e / e.sum(axis=1, keepdims=True)
+
+
+def genera_episodio(theta, w, rng, max_pasos=80):
+    """Juega un episodio con pi_theta. Devuelve arrays alineados por paso:
+    estados, acciones, recompensas, logp_old (log-prob en el momento de actuar),
+    ademas del estado final y si termino de verdad (llego a la meta)."""
+    s = INICIO
+    estados, acciones, recompensas, logp_old = [], [], [], []
+    terminado = False
+    for _ in range(max_pasos):
+        logits = theta[s]                        # phi(s) one-hot -&gt; fila s
+        p = softmax_filas(logits[None, :])[0]
+        a = rng.choice(N_ACCIONES, p=p)
+        s2, r, terminado = paso(s, a)
+        estados.append(s)
+        acciones.append(a)
+        recompensas.append(r)
+        logp_old.append(np.log(p[a] + 1e-12))
+        s = s2
+        if terminado:
+            break
+    return (np.array(estados), np.array(acciones), np.array(recompensas),
+            np.array(logp_old), s, terminado)
+
+
+def ventajas_gae(estados, recompensas, w, s_final, terminado, gamma, lam):
+    """GAE por episodio. Devuelve (ventajas, retornos_objetivo_del_critico).
+
+    delta_t = r_t + gamma * V(s_{t+1}) - V(s_t)
+    A_t     = delta_t + gamma*lambda * A_{t+1}
+    Si el episodio termina de verdad, V(s_final)=0; si se corto por el tope de
+    pasos, arrancamos con el bootstrap V(s_final) del critico.
+    """
+    T = len(recompensas)
+    valores = w[estados]                         # V(s_t) para cada paso
+    adv = np.zeros(T)
+    siguiente_v = 0.0 if terminado else w[s_final]
+    acc = 0.0
+    for t in reversed(range(T)):
+        delta = recompensas[t] + gamma * siguiente_v - valores[t]
+        acc = delta + gamma * lam * acc
+        adv[t] = acc
+        siguiente_v = valores[t]
+    retornos = adv + valores                     # objetivo de regresion del critico
+    return adv, retornos
+
+
+def entropia_por_fila(p, logp):
+    """H(pi(.|s)) = -sum_a p_a log p_a para cada fila (forma (B,))."""
+    return -(p * logp).sum(axis=1)
+
+
+def entrena(n_iteraciones=160, episodios_por_iter=8, epocas=6,
+            lr_pi=0.20, lr_v=0.30, gamma=0.99, lam=0.95,
+            eps=0.2, c2=0.01, semilla=0):
+    """Bucle de PPO. Devuelve (historial_de_retornos, theta)."""
+    rng = np.random.default_rng(semilla)
+    theta = np.zeros((N_ESTADOS, N_ACCIONES))    # actor (preferencias)
+    w = np.zeros(N_ESTADOS)                       # critico V_w(s)
+    identidad = np.eye(N_ACCIONES)                # filas = one-hot de cada accion
+    historial = np.zeros(n_iteraciones)
+
+    for it in range(n_iteraciones):
+        # ---------- 1) Recogida: varios episodios completos ----------
+        b_s, b_a, b_logp, b_adv, b_ret = [], [], [], [], []
+        retornos_ep = []
+        for _ in range(episodios_por_iter):
+            s, a, r, logp, s_fin, term = genera_episodio(theta, w, rng)
+            adv, ret = ventajas_gae(s, r, w, s_fin, term, gamma, lam)
+            b_s.append(s); b_a.append(a); b_logp.append(logp)
+            b_adv.append(adv); b_ret.append(ret)
+            retornos_ep.append(r.sum())
+        b_s = np.concatenate(b_s)
+        b_a = np.concatenate(b_a)
+        b_logp = np.concatenate(b_logp)
+        b_adv = np.concatenate(b_adv)
+        b_ret = np.concatenate(b_ret)
+        historial[it] = np.mean(retornos_ep)
+
+        # Normalizamos las ventajas (media 0, desviacion 1): estabiliza el paso.
+        b_adv = (b_adv - b_adv.mean()) / (b_adv.std() + 1e-8)
+        onehot_a = identidad[b_a]                 # (B, A)
+
+        # ---------- 2) Optimizacion: K epocas sobre el MISMO lote ----------
+        for _ in range(epocas):
+            logits = theta[b_s]                   # (B, A)
+            p = softmax_filas(logits)             # pi_theta(.|s) actual
+            logp = np.log(p + 1e-12)
+            logp_a = logp[np.arange(len(b_a)), b_a]
+            ratio = np.exp(logp_a - b_logp)       # r_t(theta)
+
+            # --- Gradiente del objetivo recortado ---
+            # d/dtheta [r_t A_t] = A_t * r_t * grad_log_pi.  El recorte anula el
+            # gradiente solo cuando empujar mas ya no aporta (region plana):
+            #   A&gt;=0 y r&gt;1+eps   -&gt;  gradiente 0
+            #   A&lt;0  y r&lt;1-eps   -&gt;  gradiente 0
+            plano = ((b_adv &gt;= 0) &amp; (ratio &gt; 1 + eps)) | \
+                    ((b_adv &lt; 0) &amp; (ratio &lt; 1 - eps))
+            coef = np.where(plano, 0.0, b_adv * ratio)     # (B,)
+            # grad_log pi(a|s) = phi(s) x (e_a - p);  con phi one-hot, la fila s.
+            g_pi_filas = coef[:, None] * (onehot_a - p)    # (B, A)
+
+            # --- Gradiente del bonus de entropia (fomenta explorar) ---
+            H = entropia_por_fila(p, logp)                 # (B,)
+            g_ent_filas = -p * (logp + H[:, None])         # dH/dlogits
+
+            # Acumulamos por estado (varios pasos pueden caer en el mismo estado).
+            grad_actor = np.zeros_like(theta)
+            np.add.at(grad_actor, b_s, g_pi_filas + c2 * g_ent_filas)
+            theta += lr_pi * grad_actor / len(b_s)         # ASCENSO de gradiente
+
+            # --- Critico: descenso sobre 0.5 (V_w(s) - retorno)^2 ---
+            v = w[b_s]
+            err = v - b_ret                                # (B,)
+            grad_critico = np.zeros_like(w)
+            np.add.at(grad_critico, b_s, err)
+            w -= lr_v * grad_critico / len(b_s)            # DESCENSO de gradiente
+
+        if (it + 1) % 20 == 0:
+            print(f"Iteracion {it + 1:3d} | retorno medio = {historial[it]:7.2f}"
+                  f"   (optimo = {OPTIMO})")
+
+    return historial, theta
+
+
+def camino_voraz(theta, max_pasos=80):
+    """Sigue la politica de forma voraz (argmax) y cuenta pasos hasta la meta."""
+    s, pasos = INICIO, 0
+    while s != META and pasos &lt; max_pasos:
+        a = int(np.argmax(theta[s]))
+        s, _, _ = paso(s, a)
+        pasos += 1
+    return pasos
+
+
+def media_movil(x, ventana=10):
+    nucleo = np.ones(ventana) / ventana
+    return np.convolve(x, nucleo, mode="valid")
+
+
+if __name__ == "__main__":
+    historial, theta = entrena()
+
+    print(f"\nCamino mas corto posible: {-OPTIMO} pasos (retorno {OPTIMO}).")
+    print(f"Pasos de la politica aprendida (voraz): {camino_voraz(theta)}.")
+
+    # --- Grafica del retorno por iteracion ---
+    plt.figure(figsize=(8, 4.6))
+    plt.plot(historial, color="#c7d2fe", linewidth=1.2,
+             label="Retorno por iteracion")
+    suave = media_movil(historial, 10)
+    plt.plot(np.arange(len(suave)) + 9, suave, color="#4f46e5",
+             linewidth=2.4, label="Media movil (10 iteraciones)")
+    plt.axhline(OPTIMO, color="#059669", linestyle="--", linewidth=1.3,
+                label=f"Optimo ({OPTIMO})")
+    plt.xlabel("Iteracion de PPO")
+    plt.ylabel("Retorno medio por episodio")
+    plt.title("PPO desde cero: aprendizaje en un gridworld 5x5")
+    plt.legend(loc="lower right")
+    plt.grid(alpha=0.2)
+    plt.tight_layout()
+    plt.show()
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong>. Verás por consola cómo el retorno medio sube (se hace menos
+          negativo) iteración a iteración, y una gráfica en la que la media móvil se acerca a la línea del
+          óptimo ($-8$, el camino más corto de $8$ pasos). La política <em>voraz</em> aprendida encuentra
+          ese camino óptimo; el retorno <em>muestreado</em> se queda un poco por encima porque la política
+          conserva algo de aleatoriedad (gracias, entre otras cosas, al bonus de entropía).
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Sube <code>epocas</code> de $6$ a $30$ dejando todo lo demás igual. Reutilizar tantísimo cada
+            lote hace que la política se aleje demasiado de la vieja y el aprendizaje se vuelve más ruidoso o
+            se estanca: exactamente el problema que el recorte intenta contener, pero llevado al límite.
+            Prueba también a poner $\epsilon$ enorme (<code>eps=100</code>): habrás desactivado el recorte y
+            recuperado un gradiente de política «ingenuo», más inestable.
+          </p>
+        </div>
+
+        <h2 id="torch">PPO «de verdad», con PyTorch</h2>
+        <p>
+          La versión lineal es estupenda para <em>ver</em> el algoritmo, pero PPO brilla con redes neuronales.
+          Este segundo ejemplo es un PPO limpio, en un solo fichero al estilo
+          <a href="https://github.com/vwxyzjn/cleanrl" target="_blank" rel="noopener">CleanRL</a>, sobre el
+          clásico <strong>CartPole-v1</strong> de Gymnasium. Reúne todo lo del capítulo con redes MLP:
+          recogida de rollouts, GAE, objetivo recortado, varias épocas con minibatches, normalización de
+          ventajas, bonus de entropía y recorte de la norma del gradiente.
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Este ejemplo se ejecuta en tu terminal</div>
+          <p>
+            Usa <code>torch</code> y <code>gymnasium</code>, demasiado pesados para el navegador. No tiene
+            botón «Ejecutar»: cópialo o descárgalo y lánzalo en tu máquina con las instrucciones de más
+            abajo. En pocas decenas de miles de pasos deberías ver cómo la recompensa media se dispara hasta
+            resolver CartPole (media $\ge 475$ sobre $500$).
+          </p>
+        </div>
+
+        <div class="code-example">
+          <div class="code-header">
+            <span class="file-name">ppo_torch.py</span>
+            <div class="code-actions">
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+PPO con PyTorch sobre CartPole-v1  (SOLO TERMINAL)
+==================================================
+
+Version "de verdad" de PPO (Proximal Policy Optimization) en un unico fichero,
+al estilo CleanRL, sobre el entorno clasico CartPole-v1 de Gymnasium. Reune
+todas las piezas del capitulo:
+
+  * Recogida de un ROLLOUT de longitud fija (num_pasos) siguiendo la politica.
+  * Ventajas con GAE(gamma, lambda) y objetivo del critico = ventaja + valor.
+  * Objetivo RECORTADO (clipped surrogate) sobre el ratio r_t(theta).
+  * VARIAS EPOCAS de SGD por lote, dividiendo el lote en MINIBATCHES.
+  * Perdida total = perdida_politica(clip) + c1*perdida_valor - c2*entropia,
+    con recorte de la norma del gradiente para mayor estabilidad.
+
+Este ejemplo necesita PyTorch y Gymnasium, demasiado pesados para el navegador:
+se ejecuta en tu terminal.
+
+Como ejecutarlo:
+    pip install -r requirements.txt
+    python code/16-ppo/ppo_torch.py
+
+CartPole se considera "resuelto" cuando la recompensa media (= numero de pasos
+que el poste aguanta en pie) supera ~475 sobre 500 posibles. PPO suele resolverlo
+en unas decenas de miles de pasos.
+"""
+
+import numpy as np
+import gymnasium as gym
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.distributions import Categorical
+
+
+# --- Hiperparametros (valores tipicos de PPO para CartPole) ---------------
+SEMILLA          = 1
+TOTAL_PASOS      = 200_000     # tope de pasos de entorno (paramos antes si se resuelve)
+NUM_PASOS        = 512         # longitud del rollout entre actualizaciones
+LR               = 2.5e-4      # tasa de aprendizaje de Adam
+GAMMA            = 0.99        # factor de descuento
+GAE_LAMBDA       = 0.95        # lambda de GAE (sesgo/varianza)
+NUM_MINIBATCHES  = 4           # minibatches en los que dividir cada lote
+EPOCAS           = 4           # epocas de SGD por lote (reutilizamos los datos)
+CLIP_EPS         = 0.2         # epsilon del recorte del ratio
+C1_VALOR         = 0.5         # peso de la perdida del critico
+C2_ENTROPIA      = 0.01        # peso del bonus de entropia
+MAX_GRAD_NORM    = 0.5         # recorte de la norma del gradiente
+ANNEAL_LR        = True        # decaimiento lineal de la tasa de aprendizaje
+OBJETIVO_RESUELTO = 475.0      # recompensa media (ult. 20 episodios) para parar
+
+TAM_LOTE      = NUM_PASOS                       # 1 entorno -&gt; lote = num_pasos
+TAM_MINIBATCH = TAM_LOTE // NUM_MINIBATCHES
+NUM_ITERS     = TOTAL_PASOS // TAM_LOTE
+
+
+def init_capa(capa, std=np.sqrt(2), sesgo=0.0):
+    """Inicializacion ortogonal (recomendada para PPO)."""
+    nn.init.orthogonal_(capa.weight, std)
+    nn.init.constant_(capa.bias, sesgo)
+    return capa
+
+
+class Agente(nn.Module):
+    """Actor y critico como dos MLP independientes."""
+
+    def __init__(self, dim_obs, n_acciones):
+        super().__init__()
+        self.critico = nn.Sequential(
+            init_capa(nn.Linear(dim_obs, 64)), nn.Tanh(),
+            init_capa(nn.Linear(64, 64)), nn.Tanh(),
+            init_capa(nn.Linear(64, 1), std=1.0),
+        )
+        self.actor = nn.Sequential(
+            init_capa(nn.Linear(dim_obs, 64)), nn.Tanh(),
+            init_capa(nn.Linear(64, 64)), nn.Tanh(),
+            init_capa(nn.Linear(64, n_acciones), std=0.01),   # logits pequenos al inicio
+        )
+
+    def valor(self, x):
+        return self.critico(x).squeeze(-1)                    # (B,)
+
+    def accion_y_valor(self, x, accion=None):
+        """Devuelve (accion, log pi(a|s), entropia, V(s)) para x de forma (B, dim_obs)."""
+        logits = self.actor(x)
+        dist = Categorical(logits=logits)
+        if accion is None:
+            accion = dist.sample()
+        return accion, dist.log_prob(accion), dist.entropy(), self.critico(x).squeeze(-1)
+
+
+def entrena():
+    torch.manual_seed(SEMILLA)
+    np.random.seed(SEMILLA)
+
+    # RecordEpisodeStatistics rellena info["episode"] al terminar cada episodio.
+    env = gym.wrappers.RecordEpisodeStatistics(gym.make("CartPole-v1"))
+    dim_obs = env.observation_space.shape[0]
+    n_acciones = env.action_space.n
+
+    agente = Agente(dim_obs, n_acciones)
+    opt = optim.Adam(agente.parameters(), lr=LR, eps=1e-5)
+
+    # --- Almacenamiento del rollout (1 entorno) ---
+    obs      = torch.zeros((NUM_PASOS, dim_obs))
+    acciones = torch.zeros(NUM_PASOS, dtype=torch.long)
+    logprobs = torch.zeros(NUM_PASOS)
+    recomps  = torch.zeros(NUM_PASOS)
+    dones    = torch.zeros(NUM_PASOS)
+    valores  = torch.zeros(NUM_PASOS)
+
+    paso_global = 0
+    obs_np, _ = env.reset(seed=SEMILLA)
+    next_obs = torch.tensor(obs_np, dtype=torch.float32)
+    next_done = torch.zeros(())
+    ventana = []                                  # ultimas recompensas de episodio
+
+    for it in range(1, NUM_ITERS + 1):
+        # Decaimiento lineal de la tasa de aprendizaje.
+        if ANNEAL_LR:
+            frac = 1.0 - (it - 1.0) / NUM_ITERS
+            opt.param_groups[0]["lr"] = frac * LR
+
+        # ---------- 1) Recogida del rollout ----------
+        for t in range(NUM_PASOS):
+            paso_global += 1
+            obs[t] = next_obs
+            dones[t] = next_done
+            with torch.no_grad():
+                a, logp, _, v = agente.accion_y_valor(next_obs.unsqueeze(0))
+            valores[t] = v.squeeze(0)
+            acciones[t] = a.squeeze(0)
+            logprobs[t] = logp.squeeze(0)
+
+            obs_np, r, term, trunc, info = env.step(int(a.item()))
+            recomps[t] = float(r)
+            done = term or trunc
+            next_done = torch.tensor(float(done))
+
+            if done:
+                # Un entorno simple de Gymnasium NO se reinicia solo: al terminar
+                # el episodio leemos su retorno y llamamos a reset() a mano.
+                if "episode" in info:
+                    ventana.append(float(info["episode"]["r"]))
+                    if len(ventana) &gt; 20:
+                        ventana.pop(0)
+                obs_np, _ = env.reset()
+            next_obs = torch.tensor(obs_np, dtype=torch.float32)
+
+        # ---------- 2) Ventajas con GAE ----------
+        with torch.no_grad():
+            next_valor = agente.valor(next_obs.unsqueeze(0)).squeeze(0)
+            ventajas = torch.zeros(NUM_PASOS)
+            ultimo_gae = 0.0
+            for t in reversed(range(NUM_PASOS)):
+                if t == NUM_PASOS - 1:
+                    no_terminal = 1.0 - next_done
+                    v_siguiente = next_valor
+                else:
+                    no_terminal = 1.0 - dones[t + 1]
+                    v_siguiente = valores[t + 1]
+                delta = recomps[t] + GAMMA * v_siguiente * no_terminal - valores[t]
+                ultimo_gae = delta + GAMMA * GAE_LAMBDA * no_terminal * ultimo_gae
+                ventajas[t] = ultimo_gae
+            retornos = ventajas + valores          # objetivo de regresion del critico
+
+        # ---------- 3) Optimizacion: EPOCAS x MINIBATCHES ----------
+        indices = np.arange(TAM_LOTE)
+        for _ in range(EPOCAS):
+            np.random.shuffle(indices)
+            for arranque in range(0, TAM_LOTE, TAM_MINIBATCH):
+                mb = indices[arranque:arranque + TAM_MINIBATCH]
+
+                _, nueva_logp, entropia, nuevo_v = agente.accion_y_valor(
+                    obs[mb], acciones[mb])
+                log_ratio = nueva_logp - logprobs[mb]
+                ratio = log_ratio.exp()            # r_t(theta)
+
+                # Ventajas normalizadas por minibatch (media 0, desviacion 1).
+                mb_adv = ventajas[mb]
+                mb_adv = (mb_adv - mb_adv.mean()) / (mb_adv.std() + 1e-8)
+
+                # --- Perdida de politica: objetivo recortado (con signo -) ---
+                perdida_pi_1 = -mb_adv * ratio
+                perdida_pi_2 = -mb_adv * torch.clamp(ratio, 1 - CLIP_EPS, 1 + CLIP_EPS)
+                perdida_pi = torch.max(perdida_pi_1, perdida_pi_2).mean()
+
+                # --- Perdida del critico: error cuadratico contra el retorno ---
+                perdida_v = 0.5 * ((nuevo_v - retornos[mb]) ** 2).mean()
+
+                # --- Bonus de entropia (fomenta explorar) ---
+                perdida_ent = entropia.mean()
+
+                perdida = perdida_pi + C1_VALOR * perdida_v - C2_ENTROPIA * perdida_ent
+
+                opt.zero_grad()
+                perdida.backward()
+                nn.utils.clip_grad_norm_(agente.parameters(), MAX_GRAD_NORM)
+                opt.step()
+
+        media = np.mean(ventana) if ventana else float("nan")
+        print(f"Iter {it:3d} | pasos {paso_global:6d} | "
+              f"recompensa media (ult. 20) = {media:6.1f}")
+
+        if len(ventana) &gt;= 20 and media &gt;= OBJETIVO_RESUELTO:
+            print(f"\n¡Resuelto! Recompensa media (ult. 20) = {media:.1f} "
+                  f"tras {paso_global} pasos.")
+            break
+
+    env.close()
+    return agente
+
+
+if __name__ == "__main__":
+    entrena()
+</code></pre>
+        </div>
+
+        <p>
+          Es prácticamente el mismo esqueleto que usa la industria. Al leerlo, fíjate en tres decisiones que
+          ya no te sorprenderán: (1) la política vieja se «congela» guardando <code>logprobs</code> durante
+          la recogida y comparando contra ellas en cada época; (2) las ventajas se normalizan por minibatch;
+          y (3) se recorta la norma del gradiente con <code>clip_grad_norm_</code>, otra salvaguarda de
+          estabilidad muy típica en PPO.
+        </p>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          Descarga los archivos (o cópialos) y ejecútalos así. El primero corre en segundos; el segundo
+          entrena hasta resolver CartPole:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual (numpy, matplotlib, torch, gymnasium)</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3a) PPO desde cero en numpy (rápido, abre una gráfica)</span>
+<span class="prompt">$</span> python code/16-ppo/ppo_desde_cero.py
+<span class="comment">Iteracion  20 | retorno medio =  -60.75   (optimo = -8)
+...
+Iteracion 160 | retorno medio =  -13.62   (optimo = -8)
+Pasos de la politica aprendida (voraz): 8.</span>
+
+<span class="comment"># 3b) PPO con PyTorch sobre CartPole-v1 (entrena unos minutos)</span>
+<span class="prompt">$</span> python code/16-ppo/ppo_torch.py
+<span class="comment">Iter   1 | pasos    512 | recompensa media (ult. 20) =   23.9
+...
+¡Resuelto! Recompensa media (ult. 20) = 479.1 tras 88064 pasos.</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Los números concretos pueden variar un poco entre versiones de las librerías o de una ejecución
+          a otra (sobre todo en la versión con PyTorch). Lo importante es la <em>tendencia</em>: la
+          recompensa sube de forma sostenida hasta resolver la tarea.
+        </p>
+
+        <h2 id="familia">PPO entre sus vecinos</h2>
+        <p>
+          Para situar PPO frente a lo que ya hemos visto y lo que inspiró:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Método</th><th>¿Cómo limita el paso?</th><th>¿Reutiliza el lote?</th><th>Complejidad</th></tr></thead>
+            <tbody>
+              <tr><td>A2C (cap. 15)</td><td>No lo limita; un solo paso por lote</td><td>No</td><td>Baja</td></tr>
+              <tr><td>TRPO</td><td>Restricción dura de KL (región de confianza)</td><td>Sí</td><td>Alta (Hessiano, grad. conjugados)</td></tr>
+              <tr><td><strong>PPO</strong></td><td>Recorte del ratio (salvaguarda blanda)</td><td>Sí (varias épocas)</td><td>Media–baja</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>Los métodos on-policy desperdician datos; reutilizarlos exige que la política <strong>no
+              cambie demasiado</strong> de una vez.</li>
+            <li>PPO define el <strong>ratio</strong> $r_t(\theta)=\pi_\theta/\pi_{\theta_{\text{old}}}$ y
+              optimiza el <strong>objetivo recortado</strong>
+              $L^{\text{CLIP}}=\hat{\mathbb{E}}_t[\min(r_t\hat A_t,\ \operatorname{clip}(r_t,1-\epsilon,1+\epsilon)\hat A_t)]$.</li>
+            <li>El $\min$ y el recorte quitan el incentivo de alejarse de $\pi_{\text{old}}$, pero
+              <strong>nunca</strong> frenan la corrección: región de confianza barata sin la maquinaria de
+              TRPO.</li>
+            <li>La ventaja se estima con <strong>GAE</strong>; la pérdida total suma política + $c_1\cdot$valor
+              $-\,c_2\cdot$entropía; y se optimiza durante <strong>varias épocas con minibatches</strong> por
+              cada lote.</li>
+            <li>Con detalles prácticos (normalizar ventajas, recortar el gradiente) PPO es estable y robusto:
+              por eso es el algoritmo de gradiente de política más usado hoy.</li>
+          </ul>
+        </div>
+
+        <p>
+          Hasta aquí, todos nuestros agentes de gradiente de política han elegido entre un número
+          <strong>finito</strong> de acciones discretas mediante un <em>softmax</em>. Pero, ¿y si el agente
+          tiene que decidir <em>cuánto</em> girar un volante o <em>cuánta</em> fuerza aplicar a un motor?
+          En el <a href="17-control-continuo.html">capítulo 17</a> damos el salto al <strong>control
+          continuo</strong>, con la familia DDPG, TD3 y SAC, donde la acción es un vector de números reales.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

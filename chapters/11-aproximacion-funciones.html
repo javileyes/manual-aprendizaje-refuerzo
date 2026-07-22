@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>11. Aproximación de funciones · Manual de RL</title>
+  <meta name="description" content="De la tabla a una función parametrizada que generaliza: aproximación lineal, features, tile coding, SGD y el TD semi-gradiente. Con SARSA sobre Mountain Car en numpy." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="11">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 2 · Capítulo 11</span>
+        <h1>Aproximación de funciones</h1>
+        <p class="lead">
+          Hasta ahora guardábamos un número por cada estado (o por cada par estado-acción) en una
+          <strong>tabla</strong>. Funciona de maravilla en mundos pequeños, pero se rompe en cuanto
+          los estados se cuentan por millones. En este capítulo damos el salto conceptual que abre
+          la puerta al <em>deep RL</em>: sustituir la tabla por una <strong>función parametrizada</strong>
+          que <strong>generaliza</strong>, de modo que aprender sobre un estado mejore también los
+          estados parecidos.
+        </p>
+
+        <h2 id="por-que">Por qué la tabla no escala</h2>
+        <p>
+          En los capítulos anteriores —desde <a href="07-td-aprendizaje.html">TD(0)</a> hasta
+          <a href="09-q-learning.html">Q-Learning</a> y <a href="10-td-lambda.html">TD(λ)</a>—
+          representábamos el valor con una tabla: una casilla de memoria por estado. Eso exige dos
+          cosas que casi nunca tenemos en problemas reales: <strong>memoria</strong> para una entrada
+          por estado y <strong>tiempo</strong> para visitar cada estado las suficientes veces.
+        </p>
+        <p>
+          El ajedrez tiene del orden de $10^{45}$ posiciones legales; el Go, muchas más; una imagen de
+          la pantalla de un videojuego, prácticamente infinitas. No hay tabla que quepa, y aunque
+          cupiera, jamás visitaríamos cada casilla ni una sola vez. La tabla, además, es <em>tonta</em>:
+          aprender el valor de una posición no dice absolutamente nada de la posición de al lado, aunque
+          se diferencien en una pieza.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Cuando aprendes a conducir no memorizas cada fotograma posible del parabrisas. Extraes
+            <strong>rasgos</strong> —«hay un coche cerca a la derecha», «el semáforo está en rojo»— y
+            aprendes a valorar situaciones a partir de esos rasgos. Así, una escena que no has visto
+            nunca te resulta familiar porque <em>se parece</em> a otras. Eso es exactamente lo que
+            hace la aproximación de funciones: describir el estado con unos pocos números
+            (<strong>features</strong>) y aprender un valor que se <strong>comparte</strong> entre
+            estados parecidos.
+          </p>
+        </div>
+
+        <h2 id="funcion-valor">Del casillero a la función</h2>
+        <p>
+          La idea es reemplazar la tabla por una función $\hat v(s, \mathbf{w})$ que estima el valor
+          del estado $s$ a partir de un vector de <strong>parámetros</strong> $\mathbf{w} \in \mathbb{R}^d$.
+          La clave es que $d$, el número de parámetros, es <strong>mucho menor</strong> que el número de
+          estados: $d \ll |\mathcal{S}|$. Al ajustar $\mathbf{w}$ para acertar en un estado, cambiamos
+          la estimación de <em>todos</em> los estados a la vez. Eso es generalizar: puede ayudar
+          (aprendemos rápido, con pocos datos) o estorbar (tocar un estado estropea otro), y buena
+          parte del oficio consiste en encontrar el equilibrio.
+        </p>
+        <p>
+          Primero necesitamos convertir el estado en números. Una función $\mathbf{x}(s)$ produce el
+          <strong>vector de características</strong> (<em>feature vector</em>)
+          $\mathbf{x}(s) = \big(x_1(s),\, x_2(s),\, \dots,\, x_d(s)\big)^{\top}$, donde cada
+          $x_i(s)$ es un rasgo numérico del estado. Con eso, el caso más simple y sorprendentemente
+          potente es la <strong>aproximación lineal</strong>:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Valor lineal en las features</div>
+          <p>$$\hat v(s, \mathbf{w}) \;=\; \mathbf{w}^{\top}\mathbf{x}(s) \;=\; \sum_{i=1}^{d} w_i\, x_i(s)$$</p>
+          <p class="math-note">
+            $\mathbf{w} = (w_1,\dots,w_d)^{\top}$ es el vector de parámetros que aprendemos.
+            $\mathbf{x}(s) = (x_1(s),\dots,x_d(s))^{\top}$ son las features del estado $s$.
+            $\hat v(s,\mathbf{w})$ es el valor <em>estimado</em>. La tabla de antes es un caso
+            particular: si $\mathbf{x}(s)$ tuviera un $1$ en la posición del estado $s$ y $0$ en el
+            resto (codificación <em>one-hot</em>), entonces $w_i$ sería justamente el valor del
+            estado $i$, y no habría ninguna generalización. La aproximación empieza a ser útil
+            cuando las features se <strong>comparten</strong> entre estados.
+          </p>
+        </div>
+
+        <h2 id="features">Cómo se construyen las features</h2>
+        <p>
+          El diseño de $\mathbf{x}(s)$ es donde entra tu conocimiento del problema. Estas son las
+          familias clásicas, de la más burda a la más flexible:
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Técnica</th><th>Idea</th><th>Generaliza…</th></tr></thead>
+            <tbody>
+              <tr><td>Agregación de estados</td><td>Agrupar estados en «cajones»; un peso por cajón.</td><td>a lo bruto: todo el cajón comparte valor.</td></tr>
+              <tr><td>Features polinómicas</td><td>Potencias y productos de las variables: $1, s, s^2, s_1 s_2, \dots$</td><td>suave y global.</td></tr>
+              <tr><td>Bases radiales (RBF)</td><td>Gaussianas centradas en puntos: $x_i(s)=e^{-\lVert s-c_i\rVert^2/2\sigma^2}$</td><td>local y suave.</td></tr>
+              <tr><td><strong>Tile coding</strong></td><td>Varias rejillas solapadas y desplazadas; features binarias.</td><td>local, rápida y robusta.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Nos quedaremos con <strong>tile coding</strong> (codificación por mosaicos) porque es la
+          favorita del RL clásico con features hechas a mano: es barata de calcular, produce un vector
+          <em>disperso</em> (casi todo ceros) y controla muy bien cuánto generaliza. La veremos en
+          detalle antes del ejemplo.
+        </p>
+
+        <h2 id="objetivo">El objetivo: minimizar el error de valor</h2>
+        <p>
+          Como ya no podemos acertar el valor exacto en todos los estados (hay menos parámetros que
+          estados), tenemos que decidir <em>en qué estados</em> nos importa más acertar. La respuesta
+          natural es: en los que la política visita a menudo. Formalizamos ese compromiso con el
+          <strong>error cuadrático medio de valor</strong>, ponderado por la frecuencia de visita:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Error cuadrático medio ponderado</div>
+          <p>$$\overline{VE}(\mathbf{w}) \;=\; \sum_{s \in \mathcal{S}} \mu(s)\,\big[\, v_\pi(s) - \hat v(s, \mathbf{w}) \,\big]^2$$</p>
+          <p class="math-note">
+            $v_\pi(s)$ es el valor <em>verdadero</em> del estado bajo la política $\pi$ (lo que
+            querríamos estimar). $\hat v(s,\mathbf{w})$ es nuestra estimación. $\mu(s) \ge 0$ con
+            $\sum_s \mu(s) = 1$ es la <strong>distribución on-policy</strong>: la fracción de tiempo
+            que la política pasa en cada estado. Al ponderar por $\mu(s)$ decimos «equivócate poco en
+            los estados frecuentes; los raros importan menos». No podemos anular todos los términos a
+            la vez, así que buscamos el $\mathbf{w}$ que minimice esta suma.
+          </p>
+        </div>
+
+        <h2 id="sgd">Descenso de gradiente estocástico</h2>
+        <p>
+          Para minimizar $\overline{VE}$ usamos <strong>descenso de gradiente estocástico</strong> (SGD):
+          en cada paso corregimos $\mathbf{w}$ un poquito en la dirección que reduce el error de ese
+          ejemplo concreto. Si en el estado $S_t$ nos llega un valor objetivo $U_t$ (una muestra de
+          lo que «debería» valer), el gradiente del error al cuadrado $[U_t - \hat v(S_t,\mathbf{w})]^2$
+          respecto de $\mathbf{w}$ nos da la regla:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Actualización SGD (predicción)</div>
+          <p>$$\mathbf{w} \;\leftarrow\; \mathbf{w} \;+\; \alpha\,\big[\, U_t - \hat v(S_t, \mathbf{w}) \,\big]\, \nabla_{\mathbf{w}}\hat v(S_t, \mathbf{w})$$</p>
+          <p class="math-note">
+            $\alpha > 0$ es la <strong>tasa de aprendizaje</strong> (tamaño del paso).
+            $U_t$ es el <strong>objetivo</strong>: aquello a lo que empujamos la estimación.
+            $\nabla_{\mathbf{w}}\hat v(S_t,\mathbf{w})$ es el gradiente del valor respecto de los
+            parámetros. En el caso lineal ese gradiente es simplemente las features:
+            $\nabla_{\mathbf{w}}\hat v(S_t,\mathbf{w}) = \mathbf{x}(S_t)$, así que la actualización
+            se lee «mueve cada peso $w_i$ en proporción a su feature $x_i(S_t)$ y al error».
+          </p>
+        </div>
+
+        <p>
+          ¿Qué ponemos en $U_t$? Si usáramos el retorno real completo $U_t = G_t$ (estilo
+          <a href="06-monte-carlo.html">Monte Carlo</a>), este sí sería el gradiente de verdad de un
+          objetivo bien definido, y SGD converge a un óptimo local. Pero $G_t$ exige esperar al final
+          del episodio. Como en <a href="07-td-aprendizaje.html">TD(0)</a>, preferimos
+          <strong>bootstrapping</strong>: estimar el objetivo con nuestra propia predicción del
+          siguiente estado. Y ahí aparece una sutileza importante.
+        </p>
+
+        <h2 id="semi-gradiente">TD semi-gradiente</h2>
+        <p>
+          El objetivo TD sustituye $G_t$ por $R_{t+1} + \gamma\,\hat v(S_{t+1}, \mathbf{w})$. El
+          problema es que ese objetivo <strong>también depende de $\mathbf{w}$</strong> (aparece
+          $\hat v(S_{t+1},\mathbf{w})$). Si fuéramos rigurosos, deberíamos derivar también ese término.
+          No lo hacemos: tratamos el objetivo como si fuera una constante fija y solo derivamos la
+          estimación actual. Por eso la regla se llama <strong>semi-gradiente</strong>:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ TD(0) semi-gradiente</div>
+          <p>$$\mathbf{w} \;\leftarrow\; \mathbf{w} \;+\; \alpha\,\underbrace{\big[\, R_{t+1} + \gamma\,\hat v(S_{t+1}, \mathbf{w}) - \hat v(S_t, \mathbf{w}) \,\big]}_{\delta_t,\;\text{error TD}}\, \nabla_{\mathbf{w}}\hat v(S_t, \mathbf{w})$$</p>
+          <p class="math-note">
+            $\delta_t = R_{t+1} + \gamma\,\hat v(S_{t+1},\mathbf{w}) - \hat v(S_t,\mathbf{w})$ es el
+            <strong>error de diferencia temporal</strong>, idéntico en espíritu al de TD(0) tabular.
+            $\gamma \in [0,1]$ es el factor de descuento. Al calcular el gradiente
+            $\nabla_{\mathbf{w}}\hat v(S_t,\mathbf{w})$ <em>ignoramos</em> que $\delta_t$ contiene un
+            $\hat v(S_{t+1},\mathbf{w})$ que también depende de $\mathbf{w}$. Es «medio» gradiente:
+            solo la mitad que corresponde a la predicción actual.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ ¿Por qué «semi» y no entero?</div>
+          <p>
+            Si derivásemos también el término bootstrap tendríamos el llamado <em>gradiente residual</em>,
+            que sí minimiza un objetivo bien definido pero aprende <strong>lento</strong> y persigue el
+            objetivo equivocado (acaba «encontrándose a medio camino» con su propia predicción). El
+            semi-gradiente no es el gradiente de ninguna función de error, así que <strong>no</strong>
+            tiene garantías de convergencia tan limpias… pero en la práctica aprende mucho mejor y es lo
+            que se usa. Es un atajo que casi siempre sale bien.
+          </p>
+        </div>
+
+        <h2 id="control">De predicción a control: SARSA semi-gradiente</h2>
+        <p>
+          Para <em>controlar</em> (aprender a actuar, no solo a evaluar) pasamos de valores de estado a
+          valores de acción $\hat q(s, a, \mathbf{w}) = \mathbf{w}^{\top}\mathbf{x}(s, a)$, donde ahora
+          las features describen el par estado-acción. La versión con función de valor de
+          <a href="08-sarsa.html">SARSA</a> es directa: cambia $\hat v$ por $\hat q$ y usa la acción
+          que realmente tomarás a continuación ($A_{t+1}$):
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ SARSA semi-gradiente</div>
+          <p>$$\mathbf{w} \;\leftarrow\; \mathbf{w} \;+\; \alpha\,\big[\, R_{t+1} + \gamma\,\hat q(S_{t+1}, A_{t+1}, \mathbf{w}) - \hat q(S_t, A_t, \mathbf{w}) \,\big]\, \nabla_{\mathbf{w}}\hat q(S_t, A_t, \mathbf{w})$$</p>
+          <p class="math-note">
+            $A_{t+1}$ es la acción elegida por la política (por ejemplo, $\varepsilon$-greedy) en el
+            estado siguiente. En el caso lineal, $\nabla_{\mathbf{w}}\hat q(S_t,A_t,\mathbf{w}) =
+            \mathbf{x}(S_t,A_t)$. Como con tile coding las features son binarias, ese gradiente es un
+            vector de ceros y unos: la actualización solo toca los pesos de los mosaicos activos. Si el
+            estado es terminal, el término $\gamma\,\hat q(S_{t+1},A_{t+1},\mathbf{w})$ se sustituye por $0$.
+          </p>
+        </div>
+
+        <h2 id="triada">La tríada mortal</h2>
+        <p>
+          El semi-gradiente funciona bien con SARSA (que es <em>on-policy</em>), pero conviene conocer
+          el peligro que acecha en cuanto combinamos ciertos ingredientes. Sutton y Barto lo llaman la
+          <strong>tríada mortal</strong> (<em>deadly triad</em>):
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Los tres ingredientes que, juntos, pueden divergir</div>
+          <ul>
+            <li><strong>Bootstrapping</strong>: usar una estimación propia como objetivo (TD, no Monte Carlo).</li>
+            <li><strong>Aproximación de funciones</strong>: en especial la lineal o no lineal, no la tabla.</li>
+            <li><strong>Entrenamiento off-policy</strong>: aprender sobre una política distinta de la que genera los datos.</li>
+          </ul>
+          <p>
+            Cada uno por separado es inofensivo. Los tres a la vez pueden hacer que $\mathbf{w}$
+            <strong>diverja</strong> hacia el infinito (el contraejemplo de Baird es el clásico). Por eso
+            SARSA semi-gradiente, que es on-policy, es seguro aquí, y por eso el
+            <a href="12-dqn.html">capítulo 12</a> tendrá que inventar trucos (replay y red objetivo)
+            para domesticar el off-policy cuando la función sea una red neuronal.
+          </p>
+        </div>
+
+        <h2 id="tile-coding">Tile coding, en detalle</h2>
+        <p>
+          Tile coding trocea el espacio de estados con varias <strong>rejillas</strong> (los mosaicos o
+          <em>tilings</em>) superpuestas, cada una <strong>ligeramente desplazada</strong> respecto a las
+          demás. Cada rejilla parte el espacio en celdas; para un estado dado, se activa la celda que lo
+          contiene en cada rejilla. La feature vale $1$ en esas celdas activas y $0$ en el resto.
+        </p>
+        <p>
+          La magia está en el solape: con $n$ rejillas, cada estado activa exactamente $n$ features (una
+          por rejilla), y dos estados cercanos comparten casi todas sus celdas activas —por eso
+          generalizan entre sí—, mientras que dos estados lejanos no comparten ninguna. El tamaño de las
+          celdas fija <em>cuánto</em> se generaliza; el número de rejillas fija la <em>resolución</em> con
+          la que se distinguen estados cercanos.
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="0 0 520 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dos rejillas de tile coding desplazadas sobre un punto de estado">
+            <!-- Rejilla A -->
+            <g stroke="#4f46e5" stroke-width="1.5" fill="none" opacity="0.9">
+              <rect x="40" y="30" width="180" height="180" />
+              <line x1="100" y1="30" x2="100" y2="210" />
+              <line x1="160" y1="30" x2="160" y2="210" />
+              <line x1="40" y1="90" x2="220" y2="90" />
+              <line x1="40" y1="150" x2="220" y2="150" />
+            </g>
+            <!-- Rejilla B, desplazada -->
+            <g stroke="#0ea5e9" stroke-width="1.5" fill="none" opacity="0.9">
+              <rect x="58" y="48" width="180" height="180" />
+              <line x1="118" y1="48" x2="118" y2="228" />
+              <line x1="178" y1="48" x2="178" y2="228" />
+              <line x1="58" y1="108" x2="238" y2="108" />
+              <line x1="58" y1="168" x2="238" y2="168" />
+            </g>
+            <!-- Celdas activas -->
+            <rect x="100" y="90" width="60" height="60" fill="#4f46e5" opacity="0.18" />
+            <rect x="118" y="108" width="60" height="60" fill="#0ea5e9" opacity="0.18" />
+            <!-- Punto de estado -->
+            <circle cx="140" cy="130" r="6" fill="#dc2626" />
+            <text x="140" y="112" text-anchor="middle" fill="#dc2626" font-size="14" font-family="sans-serif" font-weight="700">s</text>
+            <!-- Leyenda -->
+            <g font-family="sans-serif" font-size="14">
+              <rect x="300" y="60" width="16" height="16" fill="#4f46e5" opacity="0.9" />
+              <text x="324" y="73" fill="#4a5568">Rejilla 1</text>
+              <rect x="300" y="90" width="16" height="16" fill="#0ea5e9" opacity="0.9" />
+              <text x="324" y="103" fill="#4a5568">Rejilla 2 (desplazada)</text>
+              <circle cx="308" cy="128" r="6" fill="#dc2626" />
+              <text x="324" y="133" fill="#4a5568">Estado s</text>
+              <text x="300" y="170" fill="#718096" font-size="12.5">El estado activa 1 celda por</text>
+              <text x="300" y="188" fill="#718096" font-size="12.5">rejilla; el solape controla</text>
+              <text x="300" y="206" fill="#718096" font-size="12.5">cuánto se generaliza.</text>
+            </g>
+          </svg>
+          <figcaption>Con dos rejillas desplazadas, el estado $s$ activa dos celdas. Los estados vecinos comparten esas celdas (generalizan); los lejanos, no.</figcaption>
+        </figure>
+
+        <h2 id="algoritmo">El algoritmo, paso a paso</h2>
+        <p>Así queda SARSA semi-gradiente con tile coding, listo para programar:</p>
+        <ol>
+          <li>Inicializa $\mathbf{w} = \mathbf{0}$. (Con recompensas negativas, $\hat q = 0$ es
+              <strong>optimista</strong>: anima a explorar sin necesidad de mucho $\varepsilon$.)</li>
+          <li>Para cada episodio: observa $S$, elige $A$ con $\varepsilon$-greedy sobre $\hat q(S,\cdot,\mathbf{w})$.</li>
+          <li>Repite en cada paso:
+            <ul>
+              <li>Ejecuta $A$, observa $R$ y $S'$.</li>
+              <li>Si $S'$ es terminal: $\delta \leftarrow R - \hat q(S,A,\mathbf{w})$; actualiza $\mathbf{w}$ y termina el episodio.</li>
+              <li>Si no: elige $A'$ con $\varepsilon$-greedy; $\delta \leftarrow R + \gamma\,\hat q(S',A',\mathbf{w}) - \hat q(S,A,\mathbf{w})$.</li>
+              <li>$\mathbf{w} \leftarrow \mathbf{w} + \frac{\alpha}{n}\,\delta\,\mathbf{x}(S,A)$, donde $n$ es el número de rejillas.</li>
+              <li>$S \leftarrow S'$, $A \leftarrow A'$.</li>
+            </ul>
+          </li>
+        </ol>
+        <p class="math-note">
+          Dividir la tasa por el número de rejillas $n$ es habitual: como se activan $n$ features a la
+          vez, así el paso efectivo no depende de cuántas rejillas uses.
+        </p>
+
+        <h2 id="ejemplo">Ejemplo: Mountain Car en numpy</h2>
+        <p>
+          <strong>Mountain Car</strong> es el problema de control continuo por excelencia: un coche en un
+          valle no tiene motor suficiente para subir directamente la colina de la derecha, así que debe
+          aprender a <em>coger impulso</em> balanceándose. El estado es continuo —posición y velocidad—,
+          justo el terreno donde la tabla no sirve y la aproximación brilla.
+        </p>
+        <p>
+          El código de abajo implementa <strong>todo a mano</strong> con numpy: la física del entorno, un
+          tile coder sencillo y SARSA semi-gradiente. Al terminar dibuja la <strong>curva de aprendizaje</strong>
+          (pasos por episodio, que debe descender) y el mapa de <strong>coste por ir</strong>
+          $-\max_a \hat q(s,a)$, que muestra la superficie de valor aprendida. La recompensa es $-1$ por
+          paso, así que menos pasos significa mejor política.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">aprox_funciones_mountaincar.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+Aproximación de funciones: SARSA semi-gradiente con tile coding en Mountain Car.
+
+Este script implementa DESDE CERO, usando solo numpy:
+  1) La física del entorno clásico "Mountain Car" (posición y velocidad).
+  2) Un tile coder (codificación por mosaicos) que convierte el estado
+     continuo en un vector de características binarias disperso.
+  3) Control SARSA SEMI-GRADIENTE con aproximación lineal de la función Q:
+         q_hat(s, a) = w · x(s, a)
+     y la actualización
+         w &lt;- w + (alpha / n_mosaicos) * [R + gamma * q_hat(s',a') - q_hat(s,a)] * grad_w q_hat
+     donde grad_w q_hat es el propio vector de características (features binarias).
+
+Al terminar dibuja dos gráficas:
+  - La curva de aprendizaje (pasos por episodio), que debe DESCENDER.
+  - La superficie de "coste por ir" -max_a q_hat(s,a) como mapa de calor.
+
+Cómo ejecutarlo en tu terminal:
+    pip install -r requirements.txt
+    python code/11-aproximacion-funciones/aprox_funciones_mountaincar.py
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+# ---------------------------------------------------------------------------
+# 1) El entorno Mountain Car, implementado a mano con numpy
+# ---------------------------------------------------------------------------
+class MountainCar:
+    """Coche en un valle: hay que coger impulso para subir la colina derecha."""
+
+    POS_MIN, POS_MAX = -1.2, 0.6
+    VEL_MIN, VEL_MAX = -0.07, 0.07
+    META = 0.5                      # posición objetivo (cima derecha)
+    ACCIONES = np.array([-1, 0, 1])  # empujar izquierda / soltar / empujar derecha
+
+    def __init__(self, rng):
+        self.rng = rng
+        self.pos = 0.0
+        self.vel = 0.0
+
+    def reset(self):
+        # Arranca en reposo, cerca del fondo del valle.
+        self.pos = self.rng.uniform(-0.6, -0.4)
+        self.vel = 0.0
+        return np.array([self.pos, self.vel])
+
+    def step(self, accion):
+        empuje = self.ACCIONES[accion]
+        self.vel += 0.001 * empuje - 0.0025 * np.cos(3.0 * self.pos)
+        self.vel = np.clip(self.vel, self.VEL_MIN, self.VEL_MAX)
+        self.pos += self.vel
+        self.pos = np.clip(self.pos, self.POS_MIN, self.POS_MAX)
+        if self.pos == self.POS_MIN:      # choca con la pared izquierda
+            self.vel = 0.0
+        terminado = self.pos &gt;= self.META
+        recompensa = -1.0                 # cada paso cuesta: hay que llegar rápido
+        return np.array([self.pos, self.vel]), recompensa, terminado
+
+
+# ---------------------------------------------------------------------------
+# 2) Tile coder: estado continuo -&gt; índices de mosaicos activos
+# ---------------------------------------------------------------------------
+class TileCoder:
+    """Codificación por mosaicos con desplazamientos asimétricos (1, 3, ...)."""
+
+    def __init__(self, low, high, n_mosaicos=8, n_bins=8, n_acciones=3):
+        self.low = np.asarray(low, dtype=float)
+        self.high = np.asarray(high, dtype=float)
+        self.n_mosaicos = n_mosaicos
+        self.n_bins = n_bins
+        self.n_acciones = n_acciones
+        self.n_dims = len(self.low)
+        # Ancho de un mosaico en cada dimensión.
+        self.ancho = (self.high - self.low) / n_bins
+        # Vector de desplazamiento asimétrico: (1, 3, 5, ...).
+        self.disp = (2 * np.arange(self.n_dims) + 1).astype(float)
+        # Mosaicos por rejilla: un bin extra para absorber los desplazamientos.
+        self.por_mosaico = (n_bins + 1) ** self.n_dims
+        self.bloque = n_mosaicos * self.por_mosaico   # índices por acción
+        self.n_features = n_acciones * self.bloque    # tamaño del vector w
+
+    def activos(self, estado):
+        """Índices (sin acción) de los n_mosaicos mosaicos activos."""
+        escala = (np.asarray(estado) - self.low) / self.ancho
+        offs = np.outer(np.arange(self.n_mosaicos), self.disp) / self.n_mosaicos
+        coords = np.floor(escala[None, :] + offs).astype(np.int64)
+        coords = np.clip(coords, 0, self.n_bins)
+        plano = np.zeros(self.n_mosaicos, dtype=np.int64)
+        for d in range(self.n_dims):
+            plano = plano * (self.n_bins + 1) + coords[:, d]
+        return np.arange(self.n_mosaicos) * self.por_mosaico + plano
+
+    def indices(self, estado, accion):
+        """Índices en w de las features activas para el par (estado, acción)."""
+        return accion * self.bloque + self.activos(estado)
+
+    def q_todas(self, estado, w):
+        """Valor q_hat(estado, a) para todas las acciones (vector)."""
+        base = self.activos(estado)
+        return np.array([w[a * self.bloque + base].sum()
+                         for a in range(self.n_acciones)])
+
+
+# ---------------------------------------------------------------------------
+# 3) Política epsilon-greedy con desempate aleatorio
+# ---------------------------------------------------------------------------
+def eps_greedy(qs, epsilon, rng, n_acciones):
+    if rng.random() &lt; epsilon:
+        return int(rng.integers(n_acciones))
+    maximo = qs.max()
+    candidatas = np.flatnonzero(qs == maximo)  # empates -&gt; elección al azar
+    return int(rng.choice(candidatas))
+
+
+# ---------------------------------------------------------------------------
+# 4) SARSA semi-gradiente
+# ---------------------------------------------------------------------------
+def entrenar(n_episodios=50, alpha=0.5, gamma=1.0, epsilon=0.0,
+             max_pasos=2000, semilla=0):
+    rng = np.random.default_rng(semilla)
+    env = MountainCar(rng)
+    tc = TileCoder(low=[MountainCar.POS_MIN, MountainCar.VEL_MIN],
+                   high=[MountainCar.POS_MAX, MountainCar.VEL_MAX],
+                   n_mosaicos=8, n_bins=8, n_acciones=3)
+    w = np.zeros(tc.n_features)           # inicio optimista: q_hat = 0 &gt; retornos reales
+    paso_alpha = alpha / tc.n_mosaicos
+    pasos_por_ep = np.zeros(n_episodios, dtype=int)
+
+    for ep in range(n_episodios):
+        s = env.reset()
+        a = eps_greedy(tc.q_todas(s, w), epsilon, rng, tc.n_acciones)
+        for t in range(max_pasos):
+            s2, r, terminado = env.step(a)
+            idx = tc.indices(s, a)                 # features activas de (s, a)
+            q_sa = w[idx].sum()
+            if terminado:
+                delta = r - q_sa
+                w[idx] += paso_alpha * delta
+                pasos_por_ep[ep] = t + 1
+                break
+            a2 = eps_greedy(tc.q_todas(s2, w), epsilon, rng, tc.n_acciones)
+            q_s2a2 = tc.q_todas(s2, w)[a2]
+            delta = r + gamma * q_s2a2 - q_sa      # error TD (bootstrapping)
+            w[idx] += paso_alpha * delta
+            s, a = s2, a2
+        else:
+            pasos_por_ep[ep] = max_pasos           # episodio truncado
+
+    return w, tc, pasos_por_ep
+
+
+# ---------------------------------------------------------------------------
+# 5) Evaluación de la política greedy aprendida
+# ---------------------------------------------------------------------------
+def evaluar(w, tc, n=5, max_pasos=2000, semilla=100):
+    rng = np.random.default_rng(semilla)
+    env = MountainCar(rng)
+    pasos = []
+    for _ in range(n):
+        s = env.reset()
+        for t in range(max_pasos):
+            a = int(np.argmax(tc.q_todas(s, w)))
+            s, r, terminado = env.step(a)
+            if terminado:
+                pasos.append(t + 1)
+                break
+        else:
+            pasos.append(max_pasos)
+    return float(np.mean(pasos))
+
+
+# ---------------------------------------------------------------------------
+# 6) Gráficas: curva de aprendizaje y superficie de coste por ir
+# ---------------------------------------------------------------------------
+def graficar(pasos_por_ep, w, tc):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.2))
+
+    # (a) Curva de aprendizaje.
+    episodios = np.arange(1, len(pasos_por_ep) + 1)
+    ax1.plot(episodios, pasos_por_ep, color="#94a3b8", lw=1, label="pasos por episodio")
+    if len(pasos_por_ep) &gt;= 5:
+        k = 5
+        suave = np.convolve(pasos_por_ep, np.ones(k) / k, mode="valid")
+        ax1.plot(episodios[k - 1:], suave, color="#4f46e5", lw=2.2, label="media móvil (5)")
+    ax1.set_xlabel("episodio")
+    ax1.set_ylabel("pasos hasta la meta")
+    ax1.set_title("Curva de aprendizaje")
+    ax1.legend()
+    ax1.grid(alpha=0.25)
+
+    # (b) Coste por ir: -max_a q_hat(s, a) sobre una rejilla de estados.
+    n = 60
+    pos = np.linspace(MountainCar.POS_MIN, MountainCar.POS_MAX, n)
+    vel = np.linspace(MountainCar.VEL_MIN, MountainCar.VEL_MAX, n)
+    coste = np.zeros((n, n))
+    for i, v in enumerate(vel):
+        for j, p in enumerate(pos):
+            coste[i, j] = -tc.q_todas(np.array([p, v]), w).max()
+    im = ax2.imshow(coste, origin="lower", aspect="auto", cmap="viridis",
+                    extent=[MountainCar.POS_MIN, MountainCar.POS_MAX,
+                            MountainCar.VEL_MIN, MountainCar.VEL_MAX])
+    ax2.set_xlabel("posición")
+    ax2.set_ylabel("velocidad")
+    ax2.set_title("Coste por ir  -max_a q̂(s, a)")
+    fig.colorbar(im, ax=ax2, shrink=0.85)
+
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    w, tc, pasos = entrenar()
+    print(f"Episodio 1  : {pasos[0]:5d} pasos (aún explorando)")
+    print(f"Último ep.  : {pasos[-1]:5d} pasos")
+    print(f"Mejor ep.   : {pasos.min():5d} pasos")
+    media = evaluar(w, tc)
+    print(f"Política greedy final: {media:.1f} pasos de media en 5 arranques")
+    graficar(pasos, w, tc)
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong> (la primera vez tarda unos segundos en descargar Python).
+          Verás que el primer episodio se agota explorando —el coche vaga sin llegar a la meta— y que, a
+          partir de ahí, los pasos por episodio caen en picado a medida que $\mathbf{w}$ aprende a valorar
+          el impulso. La política final resuelve el valle en unas pocas centenas de pasos. En el mapa de
+          coste por ir se aprecia la típica «espiral»: el valor crece siguiendo la trayectoria que
+          acumula velocidad.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Cambia <code>n_bins</code> a $4$ (celdas más grandes): generaliza más y aprende antes, pero
+            afina peor. Sube <code>n_mosaicos</code> o baja <code>alpha</code> y observa cómo cambia la
+            velocidad de aprendizaje. Si pones <code>epsilon=0.1</code>, verás que ya no hace falta el
+            inicio optimista para explorar, pero la curva queda algo más ruidosa.
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          El mismo archivo funciona fuera del navegador. Descárgalo con «Descargar .py» (o cópialo) y
+          ejecútalo así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) ejecuta el ejemplo</span>
+<span class="prompt">$</span> python code/11-aproximacion-funciones/aprox_funciones_mountaincar.py
+<span class="comment">Episodio 1  :  2000 pasos (aún explorando)
+Último ep.  :   ~200 pasos
+Mejor ep.   :   ~120 pasos
+Política greedy final: ~175 pasos de media en 5 arranques</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Este ejemplo corre entero en el navegador (solo numpy y matplotlib). Los ejemplos con
+          <code>torch</code> o <code>gymnasium</code> del <a href="12-dqn.html">capítulo 12</a> en adelante
+          son demasiado pesados para Pyodide: para esos, el manual te dará el <code>.py</code> listo para tu terminal.
+        </p>
+
+        <h2 id="hacia-deep">Hacia el aprendizaje profundo</h2>
+        <p>
+          Fíjate en lo que hemos hecho: hemos escrito el valor como $\hat q(s,a,\mathbf{w})$, una función
+          con parámetros $\mathbf{w}$, y la hemos ajustado con gradiente. Nada en la regla del
+          semi-gradiente obliga a que esa función sea <em>lineal</em>. Si en lugar de tile coding usamos una
+          <strong>red neuronal</strong> para calcular $\hat q(s,a,\mathbf{w})$ —donde $\mathbf{w}$ son ahora
+          los pesos de la red y $\nabla_{\mathbf{w}}\hat q$ lo da la retropropagación—, tenemos
+          <strong>aprendizaje por refuerzo profundo</strong>. La red aprende ella sola las features que
+          nosotros ahora diseñamos a mano.
+        </p>
+        <p>
+          Ese es exactamente el salto del <a href="12-dqn.html">capítulo 12</a>: <strong>Deep Q-Networks
+          (DQN)</strong>. Combinar una red (aproximación no lineal) con Q-Learning (bootstrapping +
+          off-policy) reactiva la tríada mortal, y veremos los dos ingenios que la estabilizan: el
+          <em>replay buffer</em> y la <em>red objetivo</em>.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>La <strong>tabla no escala</strong>: la sustituimos por $\hat v(s,\mathbf{w})=\mathbf{w}^{\top}\mathbf{x}(s)$, que <strong>generaliza</strong> entre estados parecidos.</li>
+            <li>Las <strong>features</strong> $\mathbf{x}(s)$ describen el estado con números; <strong>tile coding</strong> es una elección barata, dispersa y robusta.</li>
+            <li>Optimizamos el <strong>error cuadrático medio ponderado</strong> $\overline{VE}$ con <strong>SGD</strong>; en el caso lineal el gradiente son las propias features.</li>
+            <li>La actualización TD es <strong>semi-gradiente</strong>: tratamos el objetivo bootstrap como una constante y no lo derivamos.</li>
+            <li>Cuidado con la <strong>tríada mortal</strong> (bootstrapping + aproximación + off-policy): puede divergir. SARSA on-policy es seguro.</li>
+            <li>Si la función es una <strong>red neuronal</strong>, esto es <strong>deep RL</strong>: el puente al <a href="12-dqn.html">capítulo 12 (DQN)</a>.</li>
+          </ul>
+        </div>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3. Procesos de Decisión de Markov · Manual de RL</title>
+  <meta name="description" content="Formalizamos el entorno con muchos estados como un Proceso de Decisión de Markov (MDP): la propiedad de Markov, la tupla (S, A, P, R, γ), políticas, retornos y un GridWorld en Python ejecutable." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="3">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 0 · Capítulo 3</span>
+        <h1>Procesos de Decisión de Markov</h1>
+        <p class="lead">
+          En el <a href="02-bandido-multibrazo.html">bandido multibrazo</a> solo había una
+          decisión, tomada una y otra vez en el mismo sitio: no existía el concepto de
+          <em>«dónde estoy»</em>. En el mundo real, en cambio, cada acción nos <strong>mueve</strong>
+          a una situación nueva, y lo que conviene hacer depende de ella. Este capítulo introduce
+          el marco matemático que captura esa idea —el <strong>Proceso de Decisión de Markov</strong>
+          (MDP)— y que es la columna vertebral de todo el aprendizaje por refuerzo.
+        </p>
+
+        <h2 id="del-bandido">Del bandido a los estados</h2>
+        <p>
+          El bandido era un problema de <strong>un solo estado</strong>. Tirabas de una palanca,
+          recibías una recompensa y volvías exactamente al mismo punto de partida. Tu acción no
+          cambiaba el mundo; solo revelaba información sobre él. Por eso lo único que había que
+          aprender era «qué palanca es la mejor».
+        </p>
+        <p>
+          Ahora damos el salto. Imagina un pequeño robot en una cuadrícula: si va al este, acaba
+          en la casilla de la derecha; si va al sur, en la de abajo. La <strong>misma acción</strong>
+          («ir al este») tiene consecuencias distintas según <strong>dónde estés</strong>. Aparece
+          así un ingrediente que el bandido no tenía: el <strong>estado</strong>. Y con él, un
+          problema mucho más rico: no basta con elegir una acción buena, hay que elegir una acción
+          buena <em>para cada estado</em>.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Piensa en un <strong>robot reciclador</strong> (el ejemplo clásico de Sutton y Barto).
+            Sus estados podrían ser el nivel de batería: <em>alta</em> o <em>baja</em>. Desde
+            «batería alta» puede buscar latas sin miedo; desde «batería baja», si sigue buscando
+            arriesga quedarse tirado y necesitar rescate (recompensa muy negativa). La decisión
+            correcta <strong>depende del estado</strong>. Eso es justo lo que un MDP formaliza.
+          </p>
+        </div>
+
+        <h2 id="propiedad-markov">La propiedad de Markov</h2>
+        <p>
+          Antes de escribir la teoría necesitamos una hipótesis que la haga manejable. Se llama
+          <strong>propiedad de Markov</strong> y se resume en una frase:
+        </p>
+        <p style="text-align:center; font-size:1.15rem; color:var(--accent-text); font-weight:600;">
+          «El presente resume el pasado.»
+        </p>
+        <p>
+          Es decir: para predecir qué pasará a continuación, <strong>basta con el estado y la
+          acción actuales</strong>. Todo el historial de cómo llegaste hasta ahí —los estados y
+          acciones anteriores— es irrelevante una vez que conoces el estado presente. El estado
+          es un resumen <em>suficiente</em> de la historia.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La propiedad de Markov, en símbolos</div>
+          <p>
+            Un estado $S_t$ es <em>markoviano</em> si la probabilidad del siguiente estado y la
+            siguiente recompensa no cambia al añadir toda la historia previa:
+          </p>
+          <p>
+            $$\Pr\{S_{t+1}=s', R_{t+1}=r \mid S_t, A_t, S_{t-1}, A_{t-1}, \dots, S_0, A_0\}
+            = \Pr\{S_{t+1}=s', R_{t+1}=r \mid S_t, A_t\}$$
+          </p>
+          <p class="math-note">
+            $S_t$ es el estado en el instante $t$; $A_t$ la acción tomada en él; $S_{t+1}$ y
+            $R_{t+1}$ el estado y la recompensa que llegan después. La igualdad dice que <em>todo
+            lo de la izquierda del historial no aporta nada</em> si ya conoces $S_t$ y $A_t$.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Cuidado: es una propiedad del estado, no del mundo</div>
+          <p>
+            Que un problema sea markoviano depende de <strong>cómo definas el estado</strong>. Si
+            para conducir usaras solo una foto fija del coche, no sabrías la velocidad: el estado
+            sería insuficiente y <em>no</em> markoviano. Si incluyes la velocidad (o dos fotos
+            consecutivas), vuelve a serlo. Buena parte del arte de aplicar RL consiste en diseñar
+            un estado que capture <em>lo necesario</em> para decidir bien.
+          </p>
+        </div>
+
+        <h2 id="mdp-formal">El MDP, formalmente</h2>
+        <p>
+          Un <strong>Proceso de Decisión de Markov</strong> es la formalización de un entorno con
+          estados que cumple la propiedad de Markov. Se describe con una <strong>tupla</strong> de
+          cinco elementos:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La tupla de un MDP</div>
+          <p>$$\mathcal{M} = (\mathcal{S}, \mathcal{A}, P, R, \gamma)$$</p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Elemento</th><th>Nombre</th><th>Qué es</th></tr></thead>
+            <tbody>
+              <tr><td>$\mathcal{S}$</td><td>Espacio de estados</td><td>El conjunto de situaciones posibles del entorno.</td></tr>
+              <tr><td>$\mathcal{A}$</td><td>Espacio de acciones</td><td>Lo que el agente puede hacer (a veces depende del estado, $\mathcal{A}(s)$).</td></tr>
+              <tr><td>$P$</td><td>Dinámica</td><td>Cómo responde el entorno: probabilidad de cada $(s', r)$ dado $(s, a)$.</td></tr>
+              <tr><td>$R$</td><td>Recompensa</td><td>La señal numérica que define el objetivo.</td></tr>
+              <tr><td>$\gamma$</td><td>Descuento</td><td>Cuánto pesan las recompensas futuras, $\gamma \in [0, 1]$.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>La dinámica $p(s', r \mid s, a)$</h3>
+        <p>
+          El corazón del MDP es su <strong>función de dinámica</strong>. Reúne en un solo objeto
+          todo lo que el entorno «sabe hacer»: dado que estás en el estado $s$ y ejecutas la acción
+          $a$, ¿con qué probabilidad acabas en $s'$ recibiendo la recompensa $r$?
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La función de dinámica</div>
+          <p>
+            $$p(s', r \mid s, a) \doteq \Pr\{S_{t+1}=s',\, R_{t+1}=r \mid S_t=s,\, A_t=a\}$$
+          </p>
+          <p class="math-note">
+            El símbolo $\doteq$ significa «se define como». La función $p$ toma cuatro argumentos
+            (dos de salida, $s'$ y $r$; dos de entrada, $s$ y $a$) y devuelve una probabilidad.
+            Como para cada $(s, a)$ tiene que ocurrir <em>algo</em>, las probabilidades suman uno:
+          </p>
+          <p>
+            $$\sum_{s' \in \mathcal{S}} \sum_{r \in \mathcal{R}} p(s', r \mid s, a) = 1
+            \qquad \text{para todo } s \in \mathcal{S},\; a \in \mathcal{A}(s).$$
+          </p>
+        </div>
+
+        <p>
+          A partir de $p$ se derivan otras cantidades útiles. La <strong>probabilidad de
+          transición de estado</strong> se obtiene sumando (marginalizando) sobre todas las
+          recompensas posibles:
+        </p>
+        <p>
+          $$p(s' \mid s, a) = \sum_{r \in \mathcal{R}} p(s', r \mid s, a).$$
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="0 0 640 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diagrama de una transición estocástica: desde un estado y una acción se llega a varios estados posibles con distintas probabilidades">
+            <defs>
+              <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#4f46e5" />
+              </marker>
+              <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#0ea5e9" />
+              </marker>
+            </defs>
+            <circle cx="90" cy="125" r="38" fill="#4f46e5" />
+            <text x="90" y="132" text-anchor="middle" fill="#fff" font-size="22" font-family="sans-serif" font-weight="700">$s$</text>
+            <text x="90" y="200" text-anchor="middle" fill="#4a5568" font-size="14" font-family="sans-serif">acción $a$ = Este</text>
+
+            <circle cx="500" cy="60" r="34" fill="#0ea5e9" />
+            <text x="500" y="67" text-anchor="middle" fill="#fff" font-size="18" font-family="sans-serif" font-weight="700">$s'_1$</text>
+            <circle cx="500" cy="190" r="34" fill="#0ea5e9" opacity="0.85" />
+            <text x="500" y="197" text-anchor="middle" fill="#fff" font-size="18" font-family="sans-serif" font-weight="700">$s'_2$</text>
+
+            <path d="M128,110 C280,70 340,60 464,62" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow)" />
+            <text x="300" y="60" text-anchor="middle" fill="#4a5568" font-size="14" font-family="sans-serif">$p(s'_1|s,a)=0{,}9$</text>
+            <path d="M128,142 C280,180 340,190 464,190" fill="none" stroke="#0ea5e9" stroke-width="2.5" marker-end="url(#arrow2)" />
+            <text x="300" y="215" text-anchor="middle" fill="#4a5568" font-size="14" font-family="sans-serif">$p(s'_2|s,a)=0{,}1$ (resbalón)</text>
+          </svg>
+          <figcaption>
+            Transición <strong>estocástica</strong>: la misma acción puede llevar a estados distintos
+            con distintas probabilidades. En nuestro GridWorld esto será el «resbalón» del suelo.
+          </figcaption>
+        </figure>
+
+        <h3>La recompensa esperada $r(s, a)$</h3>
+        <p>
+          Muchas veces no nos interesa el detalle de <em>qué</em> recompensa exacta cae, sino su
+          valor <strong>medio</strong>. La <strong>recompensa esperada</strong> de tomar la acción
+          $a$ en el estado $s$ se obtiene, de nuevo, a partir de $p$:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Recompensa esperada de un par estado–acción</div>
+          <p>
+            $$r(s, a) \doteq \mathbb{E}[R_{t+1} \mid S_t=s,\, A_t=a]
+            = \sum_{r \in \mathcal{R}} r \sum_{s' \in \mathcal{S}} p(s', r \mid s, a).$$
+          </p>
+          <p class="math-note">
+            $\mathbb{E}[\cdot]$ es la <em>esperanza</em> (el promedio ponderado por probabilidades).
+            Leemos: recorremos cada recompensa posible $r$, la multiplicamos por la probabilidad
+            total de recibirla (sumando sobre todos los $s'$ a los que podríamos ir) y sumamos. En
+            nuestro GridWorld esto será sencillo: casi siempre $-1$, salvo al pisar la meta.
+          </p>
+        </div>
+
+        <h2 id="politicas">Políticas: cómo decide el agente</h2>
+        <p>
+          El MDP describe el <em>entorno</em>. El comportamiento del <em>agente</em> se resume en
+          su <strong>política</strong> $\pi$: una regla que, dado un estado, dice qué acción tomar.
+          Ya la vimos de pasada en el <a href="01-que-es-rl.html">capítulo 1</a>; aquí la definimos
+          con precisión.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Política estocástica y determinista</div>
+          <p>
+            Una <strong>política estocástica</strong> asigna a cada estado una distribución de
+            probabilidad sobre las acciones:
+          </p>
+          <p>$$\pi(a \mid s) = \Pr\{A_t = a \mid S_t = s\}, \qquad \sum_{a \in \mathcal{A}(s)} \pi(a \mid s) = 1.$$</p>
+          <p>
+            Un caso particular es la <strong>política determinista</strong>, que elige siempre la
+            misma acción en cada estado. Se suele escribir como una función:
+          </p>
+          <p>$$a = \pi(s).$$</p>
+          <p class="math-note">
+            La política aleatoria uniforme del ejemplo de más abajo es estocástica:
+            $\pi(a \mid s) = 1/4$ para cada una de las cuatro acciones. El objetivo del resto del
+            manual será <em>encontrar</em> la política que maximice la recompensa a largo plazo.
+          </p>
+        </div>
+
+        <h2 id="episodico-continuo">Tareas episódicas y continuas</h2>
+        <p>
+          Los problemas de RL vienen en dos sabores según cómo termine (o no) la interacción:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Tipo</th><th>Descripción</th><th>Ejemplos</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><strong>Episódica</strong></td>
+                <td>Existe un <strong>estado terminal</strong> que acaba el episodio. Luego se reinicia.</td>
+                <td>Una partida de ajedrez, un laberinto, nuestro GridWorld al llegar a la meta.</td>
+              </tr>
+              <tr>
+                <td><strong>Continua</strong></td>
+                <td>La interacción <strong>no termina nunca</strong>; el tiempo tiende a infinito.</td>
+                <td>Regular la temperatura de un edificio, gestionar una cartera de inversión.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          En una tarea episódica denotamos por $T$ el instante final. El estado terminal es
+          <strong>absorbente</strong>: una vez dentro, ya no se sale y no se acumula más recompensa.
+          Nuestro GridWorld es episódico: el episodio acaba al pisar la meta.
+        </p>
+
+        <h3>El retorno y por qué hace falta $\gamma$</h3>
+        <p>
+          Recuerda del <a href="01-que-es-rl.html">capítulo 1</a> que el agente no quiere el premio
+          inmediato, sino el <strong>retorno</strong> $G_t$: la recompensa acumulada desde el
+          instante $t$ en adelante. En una tarea <em>episódica</em> podríamos sumarla sin más:
+        </p>
+        <p>$$G_t = R_{t+1} + R_{t+2} + \cdots + R_T.$$</p>
+        <p>
+          Pero en una tarea <em>continua</em> no hay $T$: la suma tendría infinitos términos y
+          podría hacerse infinita, con lo que «maximizar el retorno» dejaría de tener sentido (¿es
+          mejor un infinito que otro?). La solución es <strong>descontar</strong>: dar un poco menos
+          de peso a cada recompensa cuanto más tarde llegue, mediante el factor $\gamma \in [0, 1)$.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El retorno descontado</div>
+          <p>
+            $$G_t \doteq R_{t+1} + \gamma R_{t+2} + \gamma^2 R_{t+3} + \cdots
+            = \sum_{k=0}^{\infty} \gamma^k R_{t+k+1}.$$
+          </p>
+          <p class="math-note">
+            $\gamma$ (gamma) es el <strong>factor de descuento</strong>. Con $\gamma = 0$ el agente
+            es «miope» y solo mira el premio inmediato; con $\gamma \to 1$ es «previsor» y le
+            importa el futuro casi tanto como el presente.
+          </p>
+        </div>
+
+        <p>
+          La magia del descuento es que, si las recompensas están acotadas (digamos
+          $|R_t| \le R_{\max}$), el retorno se vuelve <strong>finito</strong> aunque la tarea sea
+          infinita. Basta usar la suma de una serie geométrica:
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ Por qué $\gamma &lt; 1$ garantiza un retorno finito</div>
+          <p>
+            $$|G_t| \le \sum_{k=0}^{\infty} \gamma^k R_{\max} = \frac{R_{\max}}{1 - \gamma} &lt; \infty.$$
+          </p>
+          <p class="math-note">
+            Aquí usamos que $\sum_{k=0}^{\infty} \gamma^k = \tfrac{1}{1-\gamma}$ cuando
+            $0 \le \gamma &lt; 1$. Por eso en tareas continuas exigimos $\gamma &lt; 1$: sin descuento
+            (con $\gamma = 1$) la cota se rompe y el retorno puede diverger.
+          </p>
+        </div>
+
+        <p>
+          Hay además una identidad que usaremos muchísimo a partir del
+          <a href="04-retornos-y-valor.html">capítulo 4</a>: el retorno se puede escribir de forma
+          <strong>recursiva</strong>, separando la primera recompensa del resto.
+        </p>
+        <div class="callout key">
+          <div class="callout-title">🔑 La recursión del retorno</div>
+          <p>$$G_t = R_{t+1} + \gamma\,G_{t+1}.$$</p>
+          <p>
+            «Lo que gano desde ahora = lo que gano en el próximo paso + (descontado) lo que ganaré
+            a partir de entonces.» Esta simple observación es la semilla de las
+            <strong>ecuaciones de Bellman</strong> y, con ellas, de casi todos los algoritmos del
+            manual.
+          </p>
+        </div>
+
+        <h2 id="ejemplo">Un MDP en Python: GridWorld</h2>
+        <p>
+          Vamos a construir un MDP <strong>explícito</strong> y a «vivir» dentro de él. Nuestro
+          entorno es un <strong>GridWorld</strong> de $5 \times 5$: hay muros por los que no se
+          puede pasar, un inicio (arriba a la izquierda, casilla <code>S</code>) y una meta (abajo
+          a la derecha, casilla <code>G</code>). Las acciones son las cuatro direcciones
+          (<strong>N</strong>orte, <strong>S</strong>ur, <strong>E</strong>ste, <strong>O</strong>este).
+        </p>
+        <p>
+          Para que el problema sea un poco más realista, el suelo <strong>resbala</strong>: con
+          probabilidad $0{,}1$ el agente se desvía a una de las dos direcciones perpendiculares a
+          la que pretendía. Esto convierte la dinámica en <strong>estocástica</strong> (justo el
+          diagrama de antes). Cada paso cuesta $-1$ y llegar a la meta da $+10$; la meta es terminal.
+        </p>
+        <p>
+          Fíjate en la clase <code>GridWorld</code>: expone <code>reset()</code> (que devuelve el
+          estado inicial) y <code>step(accion)</code> (que devuelve <code>(s', r, terminado)</code>),
+          la misma interfaz que usan los entornos clásicos de RL. La reutilizaremos, al menos
+          conceptualmente, en los próximos capítulos.
+        </p>
+        <p>
+          El programa hace tres cosas: (1) muestrea una <strong>trayectoria</strong> bajo la
+          política aleatoria e imprime cada transición $(s, a, r, s')$; (2) estima por
+          <strong>Monte Carlo</strong> el retorno medio desde el inicio (promediando el retorno
+          descontado de muchos episodios); y (3) dibuja el tablero con <code>matplotlib</code>.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">mdp_gridworld.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+mdp_gridworld.py — Un Proceso de Decisión de Markov (MDP) explícito: GridWorld.
+
+Este script define un mundo de rejilla 5x5 con muros y una meta, formalizado
+como un MDP con la tupla (S, A, P, R, gamma). Muestra tres cosas:
+  1) una trayectoria (s, a, r, s') muestreada bajo una política aleatoria,
+  2) una estimación por Monte Carlo del retorno medio desde el estado inicial,
+  3) una visualización del mapa con matplotlib (imshow), marcando inicio y meta.
+
+La clase GridWorld es reutilizable: expone reset() y step(accion) al estilo de
+los entornos clásicos de RL, y la reutilizaremos conceptualmente en capítulos
+posteriores (funciones de valor, programación dinámica, Monte Carlo, TD...).
+
+Cómo ejecutarlo:
+    pip install -r requirements.txt
+    python code/03-mdp/mdp_gridworld.py
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+
+
+# Acciones: desplazamiento (dfila, dcol) para N, S, E, O.
+ACCIONES = {
+    0: (-1, 0),   # N (Norte): subir una fila
+    1: (1, 0),    # S (Sur):   bajar una fila
+    2: (0, 1),    # E (Este):  avanzar una columna
+    3: (0, -1),   # O (Oeste): retroceder una columna
+}
+NOMBRES = {0: "N", 1: "S", 2: "E", 3: "O"}
+
+# Para cada acción, sus dos direcciones perpendiculares (por donde "resbala").
+PERPENDICULARES = {
+    0: (2, 3), 1: (2, 3),   # N y S resbalan hacia E / O
+    2: (0, 1), 3: (0, 1),   # E y O resbalan hacia N / S
+}
+
+
+class GridWorld:
+    """Mundo de rejilla como MDP episódico.
+
+    Estados (S): enteros 0..(filas*cols - 1), con estado = fila*cols + columna.
+    Acciones (A): 0=N, 1=S, 2=E, 3=O.
+    Transición (P): con probabilidad (1 - slip) el agente va en la dirección
+        elegida; con probabilidad slip resbala a una de las dos perpendiculares.
+        Si el destino es un muro o cae fuera del tablero, se queda donde está.
+    Recompensa (R): -1 por cada paso (para incentivar llegar pronto) y +10 al
+        alcanzar la meta, que es un estado terminal (absorbente).
+    """
+
+    def __init__(self, slip=0.1, seed=0):
+        # Mapa 5x5: 0 = casilla libre, 1 = muro. La meta se marca aparte.
+        self.mapa = np.array([
+            [0, 0, 0, 0, 0],
+            [0, 1, 0, 0, 0],
+            [0, 1, 0, 1, 0],
+            [0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 0],
+        ])
+        self.filas, self.cols = self.mapa.shape
+        self.inicio = (0, 0)
+        self.meta = (4, 4)
+        self.slip = float(slip)
+        self.n_estados = self.filas * self.cols
+        self.n_acciones = 4
+        self.rng = np.random.default_rng(seed)
+        self.pos = self.inicio
+
+    # --- conversión coordenadas &lt;-&gt; índice de estado ---
+    def _a_estado(self, pos):
+        fila, col = pos
+        return fila * self.cols + col
+
+    def es_muro(self, pos):
+        fila, col = pos
+        return self.mapa[fila, col] == 1
+
+    def _dentro(self, pos):
+        fila, col = pos
+        return 0 &lt;= fila &lt; self.filas and 0 &lt;= col &lt; self.cols
+
+    def _mover(self, pos, accion):
+        """Aplica un desplazamiento; si choca con muro o borde, se queda."""
+        dfila, dcol = ACCIONES[accion]
+        destino = (pos[0] + dfila, pos[1] + dcol)
+        if not self._dentro(destino) or self.es_muro(destino):
+            return pos
+        return destino
+
+    def reset(self):
+        """Coloca al agente en el inicio y devuelve el estado inicial."""
+        self.pos = self.inicio
+        return self._a_estado(self.pos)
+
+    def step(self, accion):
+        """Ejecuta una acción. Devuelve (nuevo_estado, recompensa, terminado)."""
+        # ¿Resbala? Elegimos la dirección REAL del movimiento.
+        if self.rng.random() &lt; self.slip:
+            accion = int(self.rng.choice(PERPENDICULARES[accion]))
+        self.pos = self._mover(self.pos, accion)
+
+        if self.pos == self.meta:
+            return self._a_estado(self.pos), 10.0, True
+        return self._a_estado(self.pos), -1.0, False
+
+
+def politica_aleatoria(rng):
+    """Política pi(a|s) uniforme: elige una de las 4 acciones al azar."""
+    return int(rng.integers(4))
+
+
+def muestrear_trayectoria(env, rng, max_pasos=30):
+    """Genera una trayectoria e imprime cada transición (s, a, r, s')."""
+    s = env.reset()
+    for t in range(max_pasos):
+        a = politica_aleatoria(rng)
+        s2, r, done = env.step(a)
+        print(f"t={t:&lt;2} s={s:&lt;2} a={NOMBRES[a]} r={r:&gt;3.0f}  -&gt;  s'={s2:&lt;2}")
+        s = s2
+        if done:
+            print(f"  ¡Meta alcanzada en {t + 1} pasos!")
+            break
+    else:
+        print(f"  (sin llegar a la meta en {max_pasos} pasos)")
+
+
+def estimar_retorno(env, rng, gamma=0.95, episodios=300, max_pasos=200):
+    """Estima E[G_0] promediando el retorno descontado de muchos episodios.
+
+    El retorno de un episodio es G_0 = sum_t gamma^t * r_{t+1}. Al promediar
+    muchos episodios obtenemos una estimación Monte Carlo del valor esperado.
+    """
+    retornos = np.empty(episodios)
+    for e in range(episodios):
+        env.reset()
+        G = 0.0
+        descuento = 1.0
+        for _ in range(max_pasos):
+            a = politica_aleatoria(rng)
+            _, r, done = env.step(a)
+            G += descuento * r
+            descuento *= gamma
+            if done:
+                break
+        retornos[e] = G
+    return retornos
+
+
+def dibujar_mapa(env, retorno_medio=None):
+    """Dibuja el tablero con imshow, marcando muros, inicio (S) y meta (G)."""
+    disp = env.mapa.astype(float).copy()
+    disp[env.inicio] = 2.0   # inicio
+    disp[env.meta] = 3.0     # meta
+    cmap = ListedColormap(["#eef1f5", "#334155", "#0ea5e9", "#10b981"])
+
+    fig, ax = plt.subplots(figsize=(4.6, 4.6))
+    ax.imshow(disp, cmap=cmap, vmin=0, vmax=3)
+
+    # índice de estado en cada casilla transitable
+    for f in range(env.filas):
+        for c in range(env.cols):
+            if env.mapa[f, c] == 1:
+                continue
+            s = f * env.cols + c
+            ax.text(c, f - 0.26, str(s), ha="center", va="center",
+                    fontsize=8, color="#64748b")
+    ax.text(env.inicio[1], env.inicio[0] + 0.12, "S", ha="center",
+            va="center", fontsize=16, color="white", fontweight="bold")
+    ax.text(env.meta[1], env.meta[0] + 0.12, "G", ha="center",
+            va="center", fontsize=16, color="white", fontweight="bold")
+
+    # rejilla blanca entre casillas
+    ax.set_xticks(np.arange(-0.5, env.cols, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, env.filas, 1), minor=True)
+    ax.grid(which="minor", color="white", linewidth=2)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+    titulo = "GridWorld 5x5 como MDP"
+    if retorno_medio is not None:
+        titulo += f"  —  retorno medio ≈ {retorno_medio:.1f}"
+    ax.set_title(titulo, fontsize=11)
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    env = GridWorld(slip=0.1, seed=0)
+    rng = np.random.default_rng(0)   # semilla fija: resultados reproducibles
+
+    print("=== Una trayectoria bajo política aleatoria pi(a|s) uniforme ===")
+    muestrear_trayectoria(env, rng, max_pasos=30)
+
+    print("\n=== Retorno medio por Monte Carlo (política aleatoria) ===")
+    retornos = estimar_retorno(env, rng, gamma=0.95, episodios=300, max_pasos=200)
+    print(f"gamma = 0.95   episodios = {len(retornos)}")
+    print(f"Retorno medio G_0 ≈ {retornos.mean():.2f}"
+          f"   (desviación {retornos.std():.2f})")
+
+    dibujar_mapa(env, retorno_medio=retornos.mean())
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong>. En la trayectoria verás que la política aleatoria
+          vaga sin rumbo: a veces se queda pegada a un muro (la acción no la deja avanzar y el
+          estado no cambia) y de vez en cuando el resbalón la manda a una casilla inesperada. Como
+          cada paso cuesta $-1$ y tarda mucho en llegar, el <strong>retorno medio es marcadamente
+          negativo</strong>. Ese número es una medida de lo mala que es esta política: en los
+          próximos capítulos aprenderemos a hacerlo mucho mejor.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Cambia <code>slip=0.1</code> a <code>slip=0.0</code> (suelo sin resbalones) y vuelve a
+            ejecutar: la dinámica se vuelve <strong>determinista</strong>, es decir,
+            $p(s' \mid s, a) \in \{0, 1\}$. Prueba también a subir $\gamma$ a $0{,}99$: al valorar
+            más el futuro, el retorno se hace aún más negativo, porque el castigo de cada paso
+            perdido pesa casi como si no se descontara.
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          Como todo el manual, el ejemplo también corre fuera del navegador. Descárgalo con «Descargar
+          .py» (o cópialo) y lánzalo así. Al final se abrirá una ventana con el mapa del GridWorld.
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) ejecuta el ejemplo</span>
+<span class="prompt">$</span> python code/03-mdp/mdp_gridworld.py
+<span class="comment">=== Una trayectoria bajo política aleatoria pi(a|s) uniforme ===
+t=0  s=0  a=O r= -1  ->  s'=0
+...
+=== Retorno medio por Monte Carlo (política aleatoria) ===
+gamma = 0.95   episodios = 300
+Retorno medio G_0 ≈ -18.28   (desviación 3.25)</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Los ejemplos «en el navegador» usan <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>
+          (Python compilado a WebAssembly) y necesitan conexión la primera vez. Este capítulo solo
+          usa <code>numpy</code> y <code>matplotlib</code>, así que corre entero en el navegador.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>Un <strong>estado</strong> introduce la idea de «dónde estoy»: la mejor acción depende de él (a diferencia del bandido, de un solo estado).</li>
+            <li>La <strong>propiedad de Markov</strong> dice que «el presente resume el pasado»: el futuro depende solo de $S_t$ y $A_t$, no de todo el historial.</li>
+            <li>Un <strong>MDP</strong> es la tupla $(\mathcal{S}, \mathcal{A}, P, R, \gamma)$. Su núcleo es la dinámica $p(s', r \mid s, a)$, de la que se derivan $p(s' \mid s, a)$ y $r(s, a)$.</li>
+            <li>Una <strong>política</strong> $\pi(a \mid s)$ describe cómo decide el agente; puede ser estocástica o determinista.</li>
+            <li>El <strong>retorno</strong> $G_t = \sum_{k} \gamma^k R_{t+k+1}$ es lo que se maximiza; el descuento $\gamma &lt; 1$ lo mantiene finito en tareas continuas y cumple $G_t = R_{t+1} + \gamma\,G_{t+1}$.</li>
+          </ul>
+        </div>
+
+        <p>
+          Ya sabemos <em>describir</em> el problema. Pero aún no sabemos decir qué estados son
+          «buenos» ni cómo comparar políticas de forma sistemática. En el
+          <a href="04-retornos-y-valor.html">capítulo 4</a> definiremos el <strong>valor</strong> de
+          un estado y de un par estado–acción —las funciones $V$ y $Q$— y convertiremos la recursión
+          $G_t = R_{t+1} + \gamma\,G_{t+1}$ en las célebres <strong>ecuaciones de Bellman</strong>.
+          Ahí empezará de verdad la maquinaria del RL.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

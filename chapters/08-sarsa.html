@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>8. SARSA: control TD on-policy · Manual de RL</title>
+  <meta name="description" content="SARSA, el primer algoritmo de control por diferencias temporales: on-policy, epsilon-greedy y el ejemplo del acantilado (Cliff Walking) en Python ejecutable." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="8">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 1 · Capítulo 8</span>
+        <h1>SARSA: control TD on-policy</h1>
+        <p class="lead">
+          En el <a href="07-td-aprendizaje.html">capítulo 7</a> aprendimos a <strong>predecir</strong>
+          el valor de una política dada, paso a paso, con TD(0). Pero predecir no es el objetivo final:
+          queremos <strong>controlar</strong>, es decir, <strong>encontrar</strong> una buena política.
+          SARSA es el primer algoritmo que lo consigue combinando TD con la mejora de política. Su
+          rasgo distintivo es que es <strong>on-policy</strong>: aprende el valor de la política que
+          <em>de verdad</em> está siguiendo, exploración incluida. Eso lo vuelve prudente, como veremos
+          al asomarnos a un acantilado.
+        </p>
+
+        <h2 id="de-predecir-a-controlar">De predecir a controlar</h2>
+        <p>
+          Recordemos el bucle de la mejora de política generalizada (GPI) que ya vimos en
+          <a href="05-programacion-dinamica.html">programación dinámica</a>: alternar entre
+          <strong>evaluar</strong> una política (calcular su valor) y <strong>mejorarla</strong>
+          (actuar de forma más codiciosa respecto a ese valor). TD(0) nos dio una forma barata de
+          evaluar sin modelo. Ahora cerramos el círculo para <em>controlar</em>.
+        </p>
+        <p>
+          Hay un detalle crucial. En el capítulo anterior estimábamos la función de valor de estado
+          $V(s)$. Pero para <strong>decidir</strong> qué hacer sin conocer la dinámica del entorno,
+          $V(s)$ no basta: nos diría cómo de bueno es un estado, pero no qué acción tomar para llegar
+          a los buenos. Necesitamos la función de <strong>valor de acción</strong> $Q(s, a)$, que
+          estima el retorno esperado de tomar la acción $a$ en el estado $s$ y luego seguir la política.
+          Con $Q$ a mano, elegir es directo: mira las acciones disponibles y quédate (casi siempre) con
+          la de mayor valor.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            El nombre <strong>SARSA</strong> es un acrónimo de los cinco ingredientes que usa cada
+            actualización: el estado actual $S$, la acción $A$, la recompensa $R$, el estado siguiente
+            $S'$ y —esto es lo característico— la acción siguiente $A'$ que el agente <em>realmente va
+            a tomar</em>. Esa quíntupla $(S, A, R, S', A')$ le da nombre y, a la vez, define su
+            personalidad: como mira la acción que de verdad ejecutará (que a veces es exploratoria y
+            «mala»), SARSA aprende el valor de <em>convivir con la exploración</em>.
+          </p>
+        </div>
+
+        <h2 id="la-actualizacion">La actualización SARSA</h2>
+        <p>
+          En TD(0) actualizábamos $V(S_t)$ hacia un objetivo formado por la recompensa inmediata más el
+          valor estimado del estado siguiente. SARSA hace exactamente lo mismo, pero sobre valores de
+          acción: sustituye $V(S_{t+1})$ por $Q(S_{t+1}, A_{t+1})$, donde $A_{t+1}$ es la acción que el
+          agente elige a continuación siguiendo su propia política.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Regla de actualización de SARSA</div>
+          <p>$$Q(S_t, A_t) \leftarrow Q(S_t, A_t) + \alpha\,\big[\,\underbrace{R_{t+1} + \gamma\,Q(S_{t+1}, A_{t+1})}_{\text{objetivo TD}} - Q(S_t, A_t)\,\big]$$</p>
+          <p class="math-note">
+            Donde: $Q(s, a)$ es el valor estimado de tomar la acción $a$ en el estado $s$;
+            $\alpha \in (0, 1]$ es la <strong>tasa de aprendizaje</strong> (cuánto corregimos en cada
+            paso); $R_{t+1}$ es la recompensa recibida; $\gamma \in [0, 1]$ es el <strong>factor de
+            descuento</strong>; y $A_{t+1}$ es la acción <em>elegida realmente</em> en $S_{t+1}$ por la
+            política del agente. La cantidad entre corchetes es el <strong>error TD</strong>
+            $\delta_t = R_{t+1} + \gamma\,Q(S_{t+1}, A_{t+1}) - Q(S_t, A_t)$: la diferencia entre lo que
+            esperábamos y una estimación algo mejor. Si es positivo, esa acción resultó mejor de lo
+            previsto y subimos su valor; si es negativo, lo bajamos.
+          </p>
+        </div>
+
+        <p>
+          Observa el <em>bootstrapping</em> heredado de TD: el objetivo usa nuestra propia estimación
+          $Q(S_{t+1}, A_{t+1})$ en lugar de esperar al retorno real del episodio (como haría
+          <a href="06-monte-carlo.html">Monte Carlo</a>). Por eso SARSA aprende <strong>en cada
+          paso</strong>, sin necesidad de que el episodio termine. Y si $S_{t+1}$ es terminal, no hay
+          futuro que arrastrar: tomamos $Q(S_{t+1}, \cdot) = 0$ y el objetivo se reduce a $R_{t+1}$.
+        </p>
+
+        <h2 id="epsilon-greedy">La política: $\varepsilon$-greedy sobre $Q$</h2>
+        <p>
+          ¿De dónde sale la política que elige $A_t$ y $A_{t+1}$? De la propia $Q$. La opción natural
+          sería ser <em>codicioso</em> (greedy): tomar siempre la acción de mayor valor. Pero eso mataría
+          la exploración —nunca probaríamos acciones que <em>parecen</em> malas pero podrían ser buenas—
+          y nos quedaríamos atrapados en estimaciones erróneas. La solución, que ya conoces del
+          <a href="02-bandido-multibrazo.html">bandido</a>, es la política
+          <strong>$\varepsilon$-greedy</strong>: casi siempre explotamos, y con probabilidad
+          $\varepsilon$ exploramos al azar.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Política $\varepsilon$-greedy derivada de $Q$</div>
+          <p>$$\pi(a \mid s) = \begin{cases} 1 - \varepsilon + \dfrac{\varepsilon}{|\mathcal{A}|} & \text{si } a = \arg\max_{a'} Q(s, a') \\[1.2em] \dfrac{\varepsilon}{|\mathcal{A}|} & \text{en otro caso} \end{cases}$$</p>
+          <p class="math-note">
+            Aquí $|\mathcal{A}|$ es el número de acciones disponibles y $\varepsilon \in [0, 1]$
+            controla cuánto exploramos. Con probabilidad $1 - \varepsilon$ elegimos la acción codiciosa
+            $\arg\max_{a'} Q(s, a')$; con probabilidad $\varepsilon$ elegimos una acción uniformemente
+            al azar (y por eso la acción codiciosa recibe un extra de $\varepsilon/|\mathcal{A}|$: también
+            puede salir en el sorteo aleatorio). Con $\varepsilon = 0$ recuperamos la política codiciosa
+            pura; valores como $\varepsilon = 0{,}1$ son habituales.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 On-policy: aprende lo que hace</div>
+          <p>
+            SARSA es <strong>on-policy</strong>: la política que usa para <em>comportarse</em> (elegir
+            $A_t$) es la misma que <em>evalúa y mejora</em>. Como esa política incluye exploración
+            $\varepsilon$-greedy, SARSA aprende el valor de una conducta que <em>a veces se equivoca a
+            propósito</em>. Consecuencia: si una acción es óptima en teoría pero peligrosa cuando la
+            exploración te empuja fuera de rumbo, SARSA lo tendrá en cuenta y aprenderá algo más
+            <strong>prudente</strong>. En el <a href="09-q-learning.html">capítulo 9</a> veremos su
+            contrapartida <em>off-policy</em>, Q-learning, que ignora ese riesgo.
+          </p>
+        </div>
+
+        <h2 id="algoritmo">El algoritmo, paso a paso</h2>
+        <p>
+          Juntando las piezas, SARSA es sorprendentemente compacto. Fíjate en que elegimos la
+          <strong>siguiente</strong> acción <em>antes</em> de actualizar: necesitamos $A_{t+1}$ para
+          construir el objetivo TD.
+        </p>
+        <ol>
+          <li>Inicializa $Q(s, a)$ de forma arbitraria (por ejemplo, todo a cero) para todo $s, a$.</li>
+          <li>Para cada episodio:
+            <ul>
+              <li>Observa el estado inicial $S$ y elige $A$ con $\varepsilon$-greedy sobre $Q$.</li>
+              <li>Repite en cada paso, hasta que $S$ sea terminal:
+                <ul>
+                  <li>Ejecuta $A$; observa la recompensa $R$ y el estado siguiente $S'$.</li>
+                  <li>Elige $A'$ en $S'$ con $\varepsilon$-greedy sobre $Q$.</li>
+                  <li>Actualiza $Q(S, A) \leftarrow Q(S, A) + \alpha\,[R + \gamma\,Q(S', A') - Q(S, A)]$.</li>
+                  <li>Avanza: $S \leftarrow S'$, $\;A \leftarrow A'$.</li>
+                </ul>
+              </li>
+            </ul>
+          </li>
+        </ol>
+        <p>
+          A medida que $Q$ mejora, la política $\varepsilon$-greedy derivada de ella también mejora:
+          es la GPI en acción, un paso de TD cada vez. Con el tiempo suele reducirse $\varepsilon$ para
+          converger hacia una política casi codiciosa.
+        </p>
+
+        <h2 id="expected-sarsa">Una variante: Expected SARSA</h2>
+        <p>
+          En SARSA, el objetivo depende de <em>una muestra</em> concreta de la acción siguiente,
+          $A_{t+1}$. Como esa acción se sortea, introduce ruido: dos pasos idénticos pueden dar objetivos
+          distintos solo porque la moneda de la exploración cayó de otra forma. <strong>Expected
+          SARSA</strong> elimina esa varianza extra sustituyendo la muestra por su <em>esperanza</em>
+          bajo la política: en vez de usar $Q(S_{t+1}, A_{t+1})$ para una $A_{t+1}$ aleatoria, promedia
+          sobre todas las acciones ponderando por su probabilidad.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Actualización de Expected SARSA</div>
+          <p>$$Q(S_t, A_t) \leftarrow Q(S_t, A_t) + \alpha\,\Big[\,R_{t+1} + \gamma \sum_{a} \pi(a \mid S_{t+1})\,Q(S_{t+1}, a) - Q(S_t, A_t)\,\Big]$$</p>
+          <p class="math-note">
+            El término $\sum_{a} \pi(a \mid S_{t+1})\,Q(S_{t+1}, a)$ es exactamente la esperanza
+            $\mathbb{E}_{a \sim \pi}\big[Q(S_{t+1}, a)\big]$ sobre la política $\pi$ (aquí,
+            $\varepsilon$-greedy). Al usar el valor esperado en lugar de una muestra, el objetivo tiene
+            <strong>menor varianza</strong>, lo que suele traducirse en un aprendizaje más estable y a
+            veces permite tasas $\alpha$ mayores. El coste es un poco más de cálculo por paso (recorrer
+            todas las acciones). Curiosidad: si la política objetivo fuese la codiciosa, Expected SARSA
+            coincidiría con Q-learning; ese puente lo cruzaremos en el próximo capítulo.
+          </p>
+        </div>
+
+        <h2 id="acantilado">El acantilado (Cliff Walking)</h2>
+        <p>
+          El ejemplo clásico para <em>ver</em> el carácter on-policy de SARSA es el <strong>acantilado</strong>
+          de Sutton y Barto. Imagina una rejilla de 4 filas por 12 columnas. Sales de la esquina
+          inferior izquierda (<strong>S</strong>) y quieres llegar a la inferior derecha
+          (<strong>G</strong>). Toda la fila de abajo entre ambas es un <strong>acantilado</strong>: si
+          pisas ahí, recibes un castigo de $-100$ y vuelves a la salida. Cada paso normal cuesta $-1$
+          (para animarte a llegar rápido).
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="0 0 540 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Rejilla del acantilado con dos caminos: el prudente de SARSA y el arriesgado óptimo">
+            <defs>
+              <marker id="arrowSafe" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" fill="#4f46e5" />
+              </marker>
+              <marker id="arrowRisk" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" fill="#d97706" />
+              </marker>
+            </defs>
+            <!-- Celdas especiales -->
+            <rect x="78" y="134" width="380" height="38" fill="#fca5a5" opacity="0.7" />
+            <rect x="40" y="134" width="38" height="38" fill="#86efac" />
+            <rect x="458" y="134" width="38" height="38" fill="#93c5fd" />
+            <!-- Líneas de la rejilla -->
+            <g stroke="#cbd5e0" stroke-width="1">
+              <line x1="40" y1="20" x2="496" y2="20" /><line x1="40" y1="58" x2="496" y2="58" />
+              <line x1="40" y1="96" x2="496" y2="96" /><line x1="40" y1="134" x2="496" y2="134" />
+              <line x1="40" y1="172" x2="496" y2="172" />
+              <line x1="40" y1="20" x2="40" y2="172" /><line x1="78" y1="20" x2="78" y2="172" />
+              <line x1="116" y1="20" x2="116" y2="172" /><line x1="154" y1="20" x2="154" y2="172" />
+              <line x1="192" y1="20" x2="192" y2="172" /><line x1="230" y1="20" x2="230" y2="172" />
+              <line x1="268" y1="20" x2="268" y2="172" /><line x1="306" y1="20" x2="306" y2="172" />
+              <line x1="344" y1="20" x2="344" y2="172" /><line x1="382" y1="20" x2="382" y2="172" />
+              <line x1="420" y1="20" x2="420" y2="172" /><line x1="458" y1="20" x2="458" y2="172" />
+              <line x1="496" y1="20" x2="496" y2="172" />
+            </g>
+            <!-- Camino prudente (SARSA) -->
+            <polyline points="59,153 59,39 477,39 477,153" fill="none" stroke="#4f46e5" stroke-width="3" stroke-linejoin="round" marker-end="url(#arrowSafe)" />
+            <!-- Camino arriesgado (óptimo) -->
+            <polyline points="63,153 63,115 473,115 473,153" fill="none" stroke="#d97706" stroke-width="3" stroke-dasharray="6 4" stroke-linejoin="round" marker-end="url(#arrowRisk)" />
+            <!-- Etiquetas -->
+            <text x="59" y="159" text-anchor="middle" font-size="18" font-weight="700" font-family="sans-serif" fill="#166534">S</text>
+            <text x="477" y="159" text-anchor="middle" font-size="18" font-weight="700" font-family="sans-serif" fill="#1e40af">G</text>
+            <text x="268" y="158" text-anchor="middle" font-size="13" font-family="sans-serif" fill="#7f1d1d">Acantilado (−100)</text>
+            <text x="150" y="210" font-size="13" font-family="sans-serif" fill="#4f46e5">■ camino prudente (SARSA)</text>
+            <text x="150" y="232" font-size="13" font-family="sans-serif" fill="#d97706">▦ camino óptimo, pero al borde (Q-learning)</text>
+          </svg>
+          <figcaption>
+            El óptimo <em>en teoría</em> pega al acantilado (naranja, discontinuo): es el camino más
+            corto. SARSA, que sabe que a veces explorará al azar, prefiere alejarse del borde (azul):
+            un paso exploratorio junto al acantilado sería catastrófico.
+          </figcaption>
+        </figure>
+
+        <p>
+          ¿Por qué SARSA elige el camino largo? Porque evalúa la política que <em>de verdad</em> ejecuta,
+          con su $\varepsilon$ de exploración. Junto al borde, la política $\varepsilon$-greedy tiene una
+          probabilidad no nula de dar un paso al azar hacia el vacío y comerse el $-100$. SARSA
+          <em>internaliza</em> ese riesgo en los valores $Q$ de las casillas cercanas al acantilado y
+          aprende a rodearlo. Es literalmente miedo a caerse mientras exploras.
+        </p>
+
+        <h2 id="ejemplo">SARSA en Python, sobre el acantilado</h2>
+        <p>
+          Vamos a implementar el entorno a mano con numpy (sin librerías de RL) y entrenar SARSA durante
+          500 episodios. Al final dibujaremos dos cosas: la <strong>recompensa por episodio</strong>
+          (suavizada, para ver cómo mejora) y la <strong>política aprendida</strong> como flechas sobre
+          la rejilla. Este mismo entorno <code>CliffWalking</code> lo reutilizaremos en el capítulo 9
+          para comparar con Q-learning.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">sarsa_cliff.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+SARSA on-policy sobre el entorno Cliff Walking (el acantilado).
+
+Implementa a mano, con solo numpy, el clasico entorno "Cliff Walking" de
+Sutton &amp; Barto y entrena un agente con SARSA (control por diferencias
+temporales on-policy). La actualizacion usa la quintupla (S, A, R, S', A'),
+de donde viene el nombre del algoritmo.
+
+Al terminar imprime la recompensa media de los ultimos episodios y la
+politica aprendida, y muestra dos graficas: la recompensa por episodio
+(suavizada con una media movil) y la politica greedy dibujada como flechas
+sobre la rejilla. Se ve que SARSA aprende un camino "prudente" que rodea el
+acantilado, alejandose del borde para no caerse durante la exploracion.
+
+Como ejecutarlo:
+    pip install -r requirements.txt
+    python code/08-sarsa/sarsa_cliff.py
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+class CliffWalking:
+    """Entorno del acantilado: rejilla de 4 filas x 12 columnas.
+
+    La salida esta abajo a la izquierda y la meta abajo a la derecha. Toda la
+    fila inferior entre ambas es un acantilado: caer en el da -100 y te
+    devuelve a la salida. Cada paso normal cuesta -1. El episodio termina
+    solo al alcanzar la meta.
+
+    Acciones: 0=arriba, 1=derecha, 2=abajo, 3=izquierda.
+    """
+
+    def __init__(self):
+        self.filas = 4
+        self.columnas = 12
+        self.n_estados = self.filas * self.columnas
+        self.n_acciones = 4
+        self.inicio = (3, 0)
+        self.meta = (3, 11)
+        self.pos = self.inicio
+
+    def es_acantilado(self, fila, col):
+        return fila == 3 and 1 &lt;= col &lt;= 10
+
+    def id_estado(self, fila, col):
+        return fila * self.columnas + col
+
+    def reset(self):
+        self.pos = self.inicio
+        return self.id_estado(*self.pos)
+
+    def step(self, accion):
+        """Aplica una accion y devuelve (estado_siguiente, recompensa, fin)."""
+        fila, col = self.pos
+        if accion == 0:      # arriba
+            fila = max(fila - 1, 0)
+        elif accion == 1:    # derecha
+            col = min(col + 1, self.columnas - 1)
+        elif accion == 2:    # abajo
+            fila = min(fila + 1, self.filas - 1)
+        elif accion == 3:    # izquierda
+            col = max(col - 1, 0)
+
+        if self.es_acantilado(fila, col):
+            self.pos = self.inicio
+            return self.id_estado(*self.pos), -100.0, False
+        self.pos = (fila, col)
+        if self.pos == self.meta:
+            return self.id_estado(*self.pos), -1.0, True
+        return self.id_estado(*self.pos), -1.0, False
+
+
+def epsilon_greedy(Q, estado, epsilon, rng):
+    """Elige una accion epsilon-greedy con desempate aleatorio."""
+    if rng.random() &lt; epsilon:
+        return int(rng.integers(Q.shape[1]))
+    valores = Q[estado]
+    optimas = np.flatnonzero(valores == valores.max())
+    return int(rng.choice(optimas))
+
+
+def entrenar_sarsa(env, n_episodios=500, alpha=0.5, gamma=1.0,
+                   epsilon=0.1, max_pasos=1000, semilla=0):
+    """Entrena SARSA y devuelve (Q, recompensas_por_episodio)."""
+    rng = np.random.default_rng(semilla)
+    Q = np.zeros((env.n_estados, env.n_acciones))
+    recompensas = np.zeros(n_episodios)
+
+    for ep in range(n_episodios):
+        s = env.reset()
+        a = epsilon_greedy(Q, s, epsilon, rng)
+        total = 0.0
+        for _ in range(max_pasos):
+            s_sig, r, fin = env.step(a)
+            a_sig = epsilon_greedy(Q, s_sig, epsilon, rng)
+            # Actualizacion SARSA con la quintupla (s, a, r, s', a').
+            # Si el estado es terminal, no arrastramos valor futuro.
+            objetivo = r + gamma * Q[s_sig, a_sig] * (0.0 if fin else 1.0)
+            Q[s, a] += alpha * (objetivo - Q[s, a])
+            s, a = s_sig, a_sig
+            total += r
+            if fin:
+                break
+        recompensas[ep] = total
+    return Q, recompensas
+
+
+def media_movil(x, k=10):
+    """Media movil trailing (promedio de las ultimas k muestras)."""
+    if len(x) &lt; k:
+        return x.copy()
+    return np.convolve(x, np.ones(k) / k, mode="valid")
+
+
+def dibujar(env, Q, recompensas, k=10):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.2))
+
+    # --- Recompensa por episodio (suavizada) ---
+    suave = media_movil(recompensas, k=k)
+    ax1.plot(recompensas, color="#c7d2fe", lw=1, label="por episodio")
+    ax1.plot(np.arange(len(suave)) + (k - 1), suave, color="#4f46e5", lw=2,
+             label=f"media movil ({k})")
+    ax1.set_xlabel("Episodio")
+    ax1.set_ylabel("Recompensa total")
+    ax1.set_title("Aprendizaje de SARSA en Cliff Walking")
+    ax1.set_ylim(-200, 0)
+    ax1.legend(loc="lower right")
+    ax1.grid(alpha=0.3)
+
+    # --- Politica greedy aprendida ---
+    flechas = {0: "↑", 1: "→", 2: "↓", 3: "←"}
+    ax2.set_xlim(-0.5, env.columnas - 0.5)
+    ax2.set_ylim(-0.5, env.filas - 0.5)
+    ax2.set_xticks(range(env.columnas))
+    ax2.set_yticks(range(env.filas))
+    ax2.invert_yaxis()
+    ax2.set_title("Politica aprendida (greedy)")
+    ax2.grid(True, color="#cbd5e0")
+
+    for fila in range(env.filas):
+        for col in range(env.columnas):
+            centro = (col, fila)
+            if env.es_acantilado(fila, col):
+                ax2.add_patch(plt.Rectangle((col - 0.5, fila - 0.5), 1, 1,
+                                            color="#fca5a5"))
+            elif (fila, col) == env.inicio:
+                ax2.add_patch(plt.Rectangle((col - 0.5, fila - 0.5), 1, 1,
+                                            color="#86efac"))
+                ax2.text(*centro, "S", ha="center", va="center", weight="bold")
+            elif (fila, col) == env.meta:
+                ax2.add_patch(plt.Rectangle((col - 0.5, fila - 0.5), 1, 1,
+                                            color="#93c5fd"))
+                ax2.text(*centro, "G", ha="center", va="center", weight="bold")
+            else:
+                a = int(np.argmax(Q[env.id_estado(fila, col)]))
+                ax2.text(*centro, flechas[a], ha="center", va="center",
+                         fontsize=16, color="#4f46e5")
+
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    env = CliffWalking()
+    Q, recompensas = entrenar_sarsa(env, n_episodios=500, semilla=0)
+
+    print(f"Recompensa media (ultimos 50 episodios): "
+          f"{recompensas[-50:].mean():.1f}")
+    print("Politica greedy (0=arriba 1=derecha 2=abajo 3=izquierda):")
+    politica = np.argmax(Q, axis=1).reshape(env.filas, env.columnas)
+    print(politica)
+
+    dibujar(env, Q, recompensas)
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong> (la primera vez tarda unos segundos en descargar Python y
+          numpy/matplotlib). En la gráfica de la izquierda verás cómo la recompensa por episodio arranca
+          muy negativa —al principio el agente cae al acantilado sin parar— y sube deprisa hasta
+          estabilizarse en valores mucho menos negativos (en torno a $-20$ o $-30$, con algún bache
+          cuando la exploración empuja al vacío). A la derecha, las flechas revelan la política: sale
+          de <strong>S</strong> hacia arriba, cruza por las filas superiores lejos del borde y baja hasta
+          <strong>G</strong>. Es el camino prudente que anticipábamos.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Cambia $\varepsilon$ (parámetro <code>epsilon</code>) a un valor mayor, como $0{,}3$, y
+            vuelve a ejecutar. Con más exploración, SARSA se vuelve <em>aún más</em> conservador: se aleja
+            todavía más del acantilado, porque el riesgo de un paso aleatorio fatal es mayor. Y si pones
+            $\varepsilon$ muy pequeño (por ejemplo $0{,}01$), la política aprendida se pegará más al
+            borde, acercándose al camino óptimo. Esa sensibilidad a la exploración es la firma del
+            aprendizaje on-policy.
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          Como todos los ejemplos del manual, este también corre fuera del navegador. Descarga el archivo
+          con «Descargar .py» (o cópialo) y ejecútalo así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) ejecuta el ejemplo</span>
+<span class="prompt">$</span> python code/08-sarsa/sarsa_cliff.py
+<span class="comment">Recompensa media (ultimos 50 episodios): -28.8
+Politica greedy (0=arriba 1=derecha 2=abajo 3=izquierda):
+[[1 1 1 1 1 1 1 1 1 1 2 2]
+ [0 0 0 1 0 0 1 1 0 0 1 2]
+ [0 0 0 1 0 3 3 0 0 1 1 2]
+ [0 0 0 0 0 0 0 0 0 0 0 0]]</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Este ejemplo funciona en el navegador gracias a
+          <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a> porque solo usa
+          numpy y matplotlib. Los valores exactos que veas dependen de la versión de numpy, pero el
+          <em>comportamiento</em> —subir hacia el óptimo y aprender el camino prudente— será siempre el
+          mismo con la semilla fijada.
+        </p>
+
+        <h2 id="sarsa-vs-q">Lo que viene: SARSA frente a Q-learning</h2>
+        <p>
+          SARSA aprende el valor de <em>su</em> política, la que realmente sigue. Eso tiene una
+          consecuencia importante y a veces sorprendente: mientras siga explorando, no aprenderá la
+          política <strong>óptima</strong>, sino la mejor política <em>que convive con la exploración</em>.
+          En el acantilado eso es una virtud (evita caerse); en otros problemas puede ser una limitación.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Aspecto</th><th>SARSA (cap. 8)</th><th>Q-learning (cap. 9)</th></tr></thead>
+            <tbody>
+              <tr><td>Tipo</td><td>On-policy</td><td>Off-policy</td></tr>
+              <tr><td>Acción siguiente en el objetivo</td><td>$A_{t+1}$ real (muestreada)</td><td>$\arg\max_a Q(S_{t+1}, a)$</td></tr>
+              <tr><td>Qué política aprende</td><td>La que sigue (con exploración)</td><td>La óptima, aunque explore</td></tr>
+              <tr><td>En el acantilado</td><td>Rodea, camino prudente</td><td>Al borde, camino óptimo</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          El único cambio real será una palabra en el objetivo TD: donde SARSA pone $Q(S_{t+1}, A_{t+1})$,
+          Q-learning pondrá $\max_a Q(S_{t+1}, a)$. Un detalle mínimo con una consecuencia enorme. Lo
+          desarrollamos en el <a href="09-q-learning.html">capítulo 9</a>.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>Para <strong>controlar</strong> sin modelo necesitamos valores de acción $Q(s, a)$, no solo $V(s)$.</li>
+            <li>SARSA actualiza $Q(S_t, A_t)$ hacia $R_{t+1} + \gamma\,Q(S_{t+1}, A_{t+1})$ usando la quíntupla $(S, A, R, S', A')$.</li>
+            <li>Es <strong>on-policy</strong>: evalúa y mejora la misma política $\varepsilon$-greedy que usa para actuar, exploración incluida.</li>
+            <li>Por eso aprende conductas <strong>prudentes</strong>: en el acantilado, rodea el borde para no caerse al explorar.</li>
+            <li><strong>Expected SARSA</strong> reemplaza la acción muestreada por su esperanza bajo $\pi$, reduciendo la varianza del objetivo.</li>
+          </ul>
+        </div>
+
+        <p>
+          En el siguiente capítulo damos el salto a <strong>off-policy</strong> con Q-learning: aprender
+          la política óptima <em>aunque</em> sigas una política exploratoria distinta. Es, probablemente,
+          el algoritmo de RL tabular más famoso de todos.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

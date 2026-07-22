@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>6. Métodos de Monte Carlo · Manual de RL</title>
+  <meta name="description" content="Aprender valores y políticas sin modelo, promediando los retornos de episodios completos: MC de primera visita, control ε-greedy y muestreo por importancia, con un ejemplo ejecutable en Python." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="6">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 1 · Capítulo 6</span>
+        <h1>Métodos de Monte Carlo</h1>
+        <p class="lead">
+          En el <a href="05-programacion-dinamica.html">capítulo anterior</a> planificábamos con el
+          <strong>modelo</strong> del entorno en la mano: sabíamos las probabilidades de transición
+          $p(s',r\mid s,a)$ y podíamos calcular los valores exactos. Pero en el mundo real casi nunca
+          conocemos ese modelo. Los <strong>métodos de Monte Carlo</strong> dan el primer gran salto:
+          aprenden valores y políticas <strong>sin modelo</strong>, simplemente <em>jugando partidas
+          enteras</em> y <strong>promediando lo que ocurre</strong>.
+        </p>
+
+        <h2 id="la-idea">La idea: aprender jugando partidas enteras</h2>
+        <p>
+          Imagina que quieres saber cómo de buena es una casilla concreta de un juego de mesa, pero
+          nadie te ha dado las reglas exactas de los dados. No puedes calcularlo… pero <em>sí</em>
+          puedes jugar. Juegas cien partidas que pasan por esa casilla, apuntas cuántos puntos acabas
+          sacando en cada una, y haces la media. Esa media <strong>es</strong> tu estimación del valor
+          de la casilla. Cuantas más partidas juegues, mejor será la estimación.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            «Monte Carlo» es el nombre que la física y las matemáticas dan a <em>estimar algo
+            promediando muchas muestras aleatorias</em> (por el casino de Mónaco). Aquí las muestras
+            son <strong>episodios completos</strong> de experiencia. No necesitamos saber cómo funciona
+            el mundo por dentro: nos basta con vivirlo de principio a fin muchas veces y quedarnos con
+            el promedio de lo que hemos ganado.
+          </p>
+        </div>
+
+        <p>
+          Esto tiene una consecuencia importante: Monte Carlo necesita <strong>tareas episódicas</strong>,
+          es decir, que tengan un final. Para promediar el <em>retorno</em> de un episodio hay que
+          esperar a que el episodio <strong>termine</strong>. Un juego que nunca acaba no nos deja
+          calcular nunca un retorno completo. Recuérdalo, porque es justo la limitación que el
+          <a href="07-td-aprendizaje.html">capítulo 7</a> vendrá a resolver.
+        </p>
+
+        <h2 id="estimar-v">Estimar $V^\pi$ promediando retornos</h2>
+        <p>
+          Recuperemos dos definiciones del <a href="04-retornos-y-valor.html">capítulo 4</a>. El
+          <strong>retorno</strong> desde el instante $t$ es la suma descontada de recompensas futuras
+          hasta el final del episodio (en el paso $T$):
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Retorno de un episodio</div>
+          <p>$$G_t = R_{t+1} + \gamma R_{t+2} + \cdots + \gamma^{T-t-1} R_T = \sum_{k=0}^{T-t-1} \gamma^{k}\, R_{t+k+1}$$</p>
+          <p class="math-note">
+            Donde $R_{t+1}, R_{t+2}, \dots$ son las recompensas que el agente recibe tras cada acción,
+            $\gamma \in [0,1]$ es el factor de descuento (cuánto pesa el futuro) y $T$ es el instante en
+            que el episodio termina. $G_t$ es un <strong>número</strong> concreto que solo conocemos una
+            vez el episodio ha acabado.
+          </p>
+        </div>
+
+        <p>
+          La <strong>función de valor</strong> de un estado $s$ bajo la política $\pi$ es, por
+          definición, el retorno que <em>esperamos</em> obtener partiendo de $s$ y actuando según $\pi$:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Lo que queremos estimar</div>
+          <p>$$V^\pi(s) = \mathbb{E}_\pi\!\left[\, G_t \mid S_t = s \,\right]$$</p>
+          <p class="math-note">
+            $\mathbb{E}_\pi[\cdot]$ es el valor esperado (la media teórica) cuando el agente sigue la
+            política $\pi$. Es una media sobre <em>todos</em> los futuros posibles, ponderados por su
+            probabilidad. En programación dinámica la calculábamos con el modelo; ahora no lo tenemos.
+          </p>
+        </div>
+
+        <p>
+          Aquí está el truco de Monte Carlo: si $V^\pi(s)$ es una <strong>media teórica</strong> de
+          retornos, la <strong>ley de los grandes números</strong> nos dice que podemos aproximarla con
+          la <strong>media empírica</strong> de los retornos que realmente observamos. Recogemos muchos
+          episodios, miramos qué retorno siguió a cada visita del estado $s$, y promediamos:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Estimación de Monte Carlo</div>
+          <p>$$V(s) = \frac{1}{N(s)} \sum_{i=1}^{N(s)} G^{(i)}(s) \;\xrightarrow[N(s)\to\infty]{}\; V^\pi(s)$$</p>
+          <p class="math-note">
+            $N(s)$ es el número de retornos que hemos recogido para el estado $s$ y $G^{(i)}(s)$ es el
+            $i$-ésimo de esos retornos. A medida que $N(s)$ crece, la media empírica converge al valor
+            verdadero. Nada de probabilidades de transición: solo experiencia promediada.
+          </p>
+        </div>
+
+        <h3>La misma media, pero online</h3>
+        <p>
+          Guardar todos los retornos para promediarlos al final es innecesario. La media se puede
+          actualizar <strong>incrementalmente</strong> tras cada nuevo retorno $G$, lo que además nos
+          prepara para el estilo de aprendizaje del resto del manual:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Media incremental</div>
+          <p>$$N(s) \leftarrow N(s) + 1, \qquad V(s) \leftarrow V(s) + \frac{1}{N(s)}\bigl(G - V(s)\bigr)$$</p>
+          <p class="math-note">
+            El término $G - V(s)$ es el <strong>error</strong>: cuánto se desvía el retorno recién
+            observado de nuestra estimación actual. Movemos $V(s)$ un poco en esa dirección, con paso
+            $1/N(s)$. Si en lugar de $1/N(s)$ usamos un paso fijo $\alpha$, obtenemos
+            $V(s) \leftarrow V(s) + \alpha\,(G - V(s))$, una media móvil que «olvida» lo viejo, útil
+            cuando el entorno cambia. Esta forma reaparecerá en el capítulo 7.
+          </p>
+        </div>
+
+        <h3>Primera visita vs. cada visita</h3>
+        <p>
+          Dentro de un mismo episodio, el agente puede pasar por el estado $s$ <strong>varias veces</strong>.
+          ¿Qué retornos contamos? Hay dos convenciones:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Método</th><th>Qué promedia</th><th>Propiedad</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Primera visita</strong></td><td>Solo el retorno tras la <em>primera</em> vez que $s$ aparece en cada episodio</td><td>Cada muestra es independiente; estimador <strong>insesgado</strong> de $V^\pi(s)$</td></tr>
+              <tr><td><strong>Cada visita</strong></td><td>El retorno tras <em>todas</em> las apariciones de $s$</td><td>Las muestras no son independientes; sesgado con pocos datos, pero también converge</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Ambos convergen a $V^\pi$ con suficiente experiencia. En este capítulo usaremos
+          <strong>primera visita</strong>, que es la más fácil de razonar: cada episodio aporta como
+          mucho una muestra por estado, y esas muestras son copias independientes de $G_t$.
+        </p>
+
+        <h2 id="por-que-q">Sin modelo hay que estimar $Q$, no $V$</h2>
+        <p>
+          Estimar $V^\pi(s)$ está muy bien, pero nuestro objetivo no es solo <em>evaluar</em> una
+          política: es <strong>mejorarla</strong>. En programación dinámica mejorábamos mirando un paso
+          hacia delante y quedándonos con la mejor acción:
+        </p>
+        <p>$$\pi'(s) = \arg\max_a \sum_{s',r} p(s',r\mid s,a)\,\bigl[\,r + \gamma V(s')\,\bigr]$$</p>
+        <p>
+          Pero fíjate: esa fórmula necesita $p(s',r\mid s,a)$, ¡el modelo que no tenemos! Sin él, saber
+          que un estado es «bueno» no nos dice <strong>qué acción</strong> lleva hasta él. La solución es
+          estimar directamente el valor de los <strong>pares estado-acción</strong>:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Valor de acción</div>
+          <p>$$Q^\pi(s,a) = \mathbb{E}_\pi\!\left[\, G_t \mid S_t = s,\; A_t = a \,\right]$$</p>
+          <p class="math-note">
+            $Q^\pi(s,a)$ es el retorno esperado si en $s$ tomamos la acción $a$ y luego seguimos $\pi$.
+            Lo estimamos igual que $V$: promediando los retornos que siguen a cada par $(s,a)$ visitado.
+            Con $Q$ en la mano, mejorar la política es trivial y <strong>no requiere modelo</strong>:
+            $\pi'(s) = \arg\max_a Q(s,a)$.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La idea de fondo</div>
+          <p>
+            Sin modelo, la moneda de cambio deja de ser $V(s)$ y pasa a ser $Q(s,a)$. Los valores de
+            acción son «autosuficientes»: contienen ya la información de qué hacer, sin necesidad de
+            mirar hacia delante con probabilidades que desconocemos.
+          </p>
+        </div>
+
+        <h2 id="exploracion">El problema de la exploración</h2>
+        <p>
+          Estimar $Q(s,a)$ exige una cosa incómoda: hay que <strong>visitar</strong> el par $(s,a)$ para
+          tener retornos que promediar. Y aquí aparece una trampa. Si la política es
+          <strong>greedy pura</strong> (siempre la mejor acción según $Q$), en cada estado probará una
+          sola acción y nunca sabremos si otra era mejor. Las acciones no elegidas se quedan con su
+          $Q$ inicial para siempre. Sin exploración, no hay mejora.
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El dilema, otra vez</div>
+          <p>
+            Es el mismo <strong>explorar vs. explotar</strong> del <a href="02-bandido-multibrazo.html">capítulo 2</a>,
+            ahora con estados. Para <em>aprender</em> el mejor $Q$ hay que probar acciones que quizá no
+            sean las mejores; para <em>aprovechar</em> lo aprendido hay que elegir la mejor. Monte Carlo
+            necesita garantizar que <strong>todos los pares $(s,a)$ se sigan visitando</strong>.
+          </p>
+        </div>
+
+        <p>Hay dos formas clásicas de garantizarlo:</p>
+        <ul>
+          <li>
+            <strong>Inicios exploratorios</strong> (<em>exploring starts</em>): empezar cada episodio en
+            un par $(s,a)$ elegido al azar, con probabilidad no nula para todos. Así, con suficientes
+            episodios, cada par se visita infinitas veces. Es elegante en teoría, pero poco realista:
+            rara vez podemos «teletransportar» al agente a un estado-acción arbitrario del mundo real.
+          </li>
+          <li>
+            <strong>Políticas $\varepsilon$-soft</strong>: obligar a que la política dé una probabilidad
+            mínima a <em>toda</em> acción, $\pi(a\mid s) \ge \varepsilon/|\mathcal{A}|$. La más común es
+            la <strong>$\varepsilon$-greedy</strong>, que la mayoría de las veces elige la mejor acción,
+            pero con probabilidad $\varepsilon$ prueba una al azar. Es la que usaremos.
+          </li>
+        </ul>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Política $\varepsilon$-greedy</div>
+          <p>$$\pi(a\mid s) = \begin{cases} 1 - \varepsilon + \dfrac{\varepsilon}{|\mathcal{A}|} & \text{si } a = \arg\max_{a'} Q(s,a') \\[1.2em] \dfrac{\varepsilon}{|\mathcal{A}|} & \text{en el resto de acciones} \end{cases}$$</p>
+          <p class="math-note">
+            $|\mathcal{A}|$ es el número de acciones y $\varepsilon \in (0,1]$ la tasa de exploración.
+            Con probabilidad $1-\varepsilon$ explotamos (la mejor acción) y con probabilidad
+            $\varepsilon$ exploramos (una acción uniforme al azar). Ninguna probabilidad es nunca cero,
+            así que todos los pares $(s,a)$ se acaban visitando.
+          </p>
+        </div>
+
+        <h2 id="control">Control de Monte Carlo (GPI)</h2>
+        <p>
+          Ya tenemos las piezas para <strong>aprender la política óptima sin modelo</strong>. La receta
+          es la <strong>iteración generalizada de política</strong> (GPI) que viste en el capítulo 5:
+          alternar <em>evaluación</em> (estimar $Q$ de la política actual) y <em>mejora</em> (hacer la
+          política más greedy respecto a $Q$). La novedad es que ahora la evaluación se hace con Monte
+          Carlo, episodio a episodio.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Algoritmo: control MC $\varepsilon$-greedy (primera visita)</div>
+          <ol>
+            <li>Inicializa $Q(s,a) = 0$ y un contador $N(s,a) = 0$ para todos los pares.</li>
+            <li>Repite durante muchos episodios:
+              <ul>
+                <li><strong>Genera</strong> un episodio completo $S_0, A_0, R_1, \dots, S_{T-1}, A_{T-1}, R_T$ siguiendo la política $\varepsilon$-greedy derivada de $Q$.</li>
+                <li>Inicializa el retorno $G \leftarrow 0$ y recorre el episodio <strong>hacia atrás</strong>, de $t = T-1$ a $0$:
+                  <ul>
+                    <li>$G \leftarrow \gamma\, G + R_{t+1}$.</li>
+                    <li>Si $(S_t, A_t)$ es su <strong>primera visita</strong> en el episodio: $N(S_t,A_t)\mathrel{+}=1$ y $Q(S_t,A_t) \leftarrow Q(S_t,A_t) + \frac{1}{N(S_t,A_t)}\bigl(G - Q(S_t,A_t)\bigr)$.</li>
+                  </ul>
+                </li>
+                <li><strong>Mejora</strong> (implícita): la política $\varepsilon$-greedy ya usa el $Q$ actualizado en el siguiente episodio.</li>
+              </ul>
+            </li>
+          </ol>
+        </div>
+
+        <p>
+          El recorrido <em>hacia atrás</em> es un detalle precioso: como $G_t = R_{t+1} + \gamma\,G_{t+1}$,
+          calcular los retornos de fin a principio nos deja acumular $G$ con una sola multiplicación por
+          paso, sin recalcular sumas. Sobre la convergencia, un resultado clásico (llamado
+          <strong>GLIE</strong>, <em>Greedy in the Limit with Infinite Exploration</em>) garantiza que si
+          $\varepsilon$ decae poco a poco hacia $0$ mientras se siguen visitando todos los pares, el
+          control MC converge a la política óptima. Por eso, en el código, iremos <strong>reduciendo
+          $\varepsilon$</strong> a medida que el agente aprende.
+        </p>
+
+        <h2 id="off-policy">Un vistazo al off-policy: muestreo por importancia</h2>
+        <p>
+          Todo lo anterior es <strong>on-policy</strong>: aprendemos sobre la misma política
+          $\varepsilon$-greedy con la que exploramos. Pero a veces queremos aprender sobre una política
+          <strong>objetivo</strong> $\pi$ (por ejemplo, la greedy pura) usando datos generados por otra
+          política de <strong>comportamiento</strong> $b$ (más exploradora). A esto se le llama
+          <strong>off-policy</strong>, y la herramienta clave es el <strong>muestreo por importancia</strong>.
+        </p>
+        <p>
+          El problema es que un retorno obtenido siguiendo $b$ no es, en media, el retorno bajo $\pi$:
+          las trayectorias tienen distinta probabilidad bajo cada política. La corrección es multiplicar
+          cada retorno por un <strong>cociente de importancia</strong> que reajusta ese desajuste:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Cociente de muestreo por importancia</div>
+          <p>$$\rho_{t:T-1} = \prod_{k=t}^{T-1} \frac{\pi(A_k \mid S_k)}{b(A_k \mid S_k)}$$</p>
+          <p class="math-note">
+            Es el producto, a lo largo de la trayectoria, de cuánto más (o menos) probable era cada
+            acción bajo la política objetivo $\pi$ que bajo la de comportamiento $b$. Con él, el retorno
+            corregido cumple $\mathbb{E}_b[\rho_{t:T-1}\,G_t \mid S_t=s] = V^\pi(s)$: podemos estimar el
+            valor de $\pi$ ¡sin haberla ejecutado nunca! El único requisito es la <strong>cobertura</strong>:
+            $b(a\mid s) > 0$ siempre que $\pi(a\mid s) > 0$, para no dividir por cero. Este mecanismo es el
+            germen conceptual del <a href="09-q-learning.html">Q-Learning</a> (capítulo 9).
+          </p>
+        </div>
+
+        <h2 id="ejemplo">Ejemplo en Python: control MC en un gridworld</h2>
+        <p>
+          Vamos a ver todo esto funcionando. Nuestro entorno es una <strong>cuadrícula 4×4</strong> con
+          dos paredes. El agente sale de la esquina superior izquierda (inicio) y busca la meta en la
+          esquina inferior derecha. Cada paso cuesta $-1$ (para incentivar caminos cortos) y llegar a la
+          meta da $+10$ y termina el episodio. El agente <strong>no conoce</strong> esta descripción: solo
+          juega y promedia.
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="-14 -14 308 308" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cuadrícula 4x4 con inicio, meta y dos paredes">
+            <rect x="0" y="0" width="70" height="70" rx="6" fill="#e0e7ff" stroke="#cbd5e0" />
+            <text x="35" y="35" text-anchor="middle" dominant-baseline="central" font-size="15" font-family="sans-serif" font-weight="700" fill="#4338ca">Inicio</text>
+            <rect x="70" y="70" width="70" height="70" fill="#334155" stroke="#cbd5e0" />
+            <rect x="140" y="140" width="70" height="70" fill="#334155" stroke="#cbd5e0" />
+            <rect x="210" y="210" width="70" height="70" rx="6" fill="#bbf7d0" stroke="#cbd5e0" />
+            <text x="245" y="245" text-anchor="middle" dominant-baseline="central" font-size="15" font-family="sans-serif" font-weight="700" fill="#047857">Meta</text>
+            <path d="M0,0 H280 M0,70 H280 M0,140 H280 M0,210 H280 M0,280 H280" stroke="#cbd5e0" stroke-width="1.5" fill="none" />
+            <path d="M0,0 V280 M70,0 V280 M140,0 V280 M210,0 V280 M280,0 V280" stroke="#cbd5e0" stroke-width="1.5" fill="none" />
+            <text x="105" y="105" text-anchor="middle" dominant-baseline="central" font-size="24" fill="#94a3b8">🧱</text>
+            <text x="175" y="175" text-anchor="middle" dominant-baseline="central" font-size="24" fill="#94a3b8">🧱</text>
+          </svg>
+          <figcaption>El gridworld del ejemplo: inicio arriba a la izquierda, meta abajo a la derecha, dos paredes que hay que rodear. Chocar contra una pared o el borde te deja donde estabas (pero el paso igualmente cuesta $-1$).</figcaption>
+        </figure>
+
+        <p>
+          El código implementa el algoritmo de la caja de arriba: genera episodios con la política
+          $\varepsilon$-greedy, recorre cada episodio hacia atrás actualizando $Q$ solo en las primeras
+          visitas, y va reduciendo $\varepsilon$. Al final dibuja dos cosas: cómo <strong>sube la
+          recompensa media por episodio</strong> conforme aprende, y la <strong>política aprendida</strong>
+          (una flecha por casilla).
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">monte_carlo.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+Control de Monte Carlo (primera visita, epsilon-greedy) sobre un gridworld.
+
+Aprende una politica SIN modelo: no conoce las probabilidades del entorno, solo
+juega episodios completos y promedia los retornos observados. Es la idea central
+del capitulo 6 del Manual de Aprendizaje por Refuerzo.
+
+El agente vive en una cuadricula 4x4 con dos paredes. Sale de la esquina superior
+izquierda y busca la meta (esquina inferior derecha). Cada paso cuesta -1 y llegar
+a la meta da +10. Al final se muestra:
+  - la recompensa media por episodio (media movil) subiendo a medida que aprende,
+  - la politica greedy final como flechas sobre la cuadricula.
+
+Como ejecutarlo:
+    pip install -r requirements.txt
+    python code/06-monte-carlo/monte_carlo.py
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- El entorno: gridworld 4x4 con dos paredes ---
+FILAS, COLS = 4, 4
+INICIO = (0, 0)
+META = (3, 3)
+PAREDES = {(1, 1), (2, 2)}
+N_ESTADOS = FILAS * COLS
+N_ACCIONES = 4                      # 0 arriba, 1 abajo, 2 izquierda, 3 derecha
+MOV = {0: (-1, 0), 1: (1, 0), 2: (0, -1), 3: (0, 1)}
+FLECHAS = {0: "^", 1: "v", 2: "&lt;", 3: "&gt;"}
+GAMMA = 0.95
+
+
+def a_indice(fila, col):
+    """Convierte una casilla (fila, col) en un indice de estado 0..15."""
+    return fila * COLS + col
+
+
+def paso(estado, accion):
+    """Dinamica del entorno: devuelve (nuevo_estado, recompensa, terminado)."""
+    fila, col = divmod(estado, COLS)
+    df, dc = MOV[accion]
+    nf, nc = fila + df, col + dc
+    # Chocar contra el borde o una pared: te quedas donde estabas (pero el paso cuesta).
+    if nf &lt; 0 or nf &gt;= FILAS or nc &lt; 0 or nc &gt;= COLS or (nf, nc) in PAREDES:
+        nf, nc = fila, col
+    nuevo = a_indice(nf, nc)
+    if (nf, nc) == META:
+        return nuevo, 10.0, True
+    return nuevo, -1.0, False
+
+
+def elegir_accion(estado, Q, epsilon, rng):
+    """Politica epsilon-greedy: explora con prob. epsilon, si no explota Q."""
+    if rng.random() &lt; epsilon:
+        return int(rng.integers(N_ACCIONES))
+    q = Q[estado]
+    # argmax con desempate aleatorio (clave al principio, cuando Q es todo ceros).
+    candidatos = np.flatnonzero(q == q.max())
+    return int(rng.choice(candidatos))
+
+
+def generar_episodio(Q, epsilon, rng, max_pasos=50):
+    """Juega un episodio completo siguiendo la politica epsilon-greedy."""
+    estados, acciones, recompensas = [], [], []
+    estado = a_indice(*INICIO)
+    for _ in range(max_pasos):
+        accion = elegir_accion(estado, Q, epsilon, rng)
+        nuevo, r, terminado = paso(estado, accion)
+        estados.append(estado)
+        acciones.append(accion)
+        recompensas.append(r)
+        estado = nuevo
+        if terminado:
+            break
+    return estados, acciones, recompensas
+
+
+def mc_control(num_episodios=3000, semilla=0):
+    """Control MC de primera visita con mejora epsilon-greedy (GPI)."""
+    rng = np.random.default_rng(semilla)
+    Q = np.zeros((N_ESTADOS, N_ACCIONES))     # valor accion-estado estimado
+    N = np.zeros((N_ESTADOS, N_ACCIONES))     # nº de retornos promediados en cada (s, a)
+    historial = np.zeros(num_episodios)       # recompensa total de cada episodio
+
+    for ep in range(num_episodios):
+        # Exploracion que decae: mucha al principio, poca (pero &gt; 0) al final.
+        epsilon = max(0.05, 1.0 - ep / (0.8 * num_episodios))
+        estados, acciones, recompensas = generar_episodio(Q, epsilon, rng)
+        historial[ep] = sum(recompensas)
+
+        # Indice de la PRIMERA aparicion de cada par (estado, accion) del episodio.
+        primera = {}
+        for t, sa in enumerate(zip(estados, acciones)):
+            if sa not in primera:
+                primera[sa] = t
+
+        # Recorremos el episodio hacia atras acumulando el retorno G.
+        G = 0.0
+        for t in range(len(estados) - 1, -1, -1):
+            s, a = estados[t], acciones[t]
+            G = GAMMA * G + recompensas[t]
+            if primera[(s, a)] == t:          # solo la primera visita
+                N[s, a] += 1
+                Q[s, a] += (G - Q[s, a]) / N[s, a]   # media incremental
+
+    return Q, historial
+
+
+def evaluar_politica(Q, rng, episodios=500):
+    """Recompensa media de la politica greedy (epsilon = 0)."""
+    totales = [sum(generar_episodio(Q, 0.0, rng)[2]) for _ in range(episodios)]
+    return float(np.mean(totales))
+
+
+def media_movil(x, k=50):
+    c = np.cumsum(np.insert(np.asarray(x, dtype=float), 0, 0.0))
+    return (c[k:] - c[:-k]) / k
+
+
+def imprimir_politica(Q):
+    print("Politica aprendida (^ v &lt; &gt; , # pared, G meta):")
+    for fila in range(FILAS):
+        linea = []
+        for col in range(COLS):
+            if (fila, col) in PAREDES:
+                linea.append("#")
+            elif (fila, col) == META:
+                linea.append("G")
+            else:
+                linea.append(FLECHAS[int(np.argmax(Q[a_indice(fila, col)]))])
+        print("   " + "  ".join(linea))
+
+
+def dibujar(historial, Q):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
+
+    # --- Curva de aprendizaje ---
+    ax1.plot(media_movil(historial, 50), color="#4f46e5")
+    ax1.axhline(5, ls="--", color="#059669", lw=1, label="optimo (+5)")
+    ax1.set_xlabel("episodio")
+    ax1.set_ylabel("recompensa total (media movil 50)")
+    ax1.set_title("Aprendizaje por Monte Carlo")
+    ax1.legend()
+    ax1.grid(alpha=0.3)
+
+    # --- Politica greedy sobre la cuadricula ---
+    ax2.set_title("Politica aprendida")
+    ax2.set_xlim(-0.5, COLS - 0.5)
+    ax2.set_ylim(-0.5, FILAS - 0.5)
+    ax2.set_xticks(range(COLS))
+    ax2.set_yticks(range(FILAS))
+    ax2.set_aspect("equal")
+    ax2.invert_yaxis()
+    ax2.grid(True)
+    for fila in range(FILAS):
+        for col in range(COLS):
+            if (fila, col) in PAREDES:
+                ax2.add_patch(plt.Rectangle((col - 0.5, fila - 0.5), 1, 1, color="#334155"))
+                continue
+            if (fila, col) == META:
+                ax2.add_patch(plt.Rectangle((col - 0.5, fila - 0.5), 1, 1, color="#bbf7d0"))
+                ax2.text(col, fila, "META", ha="center", va="center",
+                         color="#047857", fontsize=11, fontweight="bold")
+                continue
+            if (fila, col) == INICIO:
+                ax2.add_patch(plt.Rectangle((col - 0.5, fila - 0.5), 1, 1, color="#e0e7ff"))
+            a = int(np.argmax(Q[a_indice(fila, col)]))
+            ax2.text(col, fila, FLECHAS[a], ha="center", va="center", fontsize=22)
+
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    Q, historial = mc_control(num_episodios=3000, semilla=0)
+    media_greedy = evaluar_politica(Q, np.random.default_rng(123))
+    print(f"Recompensa media de la politica greedy final: {media_greedy:.2f}")
+    print(f"(el optimo desde el inicio es +5: 6 pasos = 5 x (-1) + 10)\n")
+    imprimir_politica(Q)
+    dibujar(historial, Q)
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong> (la primera vez tarda unos segundos en descargar el
+          intérprete). Verás la curva de recompensa media <strong>subir</strong> desde valores muy
+          negativos —al principio el agente deambula al azar hasta agotar los pasos— hacia el óptimo,
+          marcado con la línea discontinua en $+5$ (el camino más corto son 6 pasos: cinco de $-1$ más el
+          $+10$ final). El segundo panel muestra la política aprendida: las flechas dibujan una ruta que
+          <strong>rodea las paredes</strong> hasta la meta. Todo ello sin que el agente conociera nunca
+          las reglas del entorno.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Prueba a fijar $\varepsilon = 0.05$ constante (borra la línea del decaimiento y usa
+            <code>epsilon = 0.05</code>). ¿Aprende igual de rápido? Y al revés: sube el paso por casilla a
+            $-0.1$ en lugar de $-1$. Con menos castigo por paso, ¿la política sigue teniendo tanta prisa
+            por llegar? Cambiar las recompensas es <em>diseñar</em> el problema.
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          Como todos los ejemplos del manual, este funciona también fuera del navegador. Descarga el
+          archivo con «Descargar .py» (o cópialo) y ejecútalo así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) ejecuta el ejemplo</span>
+<span class="prompt">$</span> python code/06-monte-carlo/monte_carlo.py
+<span class="comment">Recompensa media de la politica greedy final: 5.00
+(el optimo desde el inicio es +5: 6 pasos = 5 x (-1) + 10)
+
+Politica aprendida (^ v &lt; &gt; , # pared, G meta):
+   &gt;  &gt;  &gt;  v
+   v  #  &gt;  v
+   v  v  #  v
+   &gt;  &gt;  &gt;  G</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Este ejemplo usa solo <code>numpy</code> y <code>matplotlib</code>, así que corre entero en
+          el navegador con <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>. Los
+          detalles finos de la política y de la curva pueden variar ligeramente según la aleatoriedad,
+          pero el comportamiento cualitativo —aprender a rodear las paredes y acercarse al óptimo— es
+          siempre el mismo.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>Monte Carlo aprende <strong>sin modelo</strong>: estima valores <strong>promediando los retornos</strong> de episodios completos, apoyándose en la ley de los grandes números.</li>
+            <li>Requiere <strong>tareas episódicas</strong>: hay que esperar al <strong>final del episodio</strong> para calcular el retorno $G_t$.</li>
+            <li><strong>Primera visita</strong> y <strong>cada visita</strong> son dos formas de promediar; ambas convergen a $V^\pi$.</li>
+            <li>Sin modelo, mejoramos la política con los valores de <strong>acción</strong> $Q(s,a)$, no con $V(s)$: $\pi'(s)=\arg\max_a Q(s,a)$.</li>
+            <li>Para no dejar de aprender hace falta <strong>exploración</strong>: inicios exploratorios o políticas <strong>$\varepsilon$-soft</strong> (como $\varepsilon$-greedy).</li>
+            <li>El <strong>control MC</strong> es GPI: evaluar con Monte Carlo + mejorar $\varepsilon$-greedy, episodio tras episodio.</li>
+            <li>El <strong>muestreo por importancia</strong> corrige retornos para aprender <strong>off-policy</strong>, multiplicando por el cociente $\rho_{t:T-1}$.</li>
+          </ul>
+        </div>
+
+        <p>
+          Monte Carlo tiene una pega grande: <strong>hay que esperar al final del episodio</strong> para
+          aprender algo. En tareas largas (o interminables) eso es lentísimo o imposible. En el
+          <a href="07-td-aprendizaje.html">próximo capítulo</a> daremos un salto conceptual precioso: el
+          aprendizaje por <strong>diferencias temporales</strong>, que actualiza los valores
+          <strong>en cada paso</strong> sin esperar al final, combinando lo mejor de Monte Carlo y de la
+          programación dinámica.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

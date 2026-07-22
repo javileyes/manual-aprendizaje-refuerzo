@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>5. Programación dinámica · Manual de RL</title>
+  <meta name="description" content="Resolver el MDP exactamente cuando conocemos el modelo: evaluación de política, iteración de política e iteración de valor, con un gridworld resuelto en Python ejecutable." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="5">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 1 · Capítulo 5</span>
+        <h1>Programación dinámica</h1>
+        <p class="lead">
+          En el <a href="04-retornos-y-valor.html">capítulo anterior</a> escribimos las
+          <strong>ecuaciones de Bellman</strong>: relaciones que el valor de un estado
+          <em>debe</em> cumplir. Pero una ecuación no es un algoritmo. En este capítulo damos el
+          salto: convertimos esas ecuaciones en <strong>reglas de actualización que se repiten</strong>
+          hasta converger, y con ellas resolvemos un <a href="03-mdp.html">MDP</a> de forma
+          <strong>exacta</strong>. La única condición: conocer el <strong>modelo</strong> del
+          entorno (transiciones y recompensas). Cuando lo tienes, no necesitas actuar para aprender;
+          basta con <em>planificar</em>.
+        </p>
+
+        <h2 id="planificar">Planificar cuando tienes el mapa</h2>
+        <p>
+          Hasta ahora el agente aprendía probando. La <strong>programación dinámica</strong>
+          (<em>dynamic programming</em>, DP) juega otro juego: supone que ya conocemos, de
+          antemano, cómo responde el mundo. Sabemos la probabilidad de aterrizar en cada estado
+          $s'$ y la recompensa $r$ que recibiremos si en el estado $s$ tomamos la acción $a$. A eso
+          lo llamamos <strong>el modelo</strong>, y lo escribimos $p(s',r \mid s,a)$.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Imagina que quieres cruzar una ciudad y tienes el <strong>mapa completo</strong>: todas
+            las calles, sus longitudes y los sentidos de circulación. No necesitas salir a conducir
+            y perderte para encontrar la mejor ruta; puedes <strong>calcularla en tu cabeza</strong>,
+            sobre el mapa. Eso es la programación dinámica: <em>planificar</em> sobre un modelo
+            conocido, en lugar de <em>aprender</em> a base de tropezones.
+          </p>
+          <p>
+            El truco que lo hace posible es viejo y elegante: la mejor forma de cruzar la ciudad
+            desde tu casa <em>reutiliza</em> la mejor forma de cruzarla desde la esquina siguiente.
+            Los subproblemas se solapan, y esa es justo la estructura que las ecuaciones de Bellman
+            capturan.
+          </p>
+        </div>
+
+        <h2 id="bellman-como-regla">La ecuación de Bellman como regla de actualización</h2>
+        <p>
+          Recuerda la <strong>ecuación de Bellman de esperanza</strong> para el valor de una
+          política $\pi$. Dice que el valor de un estado es la recompensa inmediata esperada más el
+          valor descontado de a dónde vas a parar:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Bellman de esperanza (la identidad)</div>
+          <p>$$V^\pi(s) = \sum_{a} \pi(a \mid s) \sum_{s',r} p(s',r \mid s,a)\,\big[\, r + \gamma\, V^\pi(s') \,\big]$$</p>
+          <p class="math-note">
+            $V^\pi(s)$: valor del estado $s$ siguiendo la política $\pi$. &nbsp;
+            $\pi(a\mid s)$: probabilidad de elegir la acción $a$ en $s$. &nbsp;
+            $p(s',r\mid s,a)$: dinámica del entorno (el modelo). &nbsp;
+            $r$: recompensa inmediata. &nbsp;
+            $\gamma \in [0,1)$: factor de descuento. &nbsp;
+            $s'$: estado siguiente.
+          </p>
+        </div>
+
+        <p>
+          Fíjate en que es una <strong>igualdad</strong>, no una receta: aparece $V^\pi$ en ambos
+          lados. Si conocemos el modelo, tenemos una para cada estado, así que en total un sistema
+          de $|\mathcal{S}|$ ecuaciones lineales con $|\mathcal{S}|$ incógnitas. Se podría resolver
+          con álgebra lineal, pero eso cuesta $O(|\mathcal{S}|^3)$ y no escala. La idea central de la
+          DP es distinta y más barata: <strong>tomar la igualdad y usarla como una asignación</strong>.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La idea que se repite todo el capítulo</div>
+          <p>
+            Toma una ecuación de Bellman, cambia el «$=$» por un «$\leftarrow$» y aplícala una y otra
+            vez a tu estimación actual. Aunque empieces con números inventados, cada barrido acerca la
+            estimación a la solución verdadera. La ecuación deja de ser una descripción y se convierte
+            en un <strong>motor de cálculo</strong>.
+          </p>
+        </div>
+
+        <h2 id="evaluacion">Evaluación de política</h2>
+        <p>
+          El primer problema, el más sencillo, es el de <strong>predicción</strong>: dada una
+          política fija $\pi$, ¿cuánto vale? Es decir, calcular $V^\pi$. Convertimos la ecuación de
+          Bellman en una regla iterativa. Partimos de una estimación cualquiera $V_0$ (por ejemplo,
+          todo ceros) y en cada <strong>barrido</strong> $k$ actualizamos todos los estados:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Evaluación iterativa de política</div>
+          <p>$$V_{k+1}(s) \;\leftarrow\; \sum_{a} \pi(a \mid s) \sum_{s',r} p(s',r \mid s,a)\,\big[\, r + \gamma\, V_k(s') \,\big]$$</p>
+          <p class="math-note">
+            $V_k(s)$: estimación del valor en el barrido $k$. El lado derecho usa la estimación
+            <em>antigua</em> $V_k$ para producir la <em>nueva</em> $V_{k+1}$. Repetimos hasta que el
+            cambio máximo entre barridos, $\max_s |V_{k+1}(s) - V_k(s)|$, cae por debajo de un umbral
+            $\theta$ pequeño.
+          </p>
+        </div>
+
+        <p>
+          ¿Por qué converge? Porque el operador que define esta actualización es una
+          <strong>contracción</strong> en la norma del máximo: cada barrido acerca dos estimaciones
+          cualesquiera al menos en un factor $\gamma$. Formalmente, si $T^\pi$ es ese operador,
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Por qué no puede fallar</div>
+          <p>$$\lVert T^\pi U - T^\pi W \rVert_\infty \;\le\; \gamma\, \lVert U - W \rVert_\infty$$</p>
+          <p class="math-note">
+            $\lVert \cdot \rVert_\infty$ es la mayor diferencia sobre todos los estados. Como
+            $\gamma&lt;1$, las distancias se encogen barrido a barrido: por el
+            <strong>teorema del punto fijo de Banach</strong> la sucesión $V_0, V_1, V_2,\dots$
+            converge a un <strong>único</strong> punto fijo, que es exactamente $V^\pi$. La
+            convergencia es geométrica (el error se multiplica por $\gamma$ en cada paso).
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Un detalle de implementación útil</div>
+          <p>
+            Hay dos formas de barrer. En la versión «de libro» usas dos vectores: lees de $V_k$ y
+            escribes en $V_{k+1}$. En la versión <em>in situ</em> (la que usamos en el código) hay un
+            único vector y cada estado ya aprovecha los valores recién actualizados de sus vecinos.
+            La versión in situ suele converger <strong>más rápido</strong> y también lo hace al mismo
+            $V^\pi$; por eso es la habitual.
+          </p>
+        </div>
+
+        <h2 id="mejora">Mejorar la política: el teorema de mejora</h2>
+        <p>
+          Evaluar una política no la mejora; solo nos dice cuánto vale. Pero saber $V^\pi$ nos da una
+          palanca poderosísima. Definamos primero el <strong>valor de acción</strong> $Q^\pi(s,a)$:
+          lo que consigues si en $s$ haces $a$ (aunque tu política no lo pidiera) y <em>después</em>
+          sigues con $\pi$:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Valor de acción</div>
+          <p>$$Q^\pi(s,a) = \sum_{s',r} p(s',r \mid s,a)\,\big[\, r + \gamma\, V^\pi(s') \,\big]$$</p>
+          <p class="math-note">
+            Es una mirada «un paso hacia delante»: pruebo la acción $a$ ahora y confío en mi
+            evaluación $V^\pi$ para todo lo que venga después.
+          </p>
+        </div>
+
+        <p>
+          Ahora construimos una política nueva, $\pi'$, que en cada estado elige la acción que
+          <strong>mejor pinta</strong> según ese cálculo de un paso. Se llama política
+          <strong>avariciosa</strong> (<em>greedy</em>) respecto a $V^\pi$:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Política greedy respecto a $V^\pi$</div>
+          <p>$$\pi'(s) = \arg\max_{a}\; Q^\pi(s,a) = \arg\max_{a} \sum_{s',r} p(s',r \mid s,a)\,\big[\, r + \gamma\, V^\pi(s') \,\big]$$</p>
+        </div>
+
+        <p>
+          ¿Es $\pi'$ realmente mejor? El <strong>teorema de mejora de política</strong> lo garantiza.
+          La intuición es una cadena de desigualdades: si en el primer paso actúas greedy y luego
+          vuelves a $\pi$, no pierdes; pero entonces conviene actuar greedy también en el segundo
+          paso, y en el tercero… Encadenando, la mejora se propaga a todo el horizonte.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Teorema de mejora de política</div>
+          <p>
+            Si $\pi'$ es greedy respecto a $V^\pi$, entonces $V^{\pi'}(s) \ge V^\pi(s)$ para
+            <strong>todo</strong> estado $s$. La política nueva es al menos tan buena como la vieja en
+            todas partes. Y si resulta que son iguales ($V^{\pi'} = V^\pi$), entonces ambas cumplen la
+            ecuación de Bellman de <em>optimalidad</em>: hemos llegado a la política óptima $\pi^*$.
+          </p>
+        </div>
+
+        <h2 id="iteracion-politica">Iteración de política</h2>
+        <p>
+          Ya tenemos las dos piezas. <strong>Evaluar</strong> convierte una política en su valor;
+          <strong>mejorar</strong> convierte un valor en una política mejor. Encadenarlas es la
+          <strong>iteración de política</strong>: evaluar, mejorar, evaluar, mejorar… hasta que la
+          mejora ya no cambie nada.
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="0 0 640 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diagrama de iteración de política: evaluar y mejorar en alternancia">
+            <defs>
+              <marker id="arrow5" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#4f46e5" />
+              </marker>
+            </defs>
+            <rect x="60" y="75" width="200" height="60" rx="12" fill="#4f46e5" />
+            <text x="160" y="100" text-anchor="middle" fill="#fff" font-size="16" font-family="sans-serif" font-weight="700">Evaluar</text>
+            <text x="160" y="120" text-anchor="middle" fill="#dfe3ff" font-size="14" font-family="sans-serif">π → Vπ</text>
+            <rect x="380" y="75" width="200" height="60" rx="12" fill="#0ea5e9" />
+            <text x="480" y="100" text-anchor="middle" fill="#fff" font-size="16" font-family="sans-serif" font-weight="700">Mejorar (greedy)</text>
+            <text x="480" y="120" text-anchor="middle" fill="#e2f4ff" font-size="14" font-family="sans-serif">Vπ → π′</text>
+            <path d="M260,95 C310,95 330,95 378,95" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow5)" />
+            <path d="M380,118 C330,140 310,140 262,118" fill="none" stroke="#0ea5e9" stroke-width="2.5" marker-end="url(#arrow5)" />
+            <text x="320" y="185" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">…hasta que la política deja de cambiar → (π*, V*)</text>
+          </svg>
+          <figcaption>Iteración de política: dos procesos que se empujan mutuamente hacia $(\pi^*, V^*)$.</figcaption>
+        </figure>
+
+        <p>El algoritmo, paso a paso:</p>
+        <ol>
+          <li>Empieza con una política cualquiera $\pi$ (aleatoria, por ejemplo).</li>
+          <li><strong>Evaluación:</strong> calcula $V^\pi$ con evaluación iterativa de política.</li>
+          <li><strong>Mejora:</strong> haz $\pi'$ greedy respecto a $V^\pi$.</li>
+          <li>Si $\pi' = \pi$, para: es $\pi^*$. Si no, haz $\pi \leftarrow \pi'$ y vuelve al paso&nbsp;2.</li>
+        </ol>
+
+        <p>
+          Como cada mejora produce una política estrictamente mejor (o igual, y entonces paramos) y
+          el número de políticas deterministas es <em>finito</em>, la iteración de política converge
+          a la óptima en un número finito de pasos. En la práctica suelen bastar <strong>muy pocas</strong>
+          iteraciones.
+        </p>
+
+        <h2 id="iteracion-valor">Iteración de valor</h2>
+        <p>
+          La iteración de política tiene un coste escondido: cada mejora exige evaluar la política
+          <em>hasta el final</em>, con muchos barridos internos. ¿Y si no esperamos a que la
+          evaluación converja? La <strong>iteración de valor</strong> lleva esa idea al extremo:
+          hace <strong>un solo barrido</strong> de evaluación y mejora a la vez, fundiendo ambos
+          pasos en una única actualización con un <strong>máximo</strong>. Es, literalmente, la
+          ecuación de Bellman de <em>optimalidad</em> usada como regla:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Iteración de valor (Bellman de optimalidad)</div>
+          <p>$$V_{k+1}(s) \;\leftarrow\; \max_{a} \sum_{s',r} p(s',r \mid s,a)\,\big[\, r + \gamma\, V_k(s') \,\big]$$</p>
+          <p class="math-note">
+            El $\max_a$ hace el trabajo de «mejorar» y de «evaluar» de golpe: en cada barrido cada
+            estado se queda con el valor de su mejor acción según la estimación actual. Cuando $V$
+            converge a $V^*$, extraemos la política óptima haciéndola greedy una última vez:
+            $\pi^*(s) = \arg\max_a \sum_{s',r} p(s',r\mid s,a)[r + \gamma V^*(s')]$.
+          </p>
+        </div>
+
+        <p>
+          También aquí hay una contracción por medio: el operador de optimalidad $T^*$ cumple
+          $\lVert T^* U - T^* W \rVert_\infty \le \gamma \lVert U - W \rVert_\infty$, así que la
+          sucesión converge a un único punto fijo, $V^*$. La diferencia con la evaluación es que en
+          lugar de promediar sobre las acciones de $\pi$, nos quedamos con la máxima.
+        </p>
+
+        <h2 id="gpi">GPI: la idea que lo unifica todo</h2>
+        <p>
+          Iteración de política e iteración de valor parecen dos algoritmos distintos, pero son dos
+          puntos de un mismo espectro. En medio están las variantes «truncadas»: evaluar unos pocos
+          barridos (no hasta el final) antes de mejorar. A todo ese patrón se le llama
+          <strong>iteración de política generalizada</strong> (<em>generalized policy iteration</em>,
+          GPI).
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición: dos manos que se ajustan</div>
+          <p>
+            Piensa en dos procesos que tiran en direcciones ligeramente distintas. La
+            <strong>evaluación</strong> empuja el valor para que sea coherente con la política actual.
+            La <strong>mejora</strong> empuja la política para que sea greedy respecto al valor actual.
+            Cada una «estropea» un poco el trabajo de la otra… pero ambas comparten un único punto de
+            reposo: la pareja óptima $(\pi^*, V^*)$, donde el valor ya es coherente con la política y
+            la política ya es greedy respecto al valor. Ahí ninguna de las dos tiene nada que cambiar.
+          </p>
+        </div>
+
+        <h2 id="coste">Convergencia y coste</h2>
+        <p>
+          Ambos métodos convergen a la solución exacta gracias a la propiedad de contracción; la
+          diferencia está en <em>cómo</em> reparten el trabajo. Esta tabla resume las diferencias
+          prácticas (con $|\mathcal{S}|$ estados y $|\mathcal{A}|$ acciones):
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th></th><th>Iteración de política</th><th>Iteración de valor</th></tr></thead>
+            <tbody>
+              <tr><td>Cada iteración</td><td>Evalúa $\pi$ <em>hasta converger</em> + una mejora</td><td>Un barrido con $\max_a$</td></tr>
+              <tr><td>Coste por barrido</td><td>$O(|\mathcal{S}|^2)$ (política fija)</td><td>$O(|\mathcal{S}|^2\,|\mathcal{A}|)$</td></tr>
+              <tr><td>Nº de iteraciones externas</td><td>Muy pocas</td><td>Más, pero baratas</td></tr>
+              <tr><td>Converge a</td><td>$(\pi^*, V^*)$ exactos</td><td>$V^*$ exacto, luego $\pi^*$</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Cada barrido recorre los estados y, para cada uno, suma sobre los posibles estados
+          siguientes; de ahí el $|\mathcal{S}|^2$. Cuando el modelo es <strong>disperso</strong>
+          (cada acción lleva solo a unos pocos estados, como en nuestro gridworld determinista), el
+          coste real es mucho menor. Para problemas con millones de estados, esta dependencia de
+          <em>todo</em> el espacio de estados es justamente la barrera que romperemos en la
+          <a href="11-aproximacion-funciones.html">Parte 2</a> con aproximación de funciones.
+        </p>
+
+        <h2 id="ejemplo">El ejemplo: un gridworld resuelto de dos formas</h2>
+        <p>
+          Vamos a bajarlo a Python. El entorno es un <strong>gridworld</strong> de $3\times 4$
+          casillas. Arriba a la derecha está la <strong>meta</strong> (recompensa $+10$, casilla
+          terminal); justo debajo, una <strong>trampa</strong> ($-10$, también terminal); y hay un
+          <strong>muro</strong> intransitable en el centro. Cada movimiento cuesta $-1$ (para animar a
+          llegar pronto), las acciones son <em>arriba, derecha, abajo, izquierda</em>, y si te sales
+          del tablero o chocas con el muro, te quedas donde estabas. Usamos $\gamma = 0{,}9$.
+        </p>
+        <p>
+          Como el entorno es determinista, construimos el modelo explícitamente: $P[s,a,s']$ (un
+          vector con todo el peso en la casilla de destino) y $R[s,a]$ (la recompensa de entrar en
+          esa casilla). Con el modelo en la mano, implementamos <code>evaluar_politica</code>,
+          <code>iteracion_de_politica</code> y <code>iteracion_de_valor</code>, y comprobamos que las
+          dos últimas dan <strong>la misma</strong> política óptima. Al final dibujamos $V^*$ como
+          mapa de calor con la política óptima en flechas.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">programacion_dinamica.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+Programación dinámica en un gridworld: resolver el MDP EXACTAMENTE cuando
+conocemos el modelo (las probabilidades de transición P y las recompensas R).
+
+Implementa los tres algoritmos clásicos del capítulo:
+  - evaluar_politica     : evaluación iterativa de política (Bellman de esperanza)
+  - iteracion_de_politica: evaluar + mejorar en alternancia (GPI)
+  - iteracion_de_valor   : un barrido con el máximo de Bellman de optimalidad
+
+El entorno es un gridworld de 3x4 con una META (+10), una TRAMPA (-10) y un
+MURO intransitable. Cada movimiento cuesta -1 (para llegar rápido). Al final se
+comprueba que iteración de política e iteración de valor devuelven la MISMA
+política óptima y se dibuja V* como mapa de calor con las flechas de la política.
+
+Cómo ejecutarlo:
+    pip install -r requirements.txt
+    python code/05-programacion-dinamica/programacion_dinamica.py
+
+Solo usa numpy y matplotlib, así que también corre en el navegador (Pyodide).
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- Definición del gridworld -------------------------------------------------
+FILAS, COLS = 3, 4
+META = (0, 3)         # esquina superior derecha: recompensa +10 (terminal)
+TRAMPA = (1, 3)       # justo debajo de la meta: recompensa -10 (terminal)
+MUROS = {(1, 1)}      # celdas intransitables
+R_META = 10.0
+R_TRAMPA = -10.0
+R_PASO = -1.0         # coste de vivir: cada movimiento resta 1
+GAMMA = 0.9           # factor de descuento
+
+# Acciones como desplazamientos (fila, columna): arriba, derecha, abajo, izquierda
+ACCIONES = [(-1, 0), (0, 1), (1, 0), (0, -1)]
+FLECHAS = ["arriba", "derecha", "abajo", "izquierda"]
+SIMBOLOS = ["^", "&gt;", "v", "&lt;"]
+
+
+def construir_modelo():
+    """Construye el modelo del MDP: listas de estados, P[s,a,s'] y R[s,a].
+
+    Como el gridworld es determinista, P[s,a] es un vector one-hot (todo el peso
+    en el estado de destino). Devolvemos también qué estados son terminales.
+    """
+    estados = [(r, c) for r in range(FILAS) for c in range(COLS) if (r, c) not in MUROS]
+    idx = {s: i for i, s in enumerate(estados)}
+    nS, nA = len(estados), len(ACCIONES)
+    P = np.zeros((nS, nA, nS))
+    R = np.zeros((nS, nA))
+    terminal = np.zeros(nS, dtype=bool)
+
+    for s in estados:
+        i = idx[s]
+        if s == META or s == TRAMPA:
+            # Estado absorbente: se queda en sí mismo con recompensa 0.
+            terminal[i] = True
+            P[i, :, i] = 1.0
+            R[i, :] = 0.0
+            continue
+        for a, (dr, dc) in enumerate(ACCIONES):
+            nr, nc = s[0] + dr, s[1] + dc
+            destino = (nr, nc)
+            # Si se sale del tablero o choca con un muro, se queda donde está.
+            if not (0 &lt;= nr &lt; FILAS and 0 &lt;= nc &lt; COLS) or destino in MUROS:
+                destino = s
+            j = idx[destino]
+            P[i, a, j] = 1.0
+            # La recompensa depende de en qué celda se entra.
+            if destino == META:
+                R[i, a] = R_META
+            elif destino == TRAMPA:
+                R[i, a] = R_TRAMPA
+            else:
+                R[i, a] = R_PASO
+    return estados, idx, P, R, terminal
+
+
+def evaluar_politica(politica, P, R, gamma, theta=1e-8):
+    """Evaluación iterativa de política: barre la ecuación de Bellman de
+    esperanza hasta que V deja de cambiar. `politica` es un vector de índices
+    de acción (uno por estado). Devuelve V^pi.
+    """
+    nS = len(politica)
+    V = np.zeros(nS)
+    while True:
+        delta = 0.0
+        for s in range(nS):
+            a = politica[s]
+            v_nuevo = R[s, a] + gamma * P[s, a] @ V   # actualización in situ
+            delta = max(delta, abs(v_nuevo - V[s]))
+            V[s] = v_nuevo
+        if delta &lt; theta:
+            break
+    return V
+
+
+def valores_de_accion(V, P, R, gamma):
+    """Calcula Q(s,a) = R(s,a) + gamma * sum_s' P(s,a,s') V(s') para todo (s,a).
+
+    P tiene forma (nS, nA, nS) y V forma (nS,); P @ V da forma (nS, nA).
+    """
+    return R + gamma * (P @ V)
+
+
+def mejorar_politica(V, P, R, gamma):
+    """Política avariciosa (greedy) respecto a V: en cada estado elige la acción
+    con mayor Q. Devuelve la nueva política y la tabla Q.
+    """
+    Q = valores_de_accion(V, P, R, gamma)
+    return np.argmax(Q, axis=1), Q
+
+
+def iteracion_de_politica(P, R, gamma, politica0=None):
+    """Iteración de política (GPI): evaluar V^pi y luego volverse greedy,
+    repetido hasta que la política ya no cambia. Devuelve (politica, V, iteraciones).
+    """
+    nS, nA = R.shape
+    politica = np.zeros(nS, dtype=int) if politica0 is None else politica0.copy()
+    iteraciones = 0
+    while True:
+        iteraciones += 1
+        V = evaluar_politica(politica, P, R, gamma)
+        nueva, _ = mejorar_politica(V, P, R, gamma)
+        if np.array_equal(nueva, politica):
+            return politica, V, iteraciones
+        politica = nueva
+
+
+def iteracion_de_valor(P, R, gamma, theta=1e-8):
+    """Iteración de valor: un único barrido por estado usando el MÁXIMO de la
+    ecuación de Bellman de optimalidad, repetido hasta converger. Al final,
+    extrae la política greedy. Devuelve (politica, V, barridos).
+    """
+    nS, nA = R.shape
+    V = np.zeros(nS)
+    barridos = 0
+    while True:
+        barridos += 1
+        Q = valores_de_accion(V, P, R, gamma)
+        V_nuevo = np.max(Q, axis=1)
+        delta = np.max(np.abs(V_nuevo - V))
+        V = V_nuevo
+        if delta &lt; theta:
+            break
+    politica = np.argmax(valores_de_accion(V, P, R, gamma), axis=1)
+    return politica, V, barridos
+
+
+def politica_a_texto(idx, politica, terminal):
+    """Dibuja la política como un tablero ASCII: flechas, G (meta), X (trampa)
+    y # (muro).
+    """
+    lineas = []
+    for r in range(FILAS):
+        fila = []
+        for c in range(COLS):
+            if (r, c) in MUROS:
+                fila.append(" # ")
+            elif (r, c) == META:
+                fila.append(" G ")
+            elif (r, c) == TRAMPA:
+                fila.append(" X ")
+            else:
+                i = idx[(r, c)]
+                fila.append(" " + SIMBOLOS[politica[i]] + " ")
+        lineas.append("".join(fila))
+    return "\n".join(lineas)
+
+
+def dibujar(idx, V, politica, terminal):
+    """Mapa de calor de V* con la política óptima como flechas."""
+    Vgrid = np.full((FILAS, COLS), np.nan)
+    for (r, c), i in idx.items():
+        Vgrid[r, c] = V[i]
+
+    fig, ax = plt.subplots(figsize=(6.4, 4.6))
+    im = ax.imshow(Vgrid, cmap="RdYlGn", origin="upper")
+    fig.colorbar(im, ax=ax, label="V*(s)")
+
+    for (r, c), i in idx.items():
+        # Número de valor en la parte alta de la celda.
+        ax.text(c, r - 0.28, f"{V[i]:.1f}", ha="center", va="center",
+                fontsize=9, color="black")
+        if terminal[i]:
+            etiqueta = "META\n+10" if (r, c) == META else "TRAMPA\n-10"
+            ax.text(c, r + 0.18, etiqueta, ha="center", va="center",
+                    fontsize=8, fontweight="bold", color="black")
+        else:
+            dr, dc = ACCIONES[politica[i]]
+            ax.arrow(c, r + 0.12, dc * 0.28, dr * 0.28, head_width=0.13,
+                     head_length=0.11, fc="black", ec="black", length_includes_head=True)
+
+    # Dibuja los muros como celdas grises.
+    for (r, c) in MUROS:
+        ax.add_patch(plt.Rectangle((c - 0.5, r - 0.5), 1, 1, color="#555555"))
+        ax.text(c, r, "MURO", ha="center", va="center", color="white", fontsize=8)
+
+    ax.set_xticks(range(COLS))
+    ax.set_yticks(range(FILAS))
+    ax.set_xlabel("columna")
+    ax.set_ylabel("fila")
+    ax.set_title("V* (color y número) y política óptima (flechas)")
+    plt.tight_layout()
+    plt.show()
+
+
+# --- Programa principal: resolvemos el gridworld de las dos formas ------------
+# (Sin bloque `if __name__ == "__main__"` a propósito, para que este mismo código
+#  se ejecute tal cual en el navegador con Pyodide, que lo corre en un espacio de
+#  nombres nuevo donde __name__ no vale "__main__".)
+estados, idx, P, R, terminal = construir_modelo()
+n_no_term = int((~terminal).sum())
+print(f"Gridworld {FILAS}x{COLS}: {len(estados)} estados "
+      f"({n_no_term} no terminales), {len(ACCIONES)} acciones, gamma = {GAMMA}")
+
+# (1) EVALUACIÓN DE POLÍTICA sobre una política fija y mediocre: "ir siempre
+# a la derecha". Se queda atascada contra la pared este y acumula costes.
+pol_derecha = np.full(len(estados), 1, dtype=int)  # 1 = derecha
+V_derecha = evaluar_politica(pol_derecha, P, R, GAMMA)
+inicio = (2, 0)
+print(f"\nEvaluación de 'siempre derecha': V del inicio {inicio} = "
+      f"{V_derecha[idx[inicio]]:.2f}  (se atasca y suma -1 sin fin)")
+
+# (2) ITERACIÓN DE POLÍTICA, arrancando desde una política ALEATORIA para
+# ver que converge igual (semilla fija para reproducibilidad).
+rng = np.random.default_rng(0)
+pol_inicial = rng.integers(0, len(ACCIONES), size=len(estados))
+pol_pi, V_pi, iters_pi = iteracion_de_politica(P, R, GAMMA, pol_inicial)
+print(f"\nIteración de política: convergió en {iters_pi} iteraciones "
+      f"(evaluar + mejorar).")
+print(politica_a_texto(idx, pol_pi, terminal))
+
+# (3) ITERACIÓN DE VALOR.
+pol_vi, V_vi, barridos_vi = iteracion_de_valor(P, R, GAMMA)
+print(f"\nIteración de valor: convergió en {barridos_vi} barridos.")
+print(politica_a_texto(idx, pol_vi, terminal))
+
+# Verificación: ¿misma política óptima? ¿mismo V*?
+no_term = ~terminal
+misma = np.array_equal(pol_pi[no_term], pol_vi[no_term])
+print(f"\n¿Ambas dan la misma política? {'Sí' if misma else 'No'}")
+print(f"Diferencia máxima entre las dos V*: {np.max(np.abs(V_pi - V_vi)):.2e}")
+
+dibujar(idx, V_vi, pol_vi, terminal)
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong>. Verás por texto que la iteración de política converge en
+          poquísimas iteraciones y la de valor en unos pocos barridos más, que <strong>ambas dan la
+          misma política</strong> y que la diferencia entre sus $V^*$ es prácticamente cero. Luego
+          aparece el mapa de calor: verde donde vale la pena estar (cerca de la meta) y rojo cerca de
+          la trampa. Las flechas trazan la ruta óptima, y fíjate en que en la casilla de abajo a la
+          derecha la flecha apunta <em>a la izquierda</em>: el plan óptimo <strong>rodea</strong> la
+          trampa en lugar de arriesgarse a caer en ella.
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Por qué la meta vale 0 (y no 10)</div>
+          <p>
+            En el mapa, la casilla de la meta aparece con valor $0$, mientras que su vecina de la
+            izquierda vale $10$. No es un error. La recompensa $+10$ se cobra en la
+            <strong>transición</strong> que <em>entra</em> en la meta, no por <em>estar</em> ya en
+            ella. Una vez dentro, el episodio termina: no hay futuro que valorar, así que
+            $V^*(\text{meta}) = 0$. Por eso la casilla que de verdad vale mucho es la contigua, desde
+            la que un solo paso te da el premio. Es una confusión clásica; tenerla clara te ahorrará
+            muchos dolores de cabeza.
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          Como todos los ejemplos del manual, este también funciona fuera del navegador. Descárgalo
+          con «Descargar .py» (o cópialo) y lánzalo así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) ejecuta el ejemplo</span>
+<span class="prompt">$</span> python code/05-programacion-dinamica/programacion_dinamica.py
+<span class="comment">Gridworld 3x4: 11 estados (9 no terminales), 4 acciones, gamma = 0.9
+
+Evaluación de 'siempre derecha': V del inicio (2, 0) = -10.00  (se atasca y suma -1 sin fin)
+
+Iteración de política: convergió en 5 iteraciones (evaluar + mejorar).
+ &gt;  &gt;  &gt;  G
+ ^  #  ^  X
+ ^  &gt;  ^  &lt;
+
+Iteración de valor: convergió en 6 barridos.
+ &gt;  &gt;  &gt;  G
+ ^  #  ^  X
+ ^  &gt;  ^  &lt;
+
+¿Ambas dan la misma política? Sí
+Diferencia máxima entre las dos V*: 0.00e+00</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Este ejemplo usa solo <code>numpy</code> y <code>matplotlib</code>, así que corre entero
+          en el navegador con <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>.
+          La primera ejecución tarda unos segundos en descargar el intérprete; las siguientes son
+          instantáneas.
+        </p>
+
+        <h2 id="resumen">Cierre</h2>
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>La <strong>programación dinámica</strong> resuelve un MDP <strong>exactamente</strong>
+              cuando conocemos el modelo $p(s',r\mid s,a)$: en vez de aprender actuando, planificamos.</li>
+            <li>La receta común: tomar una <strong>ecuación de Bellman</strong> y usarla como
+              <strong>regla de actualización repetida</strong>. Funciona porque es una contracción y
+              converge a un único punto fijo.</li>
+            <li><strong>Evaluación de política:</strong> barrer Bellman de esperanza hasta obtener
+              $V^\pi$. <strong>Mejora de política:</strong> volverse greedy respecto a $V^\pi$
+              garantiza una política igual o mejor.</li>
+            <li><strong>Iteración de política</strong> alterna evaluar y mejorar;
+              <strong>iteración de valor</strong> los funde en un barrido con $\max_a$. Ambas son
+              casos de <strong>GPI</strong> y llegan a $(\pi^*, V^*)$.</li>
+            <li>El coste crece con el número de estados: barreremos <em>todo</em> el espacio, algo que
+              en problemas gigantes será el cuello de botella.</li>
+          </ul>
+        </div>
+
+        <p>
+          Toda la potencia de este capítulo descansa sobre una suposición enorme: que
+          <strong>conocemos el modelo</strong>. En la mayoría de los problemas reales no lo tenemos:
+          no sabemos de antemano las probabilidades de transición ni las recompensas. En el
+          <a href="06-monte-carlo.html">capítulo 6</a> tiramos esa muleta y aprendemos a estimar
+          valores <strong>solo a partir de la experiencia</strong>, ejecutando episodios completos y
+          promediando lo que ocurre: los <strong>métodos de Monte Carlo</strong>. La misma idea de la
+          GPI seguirá con nosotros; lo único que cambia es de dónde sacamos los números.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

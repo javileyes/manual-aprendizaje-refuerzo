@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>1. ¿Qué es el aprendizaje por refuerzo? · Manual de RL</title>
+  <meta name="description" content="El bucle agente–entorno–recompensa: la idea central del aprendizaje por refuerzo, con una analogía y un primer ejemplo en Python ejecutable." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="1">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 0 · Capítulo 1</span>
+        <h1>¿Qué es el aprendizaje por refuerzo?</h1>
+        <p class="lead">
+          El aprendizaje por refuerzo (<em>Reinforcement Learning</em>, RL) es la rama de la
+          inteligencia artificial que estudia cómo un <strong>agente</strong> aprende a
+          <strong>tomar decisiones</strong> probando cosas y observando las consecuencias.
+          No le decimos qué hacer: le dejamos actuar, le damos <strong>recompensas</strong>,
+          y él descubre solo una estrategia que las maximice.
+        </p>
+
+        <h2 id="la-idea">La idea, con una analogía</h2>
+        <p>
+          Piensa en cómo aprende un niño a montar en bicicleta. Nadie le da una fórmula.
+          Prueba, se tambalea, a veces se cae (mala experiencia) y a veces avanza unos metros
+          (buena experiencia). Con el tiempo, su cuerpo ajusta lo que hace para tener más
+          experiencias buenas y menos malas. Eso es <em>exactamente</em> el aprendizaje por refuerzo.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            En RL no aprendemos de ejemplos etiquetados («esto es un gato, esto es un perro»),
+            como en el aprendizaje supervisado. Aprendemos de <strong>consecuencias</strong>:
+            hacemos algo, el mundo responde con una señal numérica de recompensa, y usamos esa
+            señal para actuar mejor la próxima vez.
+          </p>
+        </div>
+
+        <h2 id="el-bucle">El bucle agente–entorno</h2>
+        <p>
+          Todo el RL gira en torno a un bucle que se repite en el tiempo. En cada instante $t$:
+        </p>
+        <ol>
+          <li>El agente observa el <strong>estado</strong> $S_t$ del entorno (¿dónde estoy?).</li>
+          <li>Elige una <strong>acción</strong> $A_t$ (¿qué hago?).</li>
+          <li>El entorno responde con una <strong>recompensa</strong> $R_{t+1}$ y un nuevo estado $S_{t+1}$.</li>
+          <li>Vuelta a empezar.</li>
+        </ol>
+
+        <figure class="figure">
+          <svg viewBox="0 0 640 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diagrama del bucle agente-entorno">
+            <defs>
+              <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#4f46e5" />
+              </marker>
+            </defs>
+            <rect x="70" y="90" width="180" height="60" rx="12" fill="#4f46e5" />
+            <text x="160" y="126" text-anchor="middle" fill="#fff" font-size="20" font-family="sans-serif" font-weight="700">Agente</text>
+            <rect x="390" y="90" width="180" height="60" rx="12" fill="#0ea5e9" />
+            <text x="480" y="126" text-anchor="middle" fill="#fff" font-size="20" font-family="sans-serif" font-weight="700">Entorno</text>
+            <path d="M250,105 C320,105 320,105 388,105" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow)" />
+            <text x="319" y="96" text-anchor="middle" fill="#4a5568" font-size="14" font-family="sans-serif">acción $A_t$</text>
+            <path d="M390,135 C320,135 320,135 252,135" fill="none" stroke="#0ea5e9" stroke-width="2.5" marker-end="url(#arrow)" />
+            <text x="319" y="170" text-anchor="middle" fill="#4a5568" font-size="14" font-family="sans-serif">estado $S_{t+1}$, recompensa $R_{t+1}$</text>
+          </svg>
+          <figcaption>El bucle de interacción: el agente actúa, el entorno reacciona. Aprender es cerrar bien este bucle.</figcaption>
+        </figure>
+
+        <p>El agente persigue un objetivo: no maximizar la recompensa <em>inmediata</em>, sino la
+        recompensa <strong>acumulada a largo plazo</strong>. A veces conviene sacrificar premio
+        ahora para ganar mucho más después (estudiar hoy para aprobar mañana).</p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Vocabulario esencial</div>
+          <p>Estos cinco términos aparecerán en todo el manual. Vale la pena fijarlos ya:</p>
+          <ul>
+            <li><strong>Agente</strong>: quien decide y aprende.</li>
+            <li><strong>Entorno</strong>: todo lo demás; responde a las acciones.</li>
+            <li><strong>Estado</strong> $S_t$: la información disponible para decidir.</li>
+            <li><strong>Acción</strong> $A_t$: lo que el agente puede hacer.</li>
+            <li><strong>Recompensa</strong> $R_{t+1}$: la señal numérica que define qué es «bueno».</li>
+          </ul>
+        </div>
+
+        <h2 id="matematicas">Un primer vistazo a las matemáticas</h2>
+        <p>
+          El objetivo del agente se puede escribir con precisión. Definimos el <strong>retorno</strong>
+          $G_t$ como la suma de recompensas futuras, dando un poco menos de peso a las que llegan
+          más tarde mediante un <strong>factor de descuento</strong> $\gamma \in [0, 1]$:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El objetivo formal</div>
+          <p>$$G_t = R_{t+1} + \gamma R_{t+2} + \gamma^2 R_{t+3} + \cdots = \sum_{k=0}^{\infty} \gamma^k R_{t+k+1}$$</p>
+          <p class="math-note">
+            El agente busca una <strong>política</strong> $\pi$ (una forma de elegir acciones)
+            que maximice el retorno esperado $\mathbb{E}_\pi[G_t]$. El descuento $\gamma$ codifica
+            «cuánto me importa el futuro»: con $\gamma=0$ solo cuenta el premio inmediato; con
+            $\gamma \to 1$ el agente es muy paciente.
+          </p>
+        </div>
+
+        <p>No te preocupes si aún no ves de dónde sale todo esto: en el
+        <a href="04-retornos-y-valor.html">capítulo 4</a> lo construiremos con calma. Por ahora
+        basta con la idea: <em>maximizar la recompensa acumulada y descontada</em>.</p>
+
+        <h2 id="ejemplo">Tu primer agente, en Python</h2>
+        <p>
+          Vamos a ver el bucle en acción con el ejemplo más simple posible: un robot en un
+          <strong>pasillo</strong> de 5 casillas. Empieza a la izquierda (casilla 0) y la meta
+          está a la derecha (casilla 4). Puede ir a izquierda o derecha. Cada paso cuesta $-1$
+          (queremos llegar rápido) y alcanzar la meta da $+10$.
+        </p>
+        <p>
+          Compararemos dos «agentes»: uno que actúa <strong>al azar</strong> y otro con una
+          política fija <strong>sensata</strong> (ir siempre a la derecha). Todavía no hay
+          aprendizaje —eso empieza en el capítulo 2—, pero verás el bucle y la recompensa.
+        </p>
+
+        <div class="code-example" data-packages="numpy">
+          <div class="code-header">
+            <span class="file-name">pasillo.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>import numpy as np
+
+# --- El entorno: un pasillo de 5 casillas [0, 1, 2, 3, 4] ---
+N = 5
+META = N - 1
+
+def paso(estado, accion):
+    """Devuelve (nuevo_estado, recompensa, terminado)."""
+    if accion == "derecha":
+        estado = min(estado + 1, META)
+    else:  # "izquierda"
+        estado = max(estado - 1, 0)
+    if estado == META:
+        return estado, +10, True      # llegar a la meta
+    return estado, -1, False          # cada paso cuesta
+
+def ejecutar_episodio(politica, semilla):
+    rng = np.random.default_rng(semilla)
+    estado, total, terminado, pasos = 0, 0, False, 0
+    while not terminado and pasos &lt; 50:
+        accion = politica(estado, rng)
+        estado, r, terminado = paso(estado, accion)
+        total += r
+        pasos += 1
+    return total, pasos
+
+# --- Dos políticas (formas de decidir la acción) ---
+def politica_azar(estado, rng):
+    return rng.choice(["izquierda", "derecha"])
+
+def politica_derecha(estado, rng):
+    return "derecha"
+
+# --- Comparamos ambas en 500 episodios ---
+for nombre, pol in [("Al azar", politica_azar), ("Siempre derecha", politica_derecha)]:
+    recompensas = [ejecutar_episodio(pol, semilla=i)[0] for i in range(500)]
+    print(f"{nombre:16s} -> recompensa media = {np.mean(recompensas):6.2f}")
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong> (la primera vez tarda unos segundos en descargar el
+          intérprete de Python). Verás que la política sensata obtiene una recompensa mucho mayor
+          que la aleatoria. La pregunta central del resto del manual es:
+          <em>¿cómo puede el agente <strong>descubrir</strong> esa buena política por sí solo,
+          sin que se la digamos?</em>
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Cambia la recompensa de cada paso de $-1$ a $0$ y vuelve a ejecutar. ¿Por qué ahora
+            la política aleatoria ya no parece tan mala en recompensa total? (Pista: sin castigo
+            por paso, tardar no penaliza.) Jugar con las recompensas es <em>diseñar</em> el problema.
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          Todo ejemplo del manual funciona también fuera del navegador. Descarga el archivo con el
+          botón «Descargar .py» (o cópialo) y ejecútalo así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv && source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) ejecuta el ejemplo</span>
+<span class="prompt">$</span> python pasillo.py
+<span class="comment">Al azar          -> recompensa media =  -7.83
+Siempre derecha  -> recompensa media =   7.00</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Los ejemplos «en el navegador» usan <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>
+          (Python compilado a WebAssembly) y necesitan conexión la primera vez. Los ejemplos con
+          <code>torch</code> o <code>gymnasium</code> (a partir del capítulo 12) son demasiado pesados
+          para el navegador: para esos, el manual te dará el archivo <code>.py</code> listo para tu terminal.
+        </p>
+
+        <h2 id="cuando">¿Cuándo se usa RL en el mundo real?</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Dominio</th><th>Agente</th><th>Recompensa</th></tr></thead>
+            <tbody>
+              <tr><td>Juegos (Go, ajedrez, Atari)</td><td>El jugador</td><td>Ganar / puntuación</td></tr>
+              <tr><td>Robótica</td><td>El controlador del robot</td><td>Completar la tarea sin caerse</td></tr>
+              <tr><td>Recomendadores</td><td>El sistema que sugiere</td><td>Clics, tiempo de visionado</td></tr>
+              <tr><td>ChatGPT y similares (RLHF)</td><td>El modelo de lenguaje</td><td>Preferencia humana (cap. 20)</td></tr>
+              <tr><td>Centros de datos, energía</td><td>El controlador de refrigeración</td><td>Menor consumo energético</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>El RL aprende <strong>de la interacción</strong>: acción → recompensa → mejor decisión.</li>
+            <li>El bucle es <strong>agente ↔ entorno</strong>, con estados $S_t$, acciones $A_t$ y recompensas $R_{t+1}$.</li>
+            <li>El objetivo es maximizar el <strong>retorno</strong> $G_t$: recompensa futura acumulada y descontada por $\gamma$.</li>
+            <li>Una <strong>política</strong> $\pi$ es la estrategia para elegir acciones. Aprender = mejorar la política.</li>
+          </ul>
+        </div>
+
+        <p>En el próximo capítulo atacamos el dilema más famoso del RL con el problema más
+        pequeño que lo contiene: el <strong>bandido multibrazo</strong>. Ahí sí empezará a
+        aprender de verdad.</p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

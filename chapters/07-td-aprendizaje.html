@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>7. Diferencias temporales TD(0) · Manual de RL</title>
+  <meta name="description" content="El aprendizaje por diferencias temporales TD(0): bootstrapping, el error TD, y la comparación con Monte Carlo en el paseo aleatorio de 5 estados, con código Python ejecutable." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="7">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 1 · Capítulo 7</span>
+        <h1>Aprendizaje por diferencias temporales TD(0)</h1>
+        <p class="lead">
+          El aprendizaje por <strong>diferencias temporales</strong> (<em>Temporal-Difference</em>, TD)
+          es, según Sutton y Barto, «la idea más central y novedosa de todo el aprendizaje por
+          refuerzo». Combina lo mejor de dos mundos: aprende <strong>de la experiencia directa</strong>,
+          sin necesitar un modelo del entorno (como Monte Carlo), pero actualiza sus estimaciones
+          <strong>en cada paso</strong>, sin esperar al final del episodio (como la programación
+          dinámica). El truco que lo hace posible se llama <em>bootstrapping</em>.
+        </p>
+
+        <h2 id="idea">La idea: aprender sin esperar al final</h2>
+        <p>
+          Imagina que sales del trabajo y quieres estimar cuánto tardarás en llegar a casa.
+          Al salir predices «unos 30 minutos». Nada más subir al coche ves que llueve a cántaros;
+          sin haber recorrido ni un metro, ya <strong>corriges</strong> tu predicción a 40 minutos.
+          Más adelante coges la autopista y va fluida: bajas de nuevo tu estimación. En cada tramo
+          ajustas tu predicción del tiempo <em>total</em> usando la información nueva más tu
+          <em>predicción anterior del tiempo restante</em>. No esperas a aparcar en casa para
+          descubrir que te equivocaste: aprendes sobre la marcha.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Este es el ejemplo de «conducir a casa» de Sutton y Barto, y captura la esencia de TD.
+            <strong>Monte Carlo</strong> (capítulo <a href="06-monte-carlo.html">6</a>) sería esperar a
+            llegar a casa para comparar la predicción inicial con el tiempo real: solo aprendes al final.
+            <strong>TD</strong> aprende de cada tramo comparando dos predicciones consecutivas: la de
+            hace un momento y la de ahora, ya con un poco más de realidad incorporada. Cada predicción
+            se apoya («bootstrapping», tirar de los propios cordones) en la siguiente.
+          </p>
+        </div>
+
+        <p>
+          En los capítulos anteriores atacamos el problema de <strong>predicción</strong> (estimar la
+          función de valor $V_\pi$ de una política dada) de dos formas. La
+          <a href="05-programacion-dinamica.html">programación dinámica</a> necesitaba conocer el
+          modelo del entorno (las probabilidades de transición) y actualizaba cada estado a partir de
+          los valores estimados de sus vecinos. <a href="06-monte-carlo.html">Monte Carlo</a> no
+          necesitaba modelo, pero tenía que esperar a que el episodio <em>terminara</em> para calcular
+          el retorno real. TD(0) se queda con lo bueno de cada uno.
+        </p>
+
+        <h2 id="entre-mc-y-dp">TD, entre Monte Carlo y programación dinámica</h2>
+        <p>
+          Recordemos la definición de la función de valor de un estado bajo una política $\pi$:
+          es el retorno esperado si partimos de ese estado y seguimos actuando según $\pi$.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Dos caras de la función de valor</div>
+          <p>$$V_\pi(s) = \mathbb{E}_\pi\!\left[\,G_t \mid S_t = s\,\right] = \mathbb{E}_\pi\!\left[\,R_{t+1} + \gamma\, V_\pi(S_{t+1}) \mid S_t = s\,\right]$$</p>
+          <p class="math-note">
+            $G_t$ es el <strong>retorno</strong> (suma descontada de recompensas futuras);
+            $R_{t+1}$ es la recompensa inmediata; $\gamma \in [0,1]$ es el factor de descuento;
+            $S_{t+1}$ es el estado siguiente. La primera igualdad la usa Monte Carlo (estima la
+            media de $G_t$ con muestras completas). La segunda —la ecuación de Bellman del
+            capítulo <a href="04-retornos-y-valor.html">4</a>— la usan tanto la programación
+            dinámica como TD.
+          </p>
+        </div>
+
+        <p>
+          La diferencia clave está en <em>qué usamos como objetivo</em> hacia el que mover nuestra
+          estimación actual $V(S_t)$:
+        </p>
+        <ul>
+          <li><strong>Monte Carlo</strong> usa el retorno real $G_t$, que solo se conoce al final del
+            episodio. Es un objetivo <em>insesgado</em> (su media es el valor verdadero), pero de
+            <strong>alta varianza</strong>: depende de toda la cadena de acciones y azar hasta el final.</li>
+          <li><strong>Programación dinámica</strong> usa $R_{t+1} + \gamma\, V(S_{t+1})$, pero calcula la
+            <em>esperanza exacta</em> sobre todas las transiciones posibles (necesita el modelo).</li>
+          <li><strong>TD(0)</strong> usa también $R_{t+1} + \gamma\, V(S_{t+1})$, pero con
+            <em>una sola muestra</em> del siguiente estado, tomada de la experiencia real. No necesita
+            modelo (como MC) y no espera al final (como DP).</li>
+        </ul>
+
+        <h2 id="error-td">El error TD y la actualización TD(0)</h2>
+        <p>
+          Estamos en el estado $S_t$ con una estimación actual $V(S_t)$. Damos <strong>un</strong> paso,
+          observamos la recompensa $R_{t+1}$ y el estado siguiente $S_{t+1}$. Ahora tenemos una
+          estimación «mejor informada» del valor de $S_t$: la recompensa que acabamos de recibir más
+          nuestro valor descontado del estado al que hemos llegado. A esa estimación la llamamos el
+          <strong>objetivo TD</strong>:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El objetivo TD y el error TD</div>
+          <p>Objetivo TD: $\quad R_{t+1} + \gamma\, V(S_{t+1})$</p>
+          <p>La diferencia entre ese objetivo y lo que creíamos es el <strong>error TD</strong> $\delta_t$:</p>
+          <p>$$\delta_t \;=\; \underbrace{R_{t+1} + \gamma\, V(S_{t+1})}_{\text{objetivo (nueva info)}} \;-\; \underbrace{V(S_t)}_{\text{estimación vieja}}$$</p>
+          <p class="math-note">
+            $\delta_t$ mide la «sorpresa»: cuánto se desvía lo que ha pasado de lo que esperábamos.
+            Si $\delta_t > 0$, el estado $S_t$ valía más de lo que pensábamos; si $\delta_t < 0$, menos.
+            Todos los símbolos ya te son familiares: $R_{t+1}$ recompensa, $\gamma$ descuento,
+            $V$ nuestra tabla de valores estimados, $S_t$ y $S_{t+1}$ estados consecutivos.
+          </p>
+        </div>
+
+        <p>
+          La actualización TD(0) es simplemente dar un pequeño paso en la dirección que reduce esa
+          sorpresa. Controlamos el tamaño del paso con la <strong>tasa de aprendizaje</strong>
+          $\alpha \in (0,1]$:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La regla de actualización TD(0)</div>
+          <p>$$V(S_t) \;\leftarrow\; V(S_t) + \alpha\,\delta_t \;=\; V(S_t) + \alpha\,\bigl[\,R_{t+1} + \gamma\, V(S_{t+1}) - V(S_t)\,\bigr]$$</p>
+          <p class="math-note">
+            Se llama <strong>TD(0)</strong> porque mira solo <em>un</em> paso hacia delante (el «0» de
+            $\text{TD}(\lambda)$ con $\lambda=0$, que veremos en el capítulo
+            <a href="10-td-lambda.html">10</a>). El nombre completo es <em>TD de un paso</em>.
+          </p>
+        </div>
+
+        <h3>Compárala con Monte Carlo</h3>
+        <p>
+          La actualización de Monte Carlo de cada-visita tiene <em>exactamente la misma forma</em>,
+          pero cambiando el objetivo TD por el retorno completo $G_t$:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ TD(0) frente a Monte Carlo</div>
+          <p>Monte Carlo: $\quad V(S_t) \leftarrow V(S_t) + \alpha\,\bigl[\,G_t - V(S_t)\,\bigr]$</p>
+          <p>TD(0): $\qquad\;\; V(S_t) \leftarrow V(S_t) + \alpha\,\bigl[\,R_{t+1} + \gamma\, V(S_{t+1}) - V(S_t)\,\bigr]$</p>
+          <p class="math-note">
+            La única diferencia es el objetivo: $G_t$ (todo el futuro, medido) frente a
+            $R_{t+1} + \gamma\, V(S_{t+1})$ (un paso medido, el resto <em>estimado</em>). Sustituir el
+            futuro real por una estimación propia es el <strong>bootstrapping</strong>.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Sesgo frente a varianza</div>
+          <p>
+            El bootstrapping tiene un coste. El objetivo de Monte Carlo, $G_t$, es <strong>insesgado</strong>:
+            de media coincide con $V_\pi(S_t)$. Pero es un solo número que resume una trayectoria entera de
+            decisiones y azar, así que tiene <strong>mucha varianza</strong>.
+          </p>
+          <p>
+            El objetivo de TD, $R_{t+1} + \gamma\, V(S_{t+1})$, depende de un único paso, por lo que su
+            <strong>varianza es mucho menor</strong>. A cambio es <strong>sesgado</strong>: usa $V(S_{t+1})$,
+            que aún es una estimación imperfecta. En la práctica, esa reducción de varianza suele ganar la
+            partida: TD tiende a aprender <em>más rápido y de forma más estable</em>, como comprobarás
+            en el ejemplo de más abajo.
+          </p>
+        </div>
+
+        <h2 id="algoritmo">El algoritmo TD(0), paso a paso</h2>
+        <p>
+          TD(0) evalúa una política $\pi$ fija (problema de <strong>predicción</strong>). El pseudocódigo
+          cabe en unas pocas líneas:
+        </p>
+        <ol>
+          <li>Inicializa $V(s)$ de forma arbitraria para todo estado $s$ (por ejemplo, a $0$ o a $0{,}5$),
+            y $V(\text{terminal}) = 0$.</li>
+          <li>Repite para cada episodio:
+            <ul>
+              <li>Observa el estado inicial $S$.</li>
+              <li>Repite para cada paso del episodio, hasta que $S$ sea terminal:
+                <ol>
+                  <li>Elige la acción $A$ según la política $\pi$ en $S$.</li>
+                  <li>Ejecútala; observa la recompensa $R$ y el estado siguiente $S'$.</li>
+                  <li>Actualiza: $\;V(S) \leftarrow V(S) + \alpha\,[\,R + \gamma\,V(S') - V(S)\,]$.</li>
+                  <li>Avanza: $\;S \leftarrow S'$.</li>
+                </ol>
+              </li>
+            </ul>
+          </li>
+        </ol>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Aprendizaje en línea</div>
+          <p>
+            Fíjate en que la actualización ocurre <strong>dentro</strong> del bucle de pasos, no al
+            terminar el episodio. TD es un método <em>en línea</em> (<em>online</em>): puede aprender de
+            entornos que nunca terminan (tareas continuas), donde Monte Carlo, que necesita un final,
+            no es aplicable.
+          </p>
+        </div>
+
+        <h2 id="ejemplo">Ejemplo: el paseo aleatorio de 5 estados</h2>
+        <p>
+          Vamos a comparar TD(0) y Monte Carlo en el problema clásico del ejemplo 6.2 de Sutton y Barto.
+          Tenemos un pasillo con cinco estados no terminales, <strong>A, B, C, D, E</strong>, y dos
+          estados terminales en los extremos. El agente empieza siempre en el centro (<strong>C</strong>)
+          y en cada paso se mueve a izquierda o derecha con probabilidad $1/2$ (esta es la política que
+          evaluamos). Todas las recompensas son $0$ salvo la de alcanzar el terminal <em>derecho</em>,
+          que vale $+1$.
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="0 0 720 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diagrama del paseo aleatorio de cinco estados">
+            <defs>
+              <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" fill="#718096" />
+              </marker>
+            </defs>
+            <!-- Terminal izquierdo -->
+            <rect x="30" y="60" width="70" height="60" rx="8" fill="#94a3b8" />
+            <text x="65" y="96" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">fin</text>
+            <text x="65" y="140" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">R=0</text>
+            <!-- Estados A..E -->
+            <g font-family="sans-serif" font-weight="700" font-size="20">
+              <circle cx="180" cy="90" r="30" fill="#0ea5e9" /><text x="180" y="97" text-anchor="middle" fill="#fff">A</text>
+              <circle cx="280" cy="90" r="30" fill="#0ea5e9" /><text x="280" y="97" text-anchor="middle" fill="#fff">B</text>
+              <circle cx="380" cy="90" r="30" fill="#4f46e5" /><text x="380" y="97" text-anchor="middle" fill="#fff">C</text>
+              <circle cx="480" cy="90" r="30" fill="#0ea5e9" /><text x="480" y="97" text-anchor="middle" fill="#fff">D</text>
+              <circle cx="580" cy="90" r="30" fill="#0ea5e9" /><text x="580" y="97" text-anchor="middle" fill="#fff">E</text>
+            </g>
+            <text x="380" y="42" text-anchor="middle" fill="#4338ca" font-size="13" font-family="sans-serif" font-weight="700">inicio</text>
+            <!-- Terminal derecho -->
+            <rect x="620" y="60" width="70" height="60" rx="8" fill="#10b981" />
+            <text x="655" y="96" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">fin</text>
+            <text x="655" y="140" text-anchor="middle" fill="#059669" font-size="13" font-family="sans-serif" font-weight="700">R=+1</text>
+            <!-- Flechas de transición -->
+            <g stroke="#718096" stroke-width="2" fill="none">
+              <path d="M150,78 C125,66 120,66 102,72" marker-end="url(#ar)" />
+              <path d="M210,102 C235,114 240,114 258,108" marker-end="url(#ar)" />
+              <path d="M250,78 C225,66 220,66 210,72" marker-end="url(#ar)" />
+              <path d="M310,102 C335,114 340,114 358,108" marker-end="url(#ar)" />
+              <path d="M350,78 C325,66 320,66 310,72" marker-end="url(#ar)" />
+              <path d="M410,102 C435,114 440,114 458,108" marker-end="url(#ar)" />
+              <path d="M450,78 C425,66 420,66 410,72" marker-end="url(#ar)" />
+              <path d="M510,102 C535,114 540,114 558,108" marker-end="url(#ar)" />
+              <path d="M550,78 C525,66 520,66 510,72" marker-end="url(#ar)" />
+              <path d="M610,102 C635,114 640,114 618,108" marker-end="url(#ar)" />
+            </g>
+          </svg>
+          <figcaption>El paseo aleatorio: desde C, pasos a izquierda/derecha con probabilidad 1/2. Solo el terminal derecho da recompensa.</figcaption>
+        </figure>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 ¿Por qué este ejemplo es tan didáctico?</div>
+          <p>
+            Porque conocemos la <strong>respuesta exacta</strong>. Con $\gamma = 1$, el valor de un estado
+            es justo la <em>probabilidad</em> de acabar en el terminal derecho partiendo de él. Por simetría
+            del paseo aleatorio, esas probabilidades son
+            $V(A)=\tfrac{1}{6},\, V(B)=\tfrac{2}{6},\, V(C)=\tfrac{3}{6},\, V(D)=\tfrac{4}{6},\, V(E)=\tfrac{5}{6}$.
+            Al tener la verdad podemos medir el <strong>error</strong> de cada método y ver quién se acerca antes.
+          </p>
+        </div>
+
+        <p>
+          El código de abajo hace dos cosas. Primero, deja correr TD(0) y guarda una «foto» de sus valores
+          estimados tras 0, 1, 10 y 100 episodios, para ver cómo se aproximan a la verdad. Segundo, promedia
+          sobre muchas tiradas independientes la curva de <strong>error RMS</strong> (la raíz del error
+          cuadrático medio sobre los cinco estados) frente al número de episodios, para varios valores de
+          $\alpha$, comparando TD y Monte Carlo. Pulsa <strong>▶ Ejecutar</strong> (la primera vez tarda unos
+          segundos en descargar Python).
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">td_random_walk.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+TD(0) frente a Monte Carlo en el paseo aleatorio de 5 estados
+=============================================================
+
+Reproduce el ejemplo 6.2 de Sutton &amp; Barto ("Reinforcement Learning: An
+Introduction"). Un agente parte del estado central C de un pasillo
+
+    [ 0 ] A   B   C   D   E [ 6 ]
+      T                       T
+
+con dos estados terminales (T) en los extremos. En cada paso se mueve a la
+izquierda o a la derecha con probabilidad 1/2. Todas las recompensas son 0
+salvo la de llegar al terminal derecho, que vale +1. Con gamma = 1, el valor
+verdadero de cada estado es su probabilidad de acabar en el terminal derecho:
+
+    V(A)=1/6, V(B)=2/6, V(C)=3/6, V(D)=4/6, V(E)=5/6.
+
+Comparamos dos formas de ESTIMAR esos valores a partir de la experiencia:
+
+  * TD(0): actualiza en cada paso usando su propia prediccion del estado
+    siguiente (bootstrapping):
+        V(S_t) &lt;- V(S_t) + alpha * [ R_{t+1} + gamma * V(S_{t+1}) - V(S_t) ].
+  * Monte Carlo de cada-visita: espera al final del episodio y actualiza cada
+    estado visitado hacia el retorno observado:
+        V(S_t) &lt;- V(S_t) + alpha * [ G_t - V(S_t) ].
+
+El script dibuja (1) los valores que estima TD tras 0, 1, 10 y 100 episodios
+frente a los verdaderos y (2) la curva de error RMS frente al numero de
+episodios para varios alpha, tanto para TD como para MC.
+
+Ejecucion:
+    pip install -r requirements.txt
+    python code/07-td-aprendizaje/td_random_walk.py
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- Definicion del entorno ---
+N_STATES = 7                 # estados 0..6; 0 y 6 son terminales
+START = 3                    # el estado central C
+LEFT_TERMINAL = 0
+RIGHT_TERMINAL = 6
+GAMMA = 1.0                  # sin descuento
+
+# Valores verdaderos de A, B, C, D, E  -&gt;  i/6
+TRUE_VALUES = np.arange(1, 6) / 6.0
+
+
+def generar_episodio(rng):
+    """Genera un episodio y devuelve la lista de (estado, recompensa, siguiente)."""
+    estado = START
+    transiciones = []
+    while estado not in (LEFT_TERMINAL, RIGHT_TERMINAL):
+        siguiente = estado + (1 if rng.random() &lt; 0.5 else -1)
+        recompensa = 1.0 if siguiente == RIGHT_TERMINAL else 0.0
+        transiciones.append((estado, recompensa, siguiente))
+        estado = siguiente
+    return transiciones
+
+
+def actualizar_td0(V, alpha, rng):
+    """Un episodio de TD(0): actualiza V en cada paso con bootstrapping."""
+    for s, r, s_sig in generar_episodio(rng):
+        delta = r + GAMMA * V[s_sig] - V[s]      # error TD
+        V[s] += alpha * delta
+
+
+def actualizar_mc(V, alpha, rng):
+    """Un episodio de Monte Carlo de cada-visita (alpha constante)."""
+    transiciones = generar_episodio(rng)
+    # Con gamma=1 y recompensas nulas salvo la final, G_t es la misma para todo
+    # t del episodio: la recompensa terminal (0 o 1).
+    G = transiciones[-1][1]
+    for s, r, s_sig in transiciones:
+        V[s] += alpha * (G - V[s])
+
+
+def error_rms(V):
+    """Raiz del error cuadratico medio sobre los 5 estados no terminales."""
+    return np.sqrt(np.mean((V[1:6] - TRUE_VALUES) ** 2))
+
+
+def valores_iniciales():
+    """V=0 en los terminales y V=0.5 en A..E (estimacion neutra)."""
+    V = np.zeros(N_STATES)
+    V[1:6] = 0.5
+    return V
+
+
+def instantaneas_td(snapshots, alpha, seed):
+    """Valores que estima TD(0) tras un numero dado de episodios (una tirada)."""
+    rng = np.random.default_rng(seed)
+    V = valores_iniciales()
+    resultado = {}
+    if 0 in snapshots:
+        resultado[0] = V[1:6].copy()
+    for ep in range(1, max(snapshots) + 1):
+        actualizar_td0(V, alpha, rng)
+        if ep in snapshots:
+            resultado[ep] = V[1:6].copy()
+    return resultado
+
+
+def curva_rms(actualizar, alpha, n_runs, n_episodes, seed0):
+    """Error RMS medio (sobre n_runs tiradas) tras cada episodio."""
+    errores = np.zeros(n_episodes)
+    for run in range(n_runs):
+        rng = np.random.default_rng(seed0 + run)
+        V = valores_iniciales()
+        for ep in range(n_episodes):
+            actualizar(V, alpha, rng)
+            errores[ep] += error_rms(V)
+    return errores / n_runs
+
+
+def main():
+    etiquetas = ["A", "B", "C", "D", "E"]
+
+    # --- (1) Valores estimados por TD(0) en varias fotos ---
+    snapshots = [0, 1, 10, 100]
+    fotos = instantaneas_td(snapshots, alpha=0.1, seed=0)
+
+    print("Valores estimados por TD(0) (alpha=0.1) frente a los verdaderos:")
+    print("   estado   " + "".join(f"{e:&gt;7s}" for e in etiquetas))
+    print("   verdad   " + "".join(f"{v:7.3f}" for v in TRUE_VALUES))
+    for ep in snapshots:
+        print(f"   ep={ep:&lt;5d} " + "".join(f"{v:7.3f}" for v in fotos[ep]))
+
+    # --- (2) Curvas de error RMS ---
+    n_runs, n_episodes = 100, 100
+    td_alphas = [0.15, 0.10, 0.05]
+    mc_alphas = [0.04, 0.02, 0.01]
+
+    curvas_td = {a: curva_rms(actualizar_td0, a, n_runs, n_episodes, seed0=1000)
+                 for a in td_alphas}
+    curvas_mc = {a: curva_rms(actualizar_mc, a, n_runs, n_episodes, seed0=2000)
+                 for a in mc_alphas}
+
+    print(f"\nError RMS final (media de {n_runs} tiradas, {n_episodes} episodios):")
+    for a in td_alphas:
+        print(f"   TD(0)  alpha={a:.2f}  -&gt;  RMS = {curvas_td[a][-1]:.4f}")
+    for a in mc_alphas:
+        print(f"   MC     alpha={a:.2f}  -&gt;  RMS = {curvas_mc[a][-1]:.4f}")
+
+    # --- Grafica ---
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.4))
+
+    x = np.arange(1, 6)
+    ax1.plot(x, TRUE_VALUES, "k--", marker="o", label="verdadero")
+    for ep in snapshots:
+        ax1.plot(x, fotos[ep], marker="o", label=f"{ep} episodios")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(etiquetas)
+    ax1.set_xlabel("estado")
+    ax1.set_ylabel("valor estimado")
+    ax1.set_title("TD(0): los valores se acercan a la verdad")
+    ax1.legend(fontsize=8)
+    ax1.grid(alpha=0.3)
+
+    epis = np.arange(1, n_episodes + 1)
+    for a in td_alphas:
+        ax2.plot(epis, curvas_td[a], color="tab:blue",
+                 alpha=0.5 + 0.4 * (a / max(td_alphas)),
+                 label=f"TD  alpha={a:.2f}")
+    for a in mc_alphas:
+        ax2.plot(epis, curvas_mc[a], color="tab:red", linestyle="--",
+                 alpha=0.5 + 0.4 * (a / max(mc_alphas)),
+                 label=f"MC  alpha={a:.2f}")
+    ax2.set_xlabel("episodios")
+    ax2.set_ylabel("error RMS (medio)")
+    ax2.set_title("TD (azul) converge mas rapido y estable que MC (rojo)")
+    ax2.legend(fontsize=8)
+    ax2.grid(alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
+</code></pre>
+        </div>
+
+        <p>
+          En la gráfica izquierda verás cómo TD(0) parte de la línea plana en $0{,}5$ y, episodio a episodio,
+          se va curvando hasta pegarse a la línea de valores verdaderos. En la derecha, las curvas
+          <strong>azules</strong> (TD) caen antes y se estabilizan más bajo que las <strong>rojas</strong>
+          (Monte Carlo): con el mismo esfuerzo, TD estima mejor. Es la reducción de varianza del bootstrapping
+          en acción. Fíjate también en que un $\alpha$ grande aprende rápido pero se queda con más ruido
+          residual, mientras que uno pequeño converge más lento pero más fino.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Cambia la inicialización de $V$ en <code>valores_iniciales</code> de $0{,}5$ a $0$ y vuelve a
+            ejecutar. ¿Qué le pasa a las primeras estimaciones? (Pista: $0{,}5$ es el valor verdadero de C
+            y una media razonable, así que ayuda mucho al principio.) Prueba también a subir $\alpha$ de TD
+            a $0{,}5$: ganarás velocidad inicial a costa de una curva de error mucho más ruidosa.
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          Como todos los ejemplos del manual, este funciona igual fuera del navegador. Descarga el archivo
+          con «Descargar .py» (o cópialo) y ejecútalo así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) ejecuta el ejemplo</span>
+<span class="prompt">$</span> python code/07-td-aprendizaje/td_random_walk.py
+<span class="comment"># Imprime los valores estimados por TD y el error RMS final,
+# y abre una ventana con las dos gráficas.</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Este ejemplo usa solo <code>numpy</code> y <code>matplotlib</code>, así que corre entero en el
+          navegador con <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>. A partir del
+          capítulo 12, los ejemplos con <code>torch</code> o <code>gymnasium</code> serán solo de terminal.
+        </p>
+
+        <h2 id="cierre">De la predicción al control</h2>
+        <p>
+          Hasta aquí, tanto en Monte Carlo como en TD(0), hemos hecho <strong>predicción</strong>: dada una
+          política fija, estimar su función de valor $V_\pi$. Pero el objetivo último del RL no es evaluar una
+          política, sino <strong>encontrar la mejor</strong>. Eso es el <em>control</em>.
+        </p>
+        <p>
+          El salto es natural: en lugar de estimar el valor de los <em>estados</em>, $V(s)$, estimaremos el
+          valor de los <em>pares estado-acción</em>, $Q(s,a)$, y usaremos el mismo error TD para mejorar la
+          política mientras la evaluamos. Ese es exactamente el plan del próximo capítulo con
+          <a href="08-sarsa.html"><strong>SARSA</strong></a>, el primer algoritmo de control por diferencias
+          temporales.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li><strong>Bootstrapping</strong>: TD actualiza una predicción usando otra predicción, sin
+              esperar al retorno completo.</li>
+            <li>El <strong>error TD</strong> es $\delta_t = R_{t+1} + \gamma\, V(S_{t+1}) - V(S_t)$, la
+              «sorpresa» entre el objetivo TD y la estimación previa.</li>
+            <li>La <strong>actualización TD(0)</strong> es $V(S_t) \leftarrow V(S_t) + \alpha\,\delta_t$;
+              ocurre en cada paso (aprendizaje en línea, sin modelo).</li>
+            <li><strong>Sesgo vs. varianza</strong>: MC es insesgado pero de alta varianza; TD es sesgado
+              (por el bootstrapping) pero de baja varianza, y suele aprender más rápido, como muestra el
+              paseo aleatorio.</li>
+            <li>TD(0) resuelve la <strong>predicción</strong>; en el capítulo <a href="08-sarsa.html">8</a>
+              usaremos la misma idea sobre $Q(s,a)$ para el <strong>control</strong>.</li>
+          </ul>
+        </div>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

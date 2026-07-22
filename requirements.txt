@@ -1,0 +1,16 @@
+# === Dependencias del Manual de Aprendizaje por Refuerzo ===
+# Instálalas con:  pip install -r requirements.txt
+
+# --- Núcleo: usado por casi todos los ejemplos (y por los que corren en el navegador) ---
+numpy>=1.26
+matplotlib>=3.7
+
+# --- Aprendizaje profundo (a partir del capítulo 12: DQN, PPO, SAC, ...) ---
+# Estos ejemplos son demasiado pesados para el navegador; se ejecutan en terminal.
+torch>=2.1
+gymnasium>=0.29
+
+# --- Extras opcionales para algunos entornos de gymnasium ---
+# (clásicos de control como Pendulum/MountainCar no los necesitan para entrenar,
+#  pero sí para renderizar en pantalla)
+pygame>=2.5

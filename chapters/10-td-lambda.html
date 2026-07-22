@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>10. Trazas de elegibilidad y TD(λ) · Manual de RL</title>
+  <meta name="description" content="El espectro entre TD(0) y Monte Carlo: retornos de n pasos, el λ-retorno y las trazas de elegibilidad. Vista adelante y vista atrás, con un ejemplo en Python ejecutable." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="10">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 1 · Capítulo 10</span>
+        <h1>Trazas de elegibilidad y TD(λ)</h1>
+        <p class="lead">
+          En el <a href="07-td-aprendizaje.html">capítulo 7</a> aprendimos con TD(0), que mira
+          <strong>un solo paso</strong> hacia el futuro. En el <a href="06-monte-carlo.html">capítulo 6</a>,
+          con Monte Carlo, mirábamos <strong>hasta el final del episodio</strong>. ¿Y si no tuviéramos
+          que elegir entre esos dos extremos? Entre ellos hay todo un espectro de métodos, y las
+          <strong>trazas de elegibilidad</strong> nos dan una forma barata y elegante de recorrerlo.
+          Ese es el objetivo de TD(λ): coger lo mejor de ambos mundos.
+        </p>
+
+        <h2 id="entre-dos-mundos">Entre dos mundos: un paso frente al final</h2>
+        <p>
+          Recuerda cómo actualizaba cada método el valor de un estado $V(S_t)$. Ambos empujan la
+          estimación hacia un <em>objetivo</em>, pero usan objetivos muy distintos:
+        </p>
+        <ul>
+          <li><strong>TD(0)</strong> usa el objetivo de <em>un paso</em>: la recompensa inmediata más
+          la estimación del siguiente estado, $R_{t+1} + \gamma V(S_{t+1})$. Aprende rápido y en cada
+          paso, pero <em>bootstrapea</em> (se apoya en su propia estimación, que puede estar sesgada).</li>
+          <li><strong>Monte Carlo</strong> usa el retorno real hasta el final, $G_t$. No tiene sesgo,
+          pero espera al final del episodio y sufre mucha <em>varianza</em>.</li>
+        </ul>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Imagina que vas conduciendo y de repente frenas en seco para evitar un choque. ¿Qué
+            decisiones fueron responsables de ese susto? Seguramente la de hace un segundo (girar
+            tarde), pero también, un poco, la de hace tres segundos (ir demasiado deprisa). Tu cerebro
+            reparte la «culpa» hacia atrás, dando <strong>más peso a lo más reciente</strong> y menos a
+            lo lejano. Una traza de elegibilidad es exactamente eso: una <strong>memoria que se
+            desvanece</strong> de los estados que acabas de visitar, para poder repartir entre ellos la
+            sorpresa que sientas ahora.
+          </p>
+        </div>
+
+        <h2 id="n-pasos">El punto intermedio: retornos de $n$ pasos</h2>
+        <p>
+          La forma más directa de situarnos entre TD(0) y Monte Carlo es decidir cuántos pasos reales
+          miramos antes de <em>bootstrapear</em>. Si miramos $n$ recompensas reales y luego rematamos
+          con la estimación del estado que alcancemos, obtenemos el <strong>retorno de $n$ pasos</strong>:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Retorno de $n$ pasos</div>
+          <p>$$G_t^{(n)} = R_{t+1} + \gamma R_{t+2} + \cdots + \gamma^{n-1} R_{t+n} + \gamma^n\, V(S_{t+n})$$</p>
+          <p class="math-note">
+            $R_{t+k}$ es la recompensa recibida $k$ pasos después de $t$; $\gamma \in [0,1]$ es el factor
+            de descuento; $S_{t+n}$ es el estado que se alcanza tras $n$ pasos y $V(S_{t+n})$ su valor
+            estimado (el término de <em>bootstrapping</em>). Con $n=1$ recuperas el objetivo de TD(0),
+            $R_{t+1}+\gamma V(S_{t+1})$; si $n$ llega hasta el final del episodio, el término de valor
+            desaparece y obtienes el retorno completo de Monte Carlo $G_t$.
+          </p>
+        </div>
+
+        <p>
+          La actualización de $n$ pasos es la de siempre, empujando $V(S_t)$ hacia este objetivo:
+          $V(S_t) \leftarrow V(S_t) + \alpha\,[\,G_t^{(n)} - V(S_t)\,]$, con $\alpha$ la tasa de
+          aprendizaje. El parámetro $n$ es una perilla: valores pequeños se parecen a TD, valores
+          grandes a Monte Carlo. En muchos problemas, un $n$ <em>intermedio</em> aprende más rápido que
+          cualquiera de los dos extremos. Pero elegir un único $n$ es un poco arbitrario… ¿por qué no
+          combinarlos <strong>todos</strong>?
+        </p>
+
+        <h2 id="lambda-retorno">El λ-retorno: promediar todos los horizontes</h2>
+        <p>
+          En lugar de quedarnos con un solo $n$, podemos hacer una <strong>media ponderada</strong> de
+          todos los retornos de $n$ pasos. TD(λ) usa una ponderación que decae geométricamente: cada
+          retorno de $n$ pasos recibe un peso proporcional a $\lambda^{n-1}$, con $\lambda \in [0,1]$.
+          El factor $(1-\lambda)$ delante es simplemente la constante de normalización para que los
+          pesos sumen 1.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El λ-retorno</div>
+          <p>$$G_t^{\lambda} = (1-\lambda)\sum_{n=1}^{\infty} \lambda^{\,n-1}\, G_t^{(n)}$$</p>
+          <p class="math-note">
+            $\lambda$ es el parámetro de traza (cuánto peso damos a los horizontes largos). Los pesos
+            $(1-\lambda)\lambda^{n-1}$ forman una distribución geométrica: suman 1 porque
+            $(1-\lambda)\sum_{n\ge 1}\lambda^{n-1} = (1-\lambda)\cdot\frac{1}{1-\lambda} = 1$. El primer
+            término ($n=1$) se lleva el peso mayor, $1-\lambda$, y los siguientes decaen suavemente.
+          </p>
+        </div>
+
+        <figure class="figure">
+          <svg viewBox="0 0 640 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pesos del λ-retorno para λ=0.8">
+            <line x1="30" y1="200" x2="620" y2="200" stroke="#94a3b8" stroke-width="1.5" />
+            <!-- n=1: objetivo de un paso (TD) -->
+            <rect x="40"  y="80"    width="44" height="120"   fill="#0ea5e9" rx="3" />
+            <!-- n=2..8: índigo -->
+            <rect x="104" y="104"   width="44" height="96"    fill="#4f46e5" rx="3" />
+            <rect x="168" y="123.2" width="44" height="76.8"  fill="#4f46e5" rx="3" />
+            <rect x="232" y="138.6" width="44" height="61.4"  fill="#4f46e5" rx="3" />
+            <rect x="296" y="150.8" width="44" height="49.2"  fill="#4f46e5" rx="3" />
+            <rect x="360" y="160.7" width="44" height="39.3"  fill="#4f46e5" rx="3" />
+            <rect x="424" y="168.5" width="44" height="31.5"  fill="#4f46e5" rx="3" />
+            <rect x="488" y="174.9" width="44" height="25.1"  fill="#4f46e5" rx="3" />
+            <!-- cola: retorno completo (MC) -->
+            <rect x="552" y="99.3"  width="44" height="100.7" fill="#10b981" rx="3" />
+            <text x="62"  y="220" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">n=1</text>
+            <text x="126" y="220" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">n=2</text>
+            <text x="190" y="220" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">n=3</text>
+            <text x="254" y="220" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">n=4</text>
+            <text x="318" y="220" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">n=5</text>
+            <text x="382" y="220" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">n=6</text>
+            <text x="446" y="220" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">n=7</text>
+            <text x="510" y="220" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">n=8</text>
+            <text x="574" y="220" text-anchor="middle" fill="#4a5568" font-size="13" font-family="sans-serif">resto</text>
+            <text x="62"  y="70"  text-anchor="middle" fill="#0ea5e9" font-size="12" font-family="sans-serif" font-weight="700">TD (1 paso)</text>
+            <text x="574" y="89"  text-anchor="middle" fill="#10b981" font-size="12" font-family="sans-serif" font-weight="700">MC (final)</text>
+          </svg>
+          <figcaption>
+            Pesos del λ-retorno con $\lambda=0{,}8$: cada retorno de $n$ pasos pesa $(1-\lambda)\lambda^{n-1}$.
+            El objetivo de un paso (cian) manda, pero la cola larga (verde, todo lo que queda hasta el
+            final) sigue contando. Con $\lambda=0$ solo sobrevive la primera barra (TD(0)); con
+            $\lambda=1$ todo el peso se va a la cola (Monte Carlo).
+          </figcaption>
+        </figure>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Los dos extremos, unificados</div>
+          <ul>
+            <li>Con $\lambda = 0$: el peso $(1-\lambda)\lambda^{n-1}$ vale 1 para $n=1$ y 0 para el resto.
+            El λ-retorno colapsa en el objetivo de TD(0). <strong>TD(λ=0) = TD(0)</strong>.</li>
+            <li>Con $\lambda = 1$: el peso de cada retorno de $n$ pasos <em>finito</em> tiende a 0 y todo
+            el peso recae en el retorno completo. <strong>TD(λ=1) = Monte Carlo</strong>.</li>
+            <li>Con $0 &lt; \lambda &lt; 1$: obtienes una mezcla suave de todos los horizontes.</li>
+          </ul>
+        </div>
+
+        <p>
+          En un episodio que termina en el instante $T$, la suma es finita: en cuanto $n$ alcanza el
+          final, $G_t^{(n)}$ ya es el retorno completo $G_t$. Agrupando esa cola, el λ-retorno se escribe
+          $G_t^{\lambda} = (1-\lambda)\sum_{n=1}^{T-t-1}\lambda^{n-1}G_t^{(n)} + \lambda^{\,T-t-1}\,G_t$,
+          donde el último término reúne todo el peso restante y lo asigna al retorno real hasta el final.
+        </p>
+
+        <h2 id="vista-adelante">Vista adelante: bonita, pero poco práctica</h2>
+        <p>
+          Con el λ-retorno ya tenemos un objetivo. La actualización <em>de la vista adelante</em>
+          (<em>forward view</em>) sería la natural: para cada estado visitado, empújalo hacia su λ-retorno.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Actualización de la vista adelante</div>
+          <p>$$V(S_t) \leftarrow V(S_t) + \alpha\,\bigl[\,G_t^{\lambda} - V(S_t)\,\bigr]$$</p>
+          <p class="math-note">
+            $\alpha$ es la tasa de aprendizaje y $G_t^{\lambda} - V(S_t)$ es el error respecto al
+            λ-retorno. Conceptualmente perfecta… con una pega enorme.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El problema de la vista adelante</div>
+          <p>
+            Para calcular $G_t^{\lambda}$ necesitas conocer <strong>todas las recompensas futuras</strong>
+            del episodio. Es decir, tienes que <em>esperar al final</em> antes de actualizar nada, igual
+            que Monte Carlo. Miramos «hacia adelante», hacia un futuro que aún no ha ocurrido. Necesitamos
+            una forma de conseguir el mismo efecto pero <strong>en tiempo real, paso a paso</strong>.
+          </p>
+        </div>
+
+        <h2 id="vista-atras">Vista atrás: las trazas de elegibilidad</h2>
+        <p>
+          Aquí llega la idea genial. En vez de mirar hacia adelante desde cada estado, miramos
+          <strong>hacia atrás</strong> desde cada instante. Cuando ocurre algo sorprendente ahora (un
+          error TD grande), repartimos esa sorpresa entre todos los estados que la «prepararon», en
+          proporción a cuánto los hemos visitado recientemente. Esa memoria que se desvanece es la
+          <strong>traza de elegibilidad</strong> $e_t(s)$: un número por cada estado, que arranca en 0 al
+          empezar el episodio.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La traza de elegibilidad (acumulativa)</div>
+          <p>$$e_t(s) = \gamma\lambda\, e_{t-1}(s) + \mathbb{1}[S_t = s] \qquad \text{para todo estado } s$$</p>
+          <p class="math-note">
+            En cada paso, la traza de <em>todos</em> los estados se desvanece multiplicándose por
+            $\gamma\lambda$, y el estado actual $S_t$ recibe un $+1$ (el indicador $\mathbb{1}[S_t=s]$
+            vale 1 solo para el estado visitado). Así, un estado visitado hace muchos pasos tiene una
+            traza casi nula; uno recién visitado, una traza alta. Es la «huella» que va dejando el agente.
+          </p>
+        </div>
+
+        <p>
+          Con las trazas ya podemos definir la actualización. Primero calculamos el <strong>error de
+          diferencia temporal</strong> de siempre, exactamente el mismo que en TD(0):
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Error TD y actualización global</div>
+          <p>$$\delta_t = R_{t+1} + \gamma\, V(S_{t+1}) - V(S_t)$$</p>
+          <p>$$V(s) \leftarrow V(s) + \alpha\, \delta_t\, e_t(s) \qquad \text{para todo estado } s$$</p>
+          <p class="math-note">
+            $\delta_t$ es un <strong>único número</strong>: la sorpresa en el instante $t$ (lo que ha
+            pasado frente a lo que esperábamos). La segunda línea reparte esa sorpresa entre
+            <em>todos</em> los estados a la vez, cada uno según su traza $e_t(s)$. El estado actual, con
+            traza alta, se lleva casi todo; los visitados hace poco, un eco más débil; los no visitados,
+            traza 0 y por tanto ninguna actualización. Esto es <strong>asignación de crédito hacia
+            atrás</strong> en tiempo real.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La equivalencia forward–backward</div>
+          <p>
+            No es magia gratuita: se puede demostrar que, sumadas a lo largo de un episodio, las
+            actualizaciones de la <em>vista atrás</em> (con trazas) coinciden con las de la <em>vista
+            adelante</em> (con el λ-retorno). La vista adelante explica <em>qué</em> objetivo perseguimos;
+            la vista atrás nos da un algoritmo <strong>online</strong> y barato para lograrlo sin esperar
+            al final del episodio. Lo mejor de los dos mundos.
+          </p>
+        </div>
+
+        <h3>Trazas acumulativas frente a trazas de reemplazo</h3>
+        <p>
+          La regla de arriba, $e_t(s) = \gamma\lambda\, e_{t-1}(s) + 1$ en el estado visitado, se llama
+          traza <strong>acumulativa</strong>: si vuelves a pasar por el mismo estado, su traza puede
+          superar 1 y crecer. Es potente, pero con tasas $\alpha$ altas puede desestabilizarse. La
+          alternativa son las trazas de <strong>reemplazo</strong>: en vez de sumar, <em>fijas</em> la
+          traza del estado visitado a 1.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Traza de reemplazo</div>
+          <p>$$e_t(s) = \begin{cases} 1 & \text{si } s = S_t \\ \gamma\lambda\, e_{t-1}(s) & \text{si } s \ne S_t \end{cases}$$</p>
+          <p class="math-note">
+            Suele ser más estable cuando un mismo estado se visita muchas veces (como en el paseo
+            aleatorio de abajo, que revisita estados sin parar). En el ejemplo usaremos trazas
+            acumulativas para reproducir las curvas clásicas, pero cambiar a reemplazo es una línea.
+          </p>
+        </div>
+
+        <h2 id="algoritmo">El algoritmo TD(λ), paso a paso</h2>
+        <p>Para estimar la función de valor $V$ de una política dada, TD(λ) en su vista atrás es así:</p>
+        <ol>
+          <li>Inicializa $V(s)$ de forma arbitraria (p. ej. a 0) para todos los estados.</li>
+          <li>Para cada episodio:
+            <ol>
+              <li>Pon la traza a cero: $e(s) = 0$ para todo $s$. Observa el estado inicial $S$.</li>
+              <li>Repite en cada paso, hasta que $S$ sea terminal:
+                <ul>
+                  <li>Toma la acción según la política; observa la recompensa $R$ y el estado siguiente $S'$.</li>
+                  <li>Calcula el error TD: $\delta = R + \gamma\, V(S') - V(S)$.</li>
+                  <li>Desvanece e incrementa la traza: $e(s) \leftarrow \gamma\lambda\, e(s)$ para todo $s$, y luego $e(S) \leftarrow e(S) + 1$.</li>
+                  <li>Actualiza <em>todos</em> los estados: $V(s) \leftarrow V(s) + \alpha\,\delta\, e(s)$.</li>
+                  <li>Avanza: $S \leftarrow S'$.</li>
+                </ul>
+              </li>
+            </ol>
+          </li>
+        </ol>
+        <p>
+          La misma idea se traslada al <strong>control</strong> (aprender la política, no solo evaluarla)
+          poniendo trazas sobre pares estado-acción: así nacen Sarsa(λ) y Q(λ), primos con memoria de la
+          <a href="09-q-learning.html">Sarsa y el Q-learning</a> del capítulo anterior.
+        </p>
+
+        <h2 id="ejemplo">Ejemplo: barrer λ en un paseo aleatorio</h2>
+        <p>
+          Vamos a ver el espectro completo en acción. Usamos un <strong>paseo aleatorio de 19 estados</strong>:
+          una fila de casillas con dos salidas. Empiezas en el centro y en cada paso te mueves a izquierda
+          o derecha con la misma probabilidad. Salir por la derecha da recompensa $+1$; por la izquierda,
+          $-1$; el resto de pasos, $0$ (y $\gamma=1$). Como el paseo es simétrico, el valor verdadero de
+          cada estado es una recta que va de $-0{,}9$ a $+0{,}9$, con el $0$ justo en el centro, así que
+          podemos medir el error exacto de nuestras estimaciones.
+        </p>
+        <p>
+          Aplicamos TD(λ) barriendo $\lambda \in \{0,\ 0{,}4,\ 0{,}8,\ 0{,}9,\ 1{,}0\}$ y, para cada uno,
+          un rango de tasas $\alpha$. Dibujamos el error RMS (promediado sobre los 10 primeros episodios y
+          varias repeticiones) frente a $\alpha$. Aparece la clásica <strong>familia de curvas en U</strong>:
+          casi todas tienen un mínimo a una $\alpha$ intermedia, y ese mínimo suele ser <em>más bajo</em>
+          para un $\lambda$ intermedio que para TD(0) o Monte Carlo.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">td_lambda.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+TD(lambda) con trazas de elegibilidad en el paseo aleatorio de 19 estados.
+=========================================================================
+
+Capitulo 10 del Manual de Aprendizaje por Refuerzo.
+
+Reproduce el experimento clasico que compara todo el espectro entre TD(0) y
+Monte Carlo: aplicamos TD(lambda) (vista hacia atras, con trazas de
+elegibilidad acumulativas) al paseo aleatorio de 19 estados, barriendo
+lambda en {0, 0.4, 0.8, 0.9, 1.0} y, para cada lambda, la tasa de aprendizaje
+alpha. Dibujamos el error RMS (promediado sobre los 10 primeros episodios y
+varias repeticiones) frente a alpha. Aparece la tipica familia de curvas en U:
+un lambda intermedio suele batir tanto a TD(0) como a Monte Carlo.
+
+Como ejecutarlo:
+    pip install -r requirements.txt
+    python code/10-td-lambda/td_lambda.py
+
+Solo necesita numpy y matplotlib, asi que tambien corre en el navegador
+(Pyodide) desde la pagina del capitulo.
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- El entorno: paseo aleatorio de 19 estados ---------------------------
+# Estados no terminales: 1..19. Terminales: 0 (izquierda) y 20 (derecha).
+# Se empieza en el centro. Al alcanzar la derecha la recompensa es +1; al
+# alcanzar la izquierda, -1; el resto de transiciones dan 0. gamma = 1.
+N = 19
+IZQ, DER = 0, N + 1          # estados terminales
+INICIO = (N + 1) // 2        # estado central = 10
+GAMMA = 1.0
+
+# Valores verdaderos: para un paseo simetrico, V(s) crece linealmente de
+# -0.9 (estado 1) a +0.9 (estado 19), pasando por 0 en el centro.
+ESTADOS = np.arange(1, N + 1)
+V_TRUE = (ESTADOS - INICIO) / INICIO
+
+
+def genera_episodio(rng):
+    """Simula un paseo aleatorio y devuelve su lista de transiciones (s, r, s')."""
+    s = INICIO
+    trans = []
+    while True:
+        s_next = s + (1 if rng.random() &lt; 0.5 else -1)
+        if s_next == DER:
+            trans.append((s, 1.0, s_next))
+            break
+        if s_next == IZQ:
+            trans.append((s, -1.0, s_next))
+            break
+        trans.append((s, 0.0, s_next))
+        s = s_next
+    return trans
+
+
+def td_lambda_episodio(V, lam, alpha, rng):
+    """Ejecuta un episodio de TD(lambda) hacia atras y actualiza V in situ.
+
+    En cada paso: se calcula el error TD delta, se desvanece la traza de
+    todos los estados (gamma*lambda), se refuerza la del estado actual
+    (traza acumulativa) y se reparte el error entre todos los estados en
+    proporcion a su traza.
+    """
+    e = np.zeros(N + 2)                       # traza de elegibilidad por estado
+    for (s, r, s_next) in genera_episodio(rng):
+        delta = r + GAMMA * V[s_next] - V[s]  # error de diferencia temporal
+        e *= GAMMA * lam                      # todas las trazas se desvanecen
+        e[s] += 1.0                           # el estado visitado se hace "elegible"
+        V += alpha * delta * e                # actualizacion hacia atras global
+
+
+def rms(V):
+    """Error cuadratico medio de V frente a los valores verdaderos."""
+    return np.sqrt(np.mean((V[1:N + 1] - V_TRUE) ** 2))
+
+
+def experimento(lambdas, alphas, n_runs=20, n_ep=10):
+    """Devuelve un dict {lambda: curva de RMS frente a alpha}."""
+    curvas = {}
+    with np.errstate(over="ignore", invalid="ignore"):
+        for lam in lambdas:
+            curva = np.zeros(len(alphas))
+            for i, alpha in enumerate(alphas):
+                acc = 0.0
+                for run in range(n_runs):
+                    # Mismos episodios para todo (lambda, alpha): comparacion justa.
+                    rng = np.random.default_rng(run)
+                    V = np.zeros(N + 2)              # sin informacion previa
+                    err = 0.0
+                    for _ in range(n_ep):
+                        td_lambda_episodio(V, lam, alpha, rng)
+                        err += rms(V)
+                    acc += err / n_ep
+                curva[i] = acc / n_runs
+            # Los casos que divergen (alpha grande, lambda alto) se marcan NaN.
+            curvas[lam] = np.where(np.isfinite(curva), curva, np.nan)
+    return curvas
+
+
+def main():
+    lambdas = [0.0, 0.4, 0.8, 0.9, 1.0]
+    alphas = np.linspace(0.0, 1.0, 11)
+    curvas = experimento(lambdas, alphas)
+
+    # Resumen numerico por pantalla.
+    print("Paseo aleatorio de 19 estados - TD(lambda), error RMS minimo:")
+    mejor_lam, mejor_rms = None, np.inf
+    for lam in lambdas:
+        c = curvas[lam]
+        j = np.nanargmin(c)
+        etiqueta = "Monte Carlo" if lam == 1.0 else ("TD(0)" if lam == 0.0 else "")
+        print(f"  lambda = {lam:&lt;3}  min RMS = {c[j]:.3f}  en alpha = {alphas[j]:.2f}  {etiqueta}")
+        if c[j] &lt; mejor_rms:
+            mejor_rms, mejor_lam = c[j], lam
+    print(f"-&gt; El mejor resultado global lo da lambda = {mejor_lam} (un valor intermedio).")
+
+    # Grafica: la familia de curvas en U.
+    plt.figure(figsize=(8, 5))
+    for lam in lambdas:
+        etiqueta = f"lambda = {lam}"
+        if lam == 0.0:
+            etiqueta += "  (TD(0))"
+        elif lam == 1.0:
+            etiqueta += "  (Monte Carlo)"
+        plt.plot(alphas, curvas[lam], "o-", linewidth=2, markersize=5, label=etiqueta)
+
+    plt.xlabel("alpha  (tasa de aprendizaje)")
+    plt.ylabel("Error RMS  (media de los 10 primeros episodios)")
+    plt.title("TD(lambda) en el paseo aleatorio de 19 estados")
+    plt.ylim(0.25, 0.55)
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong>. Verás por pantalla la $\alpha$ óptima de cada $\lambda$ y,
+          debajo, la gráfica. Fíjate en tres cosas: (1) casi todas las curvas tienen forma de U, con un
+          punto dulce de $\alpha$; (2) las curvas de $\lambda$ intermedio suelen tocar más abajo (menor
+          error) que la de TD(0); y (3) la de Monte Carlo ($\lambda=1$) se dispara: con trazas
+          acumulativas es la más inestable y se sale del gráfico enseguida.
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ λ alto pide α bajo</div>
+          <p>
+            Cuanto mayor es $\lambda$, más lejos viaja el crédito y más se acumulan las trazas, así que la
+            actualización efectiva es mayor. Por eso los valores de $\alpha$ que funcionan bien se hacen
+            <strong>más pequeños</strong> al subir $\lambda$: verás que el mínimo de las curvas se desplaza
+            hacia la izquierda. Con $\lambda=1$ y $\alpha$ grande el método diverge (por eso su curva
+            desaparece por arriba). No es un fallo del código: es la varianza de Monte Carlo mordiendo.
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          El mismo script corre fuera del navegador. Descárgalo con «Descargar .py» (o cópialo) y
+          ejecútalo así; abrirá una ventana con la gráfica:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) ejecuta el ejemplo</span>
+<span class="prompt">$</span> python code/10-td-lambda/td_lambda.py
+<span class="comment">Paseo aleatorio de 19 estados - TD(lambda), error RMS minimo:
+  lambda = 0.0  min RMS = 0.345  en alpha = 0.80  TD(0)
+  lambda = 0.8  min RMS = 0.265  en alpha = 0.30
+  ...
+-> El mejor resultado global lo da lambda = 0.8 (un valor intermedio).</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Este ejemplo usa solo <code>numpy</code> y <code>matplotlib</code>, así que corre entero en el
+          navegador con <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>. Prueba a
+          cambiar la traza acumulativa por una de reemplazo (fija <code>e[s] = 1.0</code> en lugar de
+          sumar): las curvas de $\lambda$ alto se vuelven mucho más estables.
+        </p>
+
+        <h2 id="cierre">De la tabla al mundo real</h2>
+        <p>
+          Con TD(λ) cerramos la caja de herramientas <strong>tabular</strong>: desde
+          <a href="05-programacion-dinamica.html">programación dinámica</a> hasta aquí, siempre hemos
+          guardado <em>una entrada por estado</em> (o por par estado-acción). Eso funciona de maravilla en
+          paseos de 19 casillas… pero se rompe en cuanto el número de estados explota: un tablero de
+          ajedrez, los píxeles de una pantalla, la posición continua de un robot. No caben en ninguna tabla,
+          y aunque cupieran, nunca visitaríamos la mayoría.
+        </p>
+        <p>
+          La salida es dejar de memorizar estado por estado y empezar a <strong>generalizar</strong>: aprender
+          una función que, a partir de unas características del estado, prediga su valor. Eso es la
+          <a href="11-aproximacion-funciones.html">aproximación de funciones</a>, el tema del próximo
+          capítulo y la puerta de entrada al aprendizaje por refuerzo profundo. Y, buena noticia, las trazas
+          de elegibilidad que acabas de ver se combinan con esas funciones aproximadas casi sin cambios.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>Entre TD(0) (un paso) y Monte Carlo (hasta el final) está el <strong>retorno de $n$ pasos</strong>
+            $G_t^{(n)}$, que mira $n$ recompensas reales y luego bootstrapea.</li>
+            <li>El <strong>λ-retorno</strong> $G_t^{\lambda}=(1-\lambda)\sum_{n\ge 1}\lambda^{n-1}G_t^{(n)}$
+            promedia todos los horizontes con pesos geométricos. $\lambda=0$ da TD(0); $\lambda=1$ da Monte Carlo.</li>
+            <li>La <strong>vista adelante</strong> (perseguir $G_t^{\lambda}$) es clara pero obliga a esperar al
+            final del episodio.</li>
+            <li>Las <strong>trazas de elegibilidad</strong> $e_t(s)=\gamma\lambda\,e_{t-1}(s)+\mathbb{1}[S_t=s]$
+            implementan la <strong>vista atrás</strong>: reparten el error TD $\delta_t$ entre los estados
+            recientes, $V(s)\leftarrow V(s)+\alpha\,\delta_t\,e_t(s)$, en tiempo real y de forma equivalente.</li>
+            <li>Un $\lambda$ <strong>intermedio</strong> suele aprender mejor que ambos extremos; las trazas de
+            <strong>reemplazo</strong> aportan estabilidad frente a las <strong>acumulativas</strong>.</li>
+          </ul>
+        </div>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

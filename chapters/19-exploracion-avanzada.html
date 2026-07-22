@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>19. Exploración avanzada y motivación intrínseca · Manual de RL</title>
+  <meta name="description" content="Por qué ε-greedy no basta con recompensas escasas y cómo explorar de forma inteligente: bonos por conteo, curiosidad (ICM, RND) y optimismo ante la incertidumbre, con un ejemplo en Python ejecutable." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="19">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 4 · Capítulo 19</span>
+        <h1>Exploración avanzada y motivación intrínseca</h1>
+        <p class="lead">
+          Cuando la recompensa es abundante, explorar es fácil: basta con un poco de azar
+          (<em>ε-greedy</em>) y tarde o temprano tropiezas con algo bueno. Pero, ¿qué pasa cuando el
+          premio es <strong>rarísimo</strong> y está <strong>muy lejos</strong>? Entonces el azar puro
+          es como buscar una aguja en un pajar dando manotazos con los ojos cerrados. En este capítulo
+          aprenderás a explorar <strong>con cabeza</strong>: premiando la novedad, la curiosidad y el
+          optimismo ante lo desconocido.
+        </p>
+
+        <h2 id="problema">El problema: recompensas escasas y lejanas</h2>
+        <p>
+          En el <a href="02-bandido-multibrazo.html">capítulo 2</a> vimos el dilema
+          <strong>explorar vs. explotar</strong> en su forma más pura, y una solución sencilla:
+          ε-greedy. La estrategia es «casi siempre haz lo que crees mejor, pero con probabilidad $\varepsilon$
+          prueba algo al azar». Ha sido nuestro caballo de batalla desde entonces, y en la mayoría de
+          los entornos funciona de maravilla.
+        </p>
+        <p>
+          El problema aparece con las <strong>recompensas escasas</strong> (<em>sparse rewards</em>):
+          entornos donde durante cientos o miles de pasos <strong>todas</strong> las recompensas valen
+          cero, y solo hay una señal positiva al final de una larga secuencia correcta de acciones. El
+          ejemplo canónico es <em>Montezuma's Revenge</em>, un videojuego de Atari donde el agente debe
+          bajar por una escalera, saltar sobre un enemigo, coger una llave y cruzar una puerta… todo
+          eso <strong>antes</strong> de ver la primera recompensa. Con ε-greedy, un agente puede jugar
+          millones de partidas y no puntuar jamás.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Imagina un laberinto enorme y a oscuras con un caramelo escondido en la esquina más lejana.
+            Un explorador <strong>aleatorio</strong> da vueltas cerca de la entrada: como cada paso es
+            independiente, tiende a deshacer lo andado y casi nunca se aleja. Un explorador
+            <strong>curioso</strong>, en cambio, lleva la cuenta de por dónde ya ha pasado y se dirige
+            adrede hacia los rincones que <strong>aún no conoce</strong>. El primero necesita una suerte
+            astronómica; el segundo barre el laberinto de forma sistemática.
+          </p>
+        </div>
+
+        <h2 id="por-que-falla">Por qué ε-greedy no basta</h2>
+        <p>
+          No es una impresión: podemos cuantificar por qué el azar fracasa. Piensa en un
+          <strong>pasillo</strong> de longitud $L$ en el que el agente empieza en un extremo y la meta
+          está en el otro. Si en cada paso se mueve a izquierda o derecha al azar, su posición describe
+          un <strong>paseo aleatorio</strong>. Un resultado clásico dice que el número esperado de pasos
+          para llegar por primera vez al extremo opuesto crece con el <strong>cuadrado</strong> de la
+          distancia:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El coste del azar crece cuadráticamente</div>
+          <p>$$\mathbb{E}[\text{pasos hasta la meta}] \;\sim\; L^2$$</p>
+          <p class="math-note">
+            $L$ es la longitud del pasillo (la distancia entre la salida y la meta). Como el tiempo de
+            llegada escala con $L^2$, si un episodio dura como mucho $H$ pasos y $H \ll L^2$, la
+            probabilidad de alcanzar la meta por azar en un episodio es minúscula. Duplicar la distancia
+            <strong>cuadruplica</strong> el esfuerzo. Con recompensa nula por el camino, el agente ni
+            siquiera tiene un gradiente que seguir: hasta que no pisa la meta, todos sus valores $Q$
+            valen cero y su política es, en la práctica, un paseo aleatorio.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El círculo vicioso de la recompensa escasa</div>
+          <p>
+            Aquí hay una trampa doble. Para <em>aprender</em> una buena política necesitas señal de
+            recompensa; pero para <em>ver</em> esa señal necesitas ya explorar bien. ε-greedy no rompe el
+            círculo porque explora de forma <strong>local y sin memoria</strong>: cada acción aleatoria
+            es independiente de las anteriores, así que no acumula progreso hacia lo desconocido.
+            Necesitamos una exploración <strong>dirigida</strong> y con <strong>memoria</strong>.
+          </p>
+        </div>
+
+        <h2 id="recompensa-aumentada">La idea unificadora: recompensa aumentada</h2>
+        <p>
+          Casi todos los métodos modernos de exploración comparten un mismo truco elegante: si el
+          entorno no nos da recompensa suficiente para guiar la exploración, <strong>nos la inventamos
+          nosotros</strong>. A la recompensa real (la <strong>extrínseca</strong>, la que da el entorno)
+          le sumamos una recompensa <strong>intrínseca</strong>: un pequeño premio que el propio agente
+          se concede por hacer algo <em>novedoso</em>.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Recompensa aumentada</div>
+          <p>$$r^{+}_t \;=\; \underbrace{r_t}_{\text{extrínseca}} \;+\; \beta\,\underbrace{b(s_t, a_t)}_{\text{intrínseca}}$$</p>
+          <p class="math-note">
+            $r_t$ es la recompensa que da el entorno (a menudo $0$ durante casi todo el episodio).
+            $b(s_t, a_t) \ge 0$ es el <strong>bono de exploración</strong>: mide cuánto de
+            <em>nuevo</em> es lo que acaba de ocurrir. $\beta \ge 0$ es un peso que decide cuánta
+            importancia damos a la curiosidad frente a la recompensa real. El agente entrena
+            <strong>exactamente igual que antes</strong> (Q-learning, DQN, PPO…), pero optimizando
+            $r^{+}$ en lugar de $r$.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La clave del diseño</div>
+          <p>
+            El bono debe ser <strong>grande donde el agente aún no ha estado</strong> y
+            <strong>decaer hacia cero</strong> a medida que un estado se vuelve familiar. Así, al
+            principio el bono empuja al agente hacia lo desconocido; y cuando ya ha explorado todo,
+            $b \to 0$ y $r^{+} \to r$: el agente vuelve a optimizar solo la recompensa real, sin que la
+            curiosidad distorsione la política final. Toda la magia está en cómo medimos «lo novedoso».
+          </p>
+        </div>
+
+        <h2 id="conteo">Bonos por conteo: «ve donde no has ido»</h2>
+        <p>
+          La forma más directa de medir la novedad es <strong>contar</strong>. Llevamos un registro
+          $N(s, a)$ de cuántas veces hemos ejecutado la acción $a$ en el estado $s$, y damos un bono
+          inversamente proporcional a la raíz de ese conteo:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Bono basado en conteo</div>
+          <p>$$b(s, a) \;=\; \frac{1}{\sqrt{N(s, a)}}$$</p>
+          <p class="math-note">
+            $N(s, a)$ es el número de visitas al par estado-acción hasta el momento. La primera vez que
+            se prueba $(s,a)$ el bono es máximo; con cada visita, $N$ crece y el bono se desvanece como
+            $1/\sqrt{N}$. Una variante habitual usa el conteo del estado, $b(s) = 1/\sqrt{N(s)}$, si solo
+            nos importa <em>dónde</em> hemos estado y no <em>qué</em> hicimos allí.
+          </p>
+        </div>
+
+        <p>
+          Esta fórmula no ha salido de la nada: es <strong>la misma idea que UCB</strong>, el método de
+          bandidos del <a href="02-bandido-multibrazo.html">capítulo 2</a>. Recuerda que UCB elegía la
+          acción sumando al valor estimado un término de incertidumbre:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El eco de UCB (capítulo 2)</div>
+          <p>$$A_t \;=\; \arg\max_{a}\;\Big[\, Q(a) \;+\; c\,\sqrt{\tfrac{\ln t}{N(a)}}\,\Big]$$</p>
+          <p class="math-note">
+            El término de incertidumbre tiene la misma forma $\propto 1/\sqrt{N}$: cuanto menos se ha
+            probado una acción, más «optimista» es su valor. Esto se conoce como <strong>optimismo ante
+            la incertidumbre</strong>: ante la duda, supón que lo desconocido es prometedor y ve a
+            comprobarlo. Los bonos por conteo llevan ese principio del bandido de un solo estado al MDP
+            completo.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Por qué esto sí propaga el progreso</div>
+          <p>
+            La diferencia con ε-greedy es que el bono se <strong>propaga</strong> a través de las
+            ecuaciones de Bellman. Un rincón sin explorar tiene bono alto; ese valor «tira» del estado
+            vecino, que a su vez tira del siguiente… hasta crear un <em>gradiente</em> que guía al agente
+            desde la salida hacia la frontera de lo desconocido. La exploración deja de ser una moneda al
+            aire en cada paso y se convierte en un plan que avanza episodio a episodio.
+          </p>
+        </div>
+
+        <h3>El problema de escala: pseudo-conteos</h3>
+        <p>
+          Contar visitas funciona de maravilla cuando los estados son pocos y discretos (una rejilla).
+          Pero en <em>Montezuma's Revenge</em> el estado es una imagen de la pantalla: <strong>nunca</strong>
+          verás dos veces exactamente el mismo fotograma, así que $N(s) = 0$ para todo estado nuevo y el
+          bono se vuelve inútil (o infinito). La solución son los <strong>pseudo-conteos</strong>:
+          en lugar de contar coincidencias exactas, entrenamos un modelo de densidad $\rho(s)$ que estima
+          cómo de «probable» o «familiar» es un estado, y de ahí derivamos un conteo aproximado.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Pseudo-conteo a partir de una densidad</div>
+          <p>$$\hat{N}(s) \;=\; \rho(s)\,\frac{1 - \rho'(s)}{\rho'(s) - \rho(s)}$$</p>
+          <p class="math-note">
+            $\rho(s)$ es la probabilidad que el modelo asigna al estado $s$ <em>antes</em> de volver a
+            observarlo, y $\rho'(s)$ la que le asignaría <em>después</em> de haberlo visto una vez más.
+            Si observar $s$ apenas cambia el modelo ($\rho' \approx \rho$), es que $s$ ya era muy
+            familiar y el pseudo-conteo $\hat{N}$ es alto; si el modelo «se sorprende» mucho, $\hat{N}$ es
+            bajo y el bono $1/\sqrt{\hat{N}}$, alto. Con esta idea, agentes con bonos de pseudo-conteo
+            fueron de los primeros en puntuar de verdad en <em>Montezuma's Revenge</em>.
+          </p>
+        </div>
+
+        <h2 id="curiosidad">Curiosidad: aprender lo que no sabes predecir</h2>
+        <p>
+          Hay otra forma, muy distinta y muy influyente, de medir la novedad: el <strong>error de
+          predicción</strong>. La intuición es psicológica: nos resulta <em>interesante</em> aquello que
+          nos sorprende, aquello que no sabíamos anticipar. Si el agente entrena un modelo que intenta
+          predecir algo del mundo, los estados donde ese modelo <strong>falla</strong> son, por
+          definición, los que aún no domina, es decir, los novedosos.
+        </p>
+
+        <h3>ICM: un modelo de la dinámica</h3>
+        <p>
+          El <em>Intrinsic Curiosity Module</em> (ICM) entrena un <strong>modelo directo</strong> que,
+          dado el estado actual y la acción, predice el <strong>siguiente</strong> estado (en un espacio
+          de características $\phi$). El bono es el error de esa predicción:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Bono de curiosidad (ICM)</div>
+          <p>$$b(s_t, a_t) \;=\; \big\|\, g\big(\phi(s_t),\, a_t\big) \;-\; \phi(s_{t+1}) \,\big\|^2$$</p>
+          <p class="math-note">
+            $\phi(s)$ es una representación (características) del estado; $g$ es el modelo directo que
+            predice las características del estado siguiente, $\hat{\phi}_{t+1} = g(\phi(s_t), a_t)$; y
+            $\phi(s_{t+1})$ son las características reales tras actuar. El bono es la distancia al cuadrado
+            entre lo predicho y lo observado: <strong>error alto = estado novedoso = más exploración</strong>.
+            ICM aprende $\phi$ con un <em>modelo inverso</em> (predecir la acción a partir de dos estados),
+            un truco para que las características capturen solo lo que el agente <strong>puede controlar</strong>.
+          </p>
+        </div>
+
+        <h3>RND: predecir una red aleatoria fija</h3>
+        <p>
+          <em>Random Network Distillation</em> (RND) es aún más ingenioso y sencillo. Usa
+          <strong>dos redes neuronales</strong> que reciben el estado:
+        </p>
+        <ul>
+          <li>Una <strong>red objetivo</strong> $\hat{f}$ con pesos <strong>aleatorios y congelados</strong>:
+          nunca se entrena. Es simplemente una función fija y arbitraria del estado.</li>
+          <li>Una <strong>red predictora</strong> $f_\theta$ que se entrena para <strong>imitar</strong> a
+          la red objetivo en los estados que el agente visita.</li>
+        </ul>
+        <p>
+          El bono es lo mal que la predictora imita a la objetivo en el estado actual:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Bono de RND</div>
+          <p>$$b(s) \;=\; \big\|\, f_\theta(s) \;-\; \hat{f}(s) \,\big\|^2$$</p>
+          <p class="math-note">
+            $\hat{f}(s)$ es la salida (un vector) de la red objetivo fija; $f_\theta(s)$ la de la red
+            predictora. Ambas se entrenan… no: solo $f_\theta$ se entrena, minimizando ese mismo error
+            $\|f_\theta(s) - \hat{f}(s)\|^2$ por descenso de gradiente sobre los estados vistos. En un
+            estado <strong>ya visitado</strong> muchas veces, la predictora ha tenido ocasión de ajustarse
+            y el error es bajo → bono pequeño. En un estado <strong>nuevo</strong>, la predictora nunca lo
+            entrenó y falla → error alto → bono grande. La red objetivo aleatoria hace de «huella digital»
+            barata del estado, sin necesidad de contar nada.
+          </p>
+        </div>
+
+        <figure class="figure">
+          <svg viewBox="0 0 660 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diagrama de Random Network Distillation">
+            <defs>
+              <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#4f46e5" />
+              </marker>
+              <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#0ea5e9" />
+              </marker>
+            </defs>
+            <!-- estado -->
+            <rect x="24" y="120" width="120" height="56" rx="12" fill="#64748b" />
+            <text x="84" y="148" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">estado s</text>
+            <text x="84" y="166" text-anchor="middle" fill="#e2e8f0" font-size="11" font-family="sans-serif">(observación)</text>
+            <!-- red objetivo -->
+            <rect x="250" y="34" width="200" height="66" rx="12" fill="#0ea5e9" />
+            <text x="350" y="62" text-anchor="middle" fill="#fff" font-size="14" font-family="sans-serif" font-weight="700">Red objetivo  f̂</text>
+            <text x="350" y="82" text-anchor="middle" fill="#e0f2fe" font-size="11.5" font-family="sans-serif">aleatoria y CONGELADA</text>
+            <!-- red predictora -->
+            <rect x="250" y="196" width="200" height="66" rx="12" fill="#4f46e5" />
+            <text x="350" y="224" text-anchor="middle" fill="#fff" font-size="14" font-family="sans-serif" font-weight="700">Red predictora  f_θ</text>
+            <text x="350" y="244" text-anchor="middle" fill="#e0e7ff" font-size="11.5" font-family="sans-serif">se ENTRENA a imitarla</text>
+            <!-- flechas estado -> redes -->
+            <path d="M144,138 C200,120 200,90 248,74" fill="none" stroke="#0ea5e9" stroke-width="2.5" marker-end="url(#arrow2)" />
+            <path d="M144,158 C200,176 200,208 248,224" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow)" />
+            <!-- salida -> error -->
+            <rect x="520" y="120" width="116" height="56" rx="12" fill="#0f172a" stroke="#a855f7" stroke-width="2" />
+            <text x="578" y="144" text-anchor="middle" fill="#e9d5ff" font-size="13" font-family="sans-serif" font-weight="700">bono b(s)</text>
+            <text x="578" y="162" text-anchor="middle" fill="#c4b5fd" font-size="11" font-family="sans-serif">‖f_θ − f̂‖²</text>
+            <path d="M450,67 C500,90 500,120 518,138" fill="none" stroke="#0ea5e9" stroke-width="2.5" marker-end="url(#arrow2)" />
+            <path d="M450,229 C500,206 500,176 518,158" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow)" />
+          </svg>
+          <figcaption>RND: el estado pasa por dos redes. La objetivo es fija y aleatoria; la predictora se entrena para imitarla. En estados nuevos la predictora falla → error alto → bono de exploración grande.</figcaption>
+        </figure>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ La «tele con ruido»</div>
+          <p>
+            La curiosidad por error de predicción tiene un fallo célebre: el problema de la
+            <strong>tele con ruido</strong> (<em>noisy TV</em>). Si en el entorno hay una fuente de
+            <strong>azar puro e impredecible</strong> (una pantalla con estática, un dado que rueda), un
+            agente basado en error de predicción quedará <em>hipnotizado</em> por ella: nunca podrá
+            predecir el ruido, así que el bono ahí es eternamente alto y el agente se queda mirándola en
+            vez de explorar. RND lo evita porque su red objetivo es <strong>determinista</strong> (misma
+            entrada, misma salida), de modo que el error sí baja a cero al visitar un estado repetidas
+            veces. ICM lo mitiga aprendiendo características que ignoran lo que el agente no controla.
+          </p>
+        </div>
+
+        <h2 id="algoritmo">El algoritmo, paso a paso</h2>
+        <p>
+          Vamos a quedarnos con la variante más simple y transparente —el <strong>bono por conteo</strong>—
+          y a injertarla en el <a href="09-q-learning.html">Q-learning</a> del capítulo 9. Verás que el
+          cambio es de <strong>una sola línea</strong>: sumar el bono a la recompensa.
+        </p>
+        <ol>
+          <li>Inicializa la tabla de valores $Q(s,a) = 0$ y los conteos $N(s,a) = 0$.</li>
+          <li>Para cada episodio, empieza en el estado de salida.</li>
+          <li>Elige la acción $a$ con ε-greedy sobre $Q(s, \cdot)$ (igual que siempre).</li>
+          <li>Ejecuta $a$; observa la recompensa real $r$ y el nuevo estado $s'$.</li>
+          <li>Incrementa el conteo, $N(s,a) \leftarrow N(s,a) + 1$, y calcula el bono $b = \beta/\sqrt{N(s,a)}$.</li>
+          <li>Forma la recompensa aumentada $r^{+} = r + b$ y actualiza:
+            $$Q(s,a) \leftarrow Q(s,a) + \alpha\Big[\, r^{+} + \gamma\,\max_{a'} Q(s', a') - Q(s,a) \,\Big]$$</li>
+          <li>Avanza $s \leftarrow s'$ y repite hasta terminar el episodio.</li>
+        </ol>
+        <p class="math-note">
+          $\alpha$ es la tasa de aprendizaje y $\gamma$ el factor de descuento, tal como los definimos en
+          los capítulos 4 y 9. Lo único nuevo respecto al Q-learning clásico es el término $b$ dentro de
+          $r^{+}$.
+        </p>
+
+        <h2 id="ejemplo">En Python: ε-greedy contra el bono por conteo</h2>
+        <p>
+          Construyamos un entorno de <strong>exploración dura</strong> a nuestra medida: una rejilla larga
+          y estrecha (un <strong>pasillo</strong> de $2 \times 30$) donde la <strong>única</strong>
+          recompensa está en la esquina opuesta a la salida. En todo el resto del mundo, la recompensa es
+          cero. Entrenamos <strong>dos agentes de Q-learning idénticos</strong> que se diferencian en una
+          sola cosa: uno explora solo con ε-greedy; el otro le suma el bono por conteo $\beta/\sqrt{N(s,a)}$.
+        </p>
+        <p>
+          El programa dibuja dos cosas: la <strong>curva de éxitos acumulados</strong> (cuántos episodios
+          han logrado ya alcanzar la meta) y dos <strong>mapas de calor de visitas</strong>. Fíjate en si
+          el agente sin bono consigue salir siquiera de la zona de partida.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">exploracion_intrinseca.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+Exploración avanzada: motivación intrínseca por conteo en un gridworld difícil.
+
+Este script implementa DESDE CERO, usando solo numpy, un problema de exploración
+"dura": una rejilla larga y estrecha donde la ÚNICA recompensa está en la esquina
+más lejana. Con recompensas tan escasas, actuar al azar (epsilon-greedy) casi
+nunca tropieza con la meta.
+
+Comparamos dos agentes de Q-learning que solo se diferencian en UNA cosa:
+
+  1) epsilon-greedy "a secas": explora dando pasos aleatorios de vez en cuando.
+  2) epsilon-greedy + BONO POR CONTEO: a la recompensa real le suma un premio
+     intrínseco por novedad,
+         r+  =  r  +  beta / sqrt(N(s, a))
+     donde N(s, a) es cuántas veces se ha tomado la acción a en el estado s.
+     Los pares (estado, acción) poco visitados valen más -&gt; el agente es empujado
+     sistemáticamente hacia lo desconocido ("ve donde no has ido").
+
+Al terminar imprime cuándo encuentra la meta cada agente y dibuja:
+  - La curva de éxitos ACUMULADOS por episodio (el bono despega mucho antes).
+  - Dos mapas de calor de visitas: el bono cubre toda la rejilla; epsilon-greedy
+    se queda dando vueltas cerca de la salida.
+
+Cómo ejecutarlo en tu terminal:
+    pip install -r requirements.txt
+    python code/19-exploracion-avanzada/exploracion_intrinseca.py
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+# ---------------------------------------------------------------------------
+# 1) El entorno: una rejilla larga con recompensa SOLO en la esquina lejana
+# ---------------------------------------------------------------------------
+# Acciones: 0=arriba, 1=abajo, 2=izquierda, 3=derecha (desplazamiento fila,col).
+MOVIMIENTOS = np.array([[-1, 0], [1, 0], [0, -1], [0, 1]])
+N_ACCIONES = 4
+
+
+class GridWorldDisperso:
+    """Salida en la esquina (0,0); meta en la esquina opuesta. Recompensa escasa."""
+
+    def __init__(self, filas=2, columnas=30, recompensa_meta=20.0):
+        self.filas = filas
+        self.columnas = columnas
+        self.recompensa_meta = recompensa_meta
+        self.salida = (0, 0)
+        self.meta = (filas - 1, columnas - 1)
+
+    def paso(self, fila, col, accion):
+        """Devuelve (fila2, col2, recompensa, terminado)."""
+        df, dc = MOVIMIENTOS[accion]
+        fila2 = min(max(fila + df, 0), self.filas - 1)   # las paredes frenan
+        col2 = min(max(col + dc, 0), self.columnas - 1)
+        if (fila2, col2) == self.meta:
+            return fila2, col2, self.recompensa_meta, True
+        return fila2, col2, 0.0, False                   # recompensa dispersa: 0
+
+
+# ---------------------------------------------------------------------------
+# 2) Política epsilon-greedy con desempate aleatorio
+# ---------------------------------------------------------------------------
+def eps_greedy(qs, epsilon, rng):
+    if rng.random() &lt; epsilon:
+        return int(rng.integers(N_ACCIONES))
+    maximo = qs.max()
+    candidatas = np.flatnonzero(qs == maximo)   # empates -&gt; elección al azar
+    return int(rng.choice(candidatas))
+
+
+# ---------------------------------------------------------------------------
+# 3) Q-learning, con o sin bono de exploración por conteo
+# ---------------------------------------------------------------------------
+def entrenar(usar_bono, n_episodios=250, max_pasos=250,
+             alpha=0.5, gamma=0.95, epsilon=0.1, beta=0.1, semilla=0):
+    rng = np.random.default_rng(semilla)
+    env = GridWorldDisperso()
+    F, C = env.filas, env.columnas
+
+    Q = np.zeros((F, C, N_ACCIONES))     # valores acción-estado
+    N = np.zeros((F, C, N_ACCIONES))     # conteos N(s, a) para el bono
+    visitas = np.zeros((F, C))           # mapa de estados visitados
+    exitos = np.zeros(n_episodios, dtype=int)   # 1 si el episodio alcanzó la meta
+
+    for ep in range(n_episodios):
+        f, c = env.salida
+        for _ in range(max_pasos):
+            visitas[f, c] += 1
+            a = eps_greedy(Q[f, c], epsilon, rng)
+            f2, c2, r, terminado = env.paso(f, c, a)
+
+            if usar_bono:
+                N[f, c, a] += 1
+                bono = beta / np.sqrt(N[f, c, a])   # 1/sqrt(N): decae con la visita
+            else:
+                bono = 0.0
+
+            r_aug = r + bono                        # recompensa aumentada r+
+            futuro = 0.0 if terminado else gamma * Q[f2, c2].max()
+            objetivo = r_aug + futuro
+            Q[f, c, a] += alpha * (objetivo - Q[f, c, a])   # actualización Q-learning
+
+            f, c = f2, c2
+            if terminado:
+                exitos[ep] = 1
+                break
+
+    return Q, N, visitas, exitos
+
+
+# ---------------------------------------------------------------------------
+# 4) Utilidad: primer episodio en el que se alcanza la meta
+# ---------------------------------------------------------------------------
+def primer_exito(exitos):
+    idx = np.flatnonzero(exitos)
+    return int(idx[0]) + 1 if idx.size else None
+
+
+# ---------------------------------------------------------------------------
+# 5) Gráficas: éxitos acumulados y mapas de visitas
+# ---------------------------------------------------------------------------
+def graficar(env, exitos_eps, visitas_eps, exitos_bono, visitas_bono):
+    fig, axd = plt.subplot_mosaic(
+        [["curva", "curva"], ["heat_eps", "heat_bono"]],
+        figsize=(11, 6.6), gridspec_kw={"height_ratios": [1.15, 1]})
+
+    # (a) Éxitos acumulados por episodio.
+    ep = np.arange(1, len(exitos_eps) + 1)
+    axd["curva"].plot(ep, np.cumsum(exitos_eps), color="#e11d48", lw=2.2,
+                      label="ε-greedy (sin bono)")
+    axd["curva"].plot(ep, np.cumsum(exitos_bono), color="#4f46e5", lw=2.2,
+                      label="ε-greedy + bono por conteo")
+    axd["curva"].set_xlabel("episodio")
+    axd["curva"].set_ylabel("episodios con éxito (acumulado)")
+    axd["curva"].set_title("¿Cuántas veces se ha encontrado ya la meta?")
+    axd["curva"].legend(loc="upper left")
+    axd["curva"].grid(alpha=0.25)
+
+    # (b) y (c) Mapas de calor de visitas (raíz para comprimir el rango).
+    vmax = np.sqrt(max(visitas_eps.max(), visitas_bono.max()))
+    for clave, visitas, titulo in [
+            ("heat_eps", visitas_eps, "Visitas · ε-greedy"),
+            ("heat_bono", visitas_bono, "Visitas · con bono")]:
+        ax = axd[clave]
+        im = ax.imshow(np.sqrt(visitas), origin="upper", aspect="auto",
+                       cmap="magma", vmin=0, vmax=vmax)
+        ax.scatter([env.salida[1]], [env.salida[0]], marker="o",
+                   s=60, edgecolor="white", facecolor="#22c55e", label="salida")
+        ax.scatter([env.meta[1]], [env.meta[0]], marker="*",
+                   s=160, edgecolor="white", facecolor="#facc15", label="meta")
+        ax.set_title(titulo)
+        ax.set_xticks([]); ax.set_yticks([])
+        fig.colorbar(im, ax=ax, shrink=0.85, label="√(nº de visitas)")
+
+    axd["heat_eps"].legend(loc="lower left", fontsize=8, framealpha=0.9)
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    N_EP = 250
+    Q_eps, _, vis_eps, ex_eps = entrenar(usar_bono=False, n_episodios=N_EP, semilla=0)
+    Q_bono, _, vis_bono, ex_bono = entrenar(usar_bono=True, n_episodios=N_EP, semilla=0)
+
+    env = GridWorldDisperso()
+    print(f"Rejilla {env.filas}x{env.columnas}, meta en {env.meta}, "
+          f"recompensa solo en la meta.\n")
+
+    pe_eps = primer_exito(ex_eps)
+    pe_bono = primer_exito(ex_bono)
+    print("Q-learning ε-greedy (sin bono):")
+    print(f"  primera vez que alcanza la meta : "
+          f"{pe_eps if pe_eps else 'nunca'} de {N_EP} episodios")
+    print(f"  episodios con éxito             : {ex_eps.sum()} / {N_EP}")
+    print("Q-learning ε-greedy + bono por conteo (1/sqrt(N)):")
+    print(f"  primera vez que alcanza la meta : "
+          f"{pe_bono if pe_bono else 'nunca'} de {N_EP} episodios")
+    print(f"  episodios con éxito             : {ex_bono.sum()} / {N_EP}")
+
+    graficar(env, ex_eps, vis_eps, ex_bono, vis_bono)
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong> (la primera vez tarda unos segundos en descargar Python y
+          matplotlib). El contraste es rotundo: el agente <strong>sin bono</strong> se pasa casi todo el
+          entrenamiento sin ver jamás la recompensa —su curva de éxitos se queda pegada al suelo— y su
+          mapa de calor muestra que se apelotona cerca de la salida, sin llegar nunca al fondo del
+          pasillo. El agente <strong>con bono</strong>, en cambio, barre el pasillo de forma sistemática,
+          da con la meta y, a partir de ahí, la alcanza una y otra vez. Su mapa de visitas es casi
+          uniforme: ha estado <em>en todas partes</em>.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Cambia <code>semilla=0</code> por otro valor en las dos llamadas a <code>entrenar</code> y
+            vuelve a ejecutar. Verás que el agente ε-greedy es <strong>una lotería</strong>: con suerte
+            tropieza pronto con la meta, y sin ella no la encuentra en todo el entrenamiento. El agente
+            con bono, en cambio, es <strong>fiable</strong> semilla tras semilla. Prueba también a alargar
+            el pasillo (<code>columnas=40</code> en <code>GridWorldDisperso</code>): la ventaja del bono
+            se vuelve todavía más dramática, porque el coste del azar crece como $L^2$.
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          Como todos los ejemplos del manual, este también corre fuera del navegador. Descarga el archivo
+          con «Descargar .py» (o cópialo) y ejecútalo así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) instala las dependencias del manual (numpy y matplotlib)</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 2) ejecuta el ejemplo (abre una ventana con las gráficas)</span>
+<span class="prompt">$</span> python code/19-exploracion-avanzada/exploracion_intrinseca.py
+<span class="comment">Rejilla 2x30, meta en (1, 29), recompensa solo en la meta.
+
+Q-learning ε-greedy (sin bono):
+  primera vez que alcanza la meta : 208 de 250 episodios
+  episodios con éxito             : 1 / 250
+Q-learning ε-greedy + bono por conteo (1/sqrt(N)):
+  primera vez que alcanza la meta : 98 de 250 episodios
+  episodios con éxito             : 146 / 250</span></pre>
+        </div>
+        <p class="math-note">
+          Los números exactos dependen de tu versión de numpy, pero el comportamiento cualitativo es
+          siempre el mismo: sin bono, el agente casi nunca ve la recompensa; con bono, la encuentra y la
+          explota con soltura.
+        </p>
+
+        <h2 id="panorama">Un mapa de la exploración inteligente</h2>
+        <p>
+          Hemos tocado varias familias de métodos. Esta tabla las resume y te sirve de brújula:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Familia</th><th>Cómo mide la novedad</th><th>Escala a estados grandes</th></tr></thead>
+            <tbody>
+              <tr><td>Conteo exacto $1/\sqrt{N(s,a)}$</td><td>Cuenta visitas</td><td>Solo estados discretos y pocos</td></tr>
+              <tr><td>Pseudo-conteos</td><td>Modelo de densidad $\rho(s)$</td><td>Sí (imágenes, etc.)</td></tr>
+              <tr><td>Curiosidad ICM</td><td>Error del modelo de dinámica</td><td>Sí; sensible al azar del entorno</td></tr>
+              <tr><td>RND</td><td>Error al imitar una red fija aleatoria</td><td>Sí; robusto y muy usado</td></tr>
+              <tr><td>UCB / Thompson (cap. 2)</td><td>Optimismo / muestreo posterior</td><td>Raíz teórica; difícil en RL profundo</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          <strong>Thompson sampling</strong>, que mencionamos en el capítulo 2, es la otra gran raíz
+          teórica: en lugar de un bono explícito, mantiene una <em>distribución</em> sobre lo que cree del
+          mundo y actúa según una muestra de ella; a veces le toca una hipótesis optimista y explora, y a
+          veces una conservadora y explota. En RL profundo es difícil de implementar exactamente, pero
+          inspira métodos como el <em>bootstrapped DQN</em> (varias «cabezas» $Q$ que discrepan justo donde
+          hay incertidumbre).
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>Con <strong>recompensas escasas y lejanas</strong>, ε-greedy fracasa: el coste de tropezar
+              con la meta por azar crece como $L^2$ con la distancia.</li>
+            <li>La idea unificadora es la <strong>recompensa aumentada</strong> $r^{+} = r + \beta\,b(s,a)$:
+              nos inventamos una recompensa <em>intrínseca</em> $b$ que premia la novedad y decae a cero.</li>
+            <li>Los <strong>bonos por conteo</strong> $1/\sqrt{N(s,a)}$ heredan el <strong>optimismo ante la
+              incertidumbre</strong> de UCB; los <strong>pseudo-conteos</strong> los llevan a espacios enormes.</li>
+            <li>La <strong>curiosidad</strong> (ICM, RND) mide la novedad como <strong>error de predicción</strong>:
+              lo que no sabes predecir es lo que aún no conoces. Ojo con la «tele con ruido».</li>
+            <li>En nuestro pasillo, un bono por conteo de una sola línea convierte un problema irresoluble
+              para el azar en uno que se resuelve con holgura.</li>
+          </ul>
+        </div>
+
+        <p>
+          Con esto cerramos el bloque de exploración. En el
+          <a href="20-rlhf.html">capítulo 20</a> daremos un salto que quizá no esperabas: veremos que buena
+          parte de la revolución de los <strong>grandes modelos de lenguaje</strong> descansa sobre el RL
+          que hemos ido construyendo. Alinear un modelo con las preferencias humanas (RLHF) es, en el
+          fondo, un problema de política, recompensa y exploración… solo que la «recompensa» la aprende
+          otra red a partir de lo que las personas prefieren.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

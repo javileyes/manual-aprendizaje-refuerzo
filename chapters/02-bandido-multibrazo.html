@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>2. El bandido multibrazo · Manual de RL</title>
+  <meta name="description" content="El dilema exploración–explotación en su forma más pura: bandidos multibrazo, medias incrementales, ε-greedy y UCB, con el testbed de 10 brazos en Python ejecutable." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="2">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 0 · Capítulo 2</span>
+        <h1>El bandido multibrazo</h1>
+        <p class="lead">
+          En el <a href="01-que-es-rl.html">capítulo 1</a> vimos el bucle agente–entorno, pero
+          nuestro agente todavía no <em>aprendía</em>: le dábamos la política hecha. Aquí aprende
+          por primera vez. Y lo hará resolviendo el problema más pequeño que contiene el gran
+          dilema del RL: ¿pruebo algo nuevo con la esperanza de que sea mejor, o me quedo con lo
+          que ya sé que funciona? Eso es <strong>explorar frente a explotar</strong>.
+        </p>
+
+        <h2 id="la-idea">La idea, con una analogía</h2>
+        <p>
+          Imagina una fila de $k$ máquinas tragaperras (en inglés, <em>one-armed bandits</em>;
+          con varias máquinas, un <em>bandido multibrazo</em>). Cada máquina —cada
+          <strong>brazo</strong> $a$— paga premios al azar, pero unas son en promedio más
+          generosas que otras. Tú <strong>no conoces</strong> esas medias. Tienes un número
+          limitado de tiradas y quieres acumular el máximo premio posible.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Es un problema con el que convives a diario:
+          </p>
+          <ul>
+            <li><strong>El médico</strong>: ante varios tratamientos posibles y pacientes que van
+            llegando, ¿repite el que mejor le ha ido hasta ahora (explotar) o prueba otro que quizá
+            sea aún mejor pero del que tiene pocos datos (explorar)?</li>
+            <li><strong>La cena</strong>: ¿vuelves a tu restaurante de siempre, que sabes que está
+            bien, o pruebas el nuevo de la esquina, que podría encantarte… o decepcionarte?</li>
+          </ul>
+          <p>
+            Si solo explotas, nunca descubres algo mejor que lo primero que te salió medio bien.
+            Si solo exploras, malgastas tiradas en opciones malas. La gracia está en
+            <strong>equilibrar</strong> las dos cosas.
+          </p>
+        </div>
+
+        <p>
+          Frente al problema del capítulo 3 (los MDP), el bandido tiene una simplificación clave:
+          <strong>no hay estados que cambien</strong>. Tu acción no altera el mundo; la máquina de
+          mañana es idéntica a la de hoy. Eso lo convierte en el laboratorio perfecto para aislar
+          el dilema exploración–explotación sin las complicaciones del largo plazo.
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="0 0 640 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diez brazos con su valor medio y su dispersión de recompensa">
+            <line x1="40" y1="150" x2="620" y2="150" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 4" />
+            <text x="30" y="154" text-anchor="end" fill="#94a3b8" font-size="12" font-family="sans-serif">q=0</text>
+            <line x1="60" y1="101" x2="60" y2="171" stroke="#c7d2fe" stroke-width="7" stroke-linecap="round" />
+            <circle cx="60" cy="136" r="5.5" fill="#4f46e5" />
+            <text x="60" y="252" text-anchor="middle" fill="#64748b" font-size="12" font-family="sans-serif">1</text>
+            <line x1="120" y1="146" x2="120" y2="216" stroke="#c7d2fe" stroke-width="7" stroke-linecap="round" />
+            <circle cx="120" cy="182" r="5.5" fill="#4f46e5" />
+            <text x="120" y="252" text-anchor="middle" fill="#64748b" font-size="12" font-family="sans-serif">2</text>
+            <line x1="180" y1="59" x2="180" y2="129" stroke="#a7f3d0" stroke-width="7" stroke-linecap="round" />
+            <circle cx="180" cy="94" r="5.5" fill="#10b981" />
+            <text x="180" y="252" text-anchor="middle" fill="#64748b" font-size="12" font-family="sans-serif">3</text>
+            <line x1="240" y1="104" x2="240" y2="174" stroke="#c7d2fe" stroke-width="7" stroke-linecap="round" />
+            <circle cx="240" cy="140" r="5.5" fill="#4f46e5" />
+            <text x="240" y="252" text-anchor="middle" fill="#64748b" font-size="12" font-family="sans-serif">4</text>
+            <line x1="300" y1="73" x2="300" y2="143" stroke="#c7d2fe" stroke-width="7" stroke-linecap="round" />
+            <circle cx="300" cy="108" r="5.5" fill="#4f46e5" />
+            <text x="300" y="252" text-anchor="middle" fill="#64748b" font-size="12" font-family="sans-serif">5</text>
+            <line x1="360" y1="168" x2="360" y2="238" stroke="#c7d2fe" stroke-width="7" stroke-linecap="round" />
+            <circle cx="360" cy="202" r="5.5" fill="#4f46e5" />
+            <text x="360" y="252" text-anchor="middle" fill="#64748b" font-size="12" font-family="sans-serif">6</text>
+            <line x1="420" y1="122" x2="420" y2="192" stroke="#c7d2fe" stroke-width="7" stroke-linecap="round" />
+            <circle cx="420" cy="157" r="5.5" fill="#4f46e5" />
+            <text x="420" y="252" text-anchor="middle" fill="#64748b" font-size="12" font-family="sans-serif">7</text>
+            <line x1="480" y1="84" x2="480" y2="154" stroke="#c7d2fe" stroke-width="7" stroke-linecap="round" />
+            <circle cx="480" cy="118" r="5.5" fill="#4f46e5" />
+            <text x="480" y="252" text-anchor="middle" fill="#64748b" font-size="12" font-family="sans-serif">8</text>
+            <line x1="540" y1="98" x2="540" y2="168" stroke="#c7d2fe" stroke-width="7" stroke-linecap="round" />
+            <circle cx="540" cy="132" r="5.5" fill="#4f46e5" />
+            <text x="540" y="252" text-anchor="middle" fill="#64748b" font-size="12" font-family="sans-serif">9</text>
+            <line x1="600" y1="140" x2="600" y2="210" stroke="#c7d2fe" stroke-width="7" stroke-linecap="round" />
+            <circle cx="600" cy="174" r="5.5" fill="#4f46e5" />
+            <text x="600" y="252" text-anchor="middle" fill="#64748b" font-size="12" font-family="sans-serif">10</text>
+            <text x="180" y="51" text-anchor="middle" fill="#059669" font-size="12" font-family="sans-serif" font-weight="700">q*(a) mayor</text>
+          </svg>
+          <figcaption>Diez brazos. El punto es el valor real $q_*(a)$ (la media de premio de ese brazo);
+          la barra, la dispersión de sus recompensas. El agente no ve nada de esto: solo tira y observa premios ruidosos.</figcaption>
+        </figure>
+
+        <h2 id="explorar-explotar">Explorar o explotar: el dilema</h2>
+        <p>
+          En cada instante el agente tiene una <strong>estimación</strong> de lo bueno que es cada
+          brazo. <strong>Explotar</strong> es elegir el brazo con la mejor estimación actual: lo
+          que parece óptimo <em>ahora</em>. <strong>Explorar</strong> es elegir otro para mejorar
+          esa estimación: puede que uno que parece mediocre sea en realidad el mejor y aún no lo
+          sepamos porque lo hemos probado poco.
+        </p>
+        <p>
+          No puedes hacer las dos a la vez en una misma tirada, y ahí está la tensión: explorar
+          sacrifica premio inmediato a cambio de <em>información</em> que quizá te dé más premio
+          después. Todo el capítulo son distintas formas de resolver este compromiso.
+        </p>
+
+        <h2 id="matematicas">Del valor real a su estimación</h2>
+        <p>
+          Pongamos números. El <strong>valor real</strong> de una acción $a$ es la recompensa que
+          cabe esperar al elegirla:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Valor de una acción</div>
+          <p>$$q_*(a) \doteq \mathbb{E}[R_t \mid A_t = a]$$</p>
+          <p class="math-note">
+            $q_*(a)$ es la media de la recompensa $R_t$ <em>condicionada</em> a haber elegido el
+            brazo $a$ (el símbolo $\doteq$ significa «se define como»). Si conociéramos $q_*$, el
+            problema sería trivial: elegiríamos siempre $a^\star = \arg\max_a q_*(a)$. La dificultad
+            es que $q_*$ es <strong>desconocido</strong>; hay que estimarlo a partir de la experiencia.
+          </p>
+        </div>
+
+        <p>
+          Llamamos $Q_t(a)$ a nuestra <strong>estimación</strong> de $q_*(a)$ en el instante $t$.
+          La forma más natural de estimarla es promediar las recompensas que hemos recibido cada
+          vez que elegimos $a$:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Media muestral</div>
+          <p>$$Q_t(a) \doteq \frac{\text{suma de recompensas obtenidas con } a \text{ antes de } t}{\text{número de veces que se eligió } a \text{ antes de } t} = \frac{\displaystyle\sum_{i=1}^{t-1} R_i \cdot \mathbb{1}[A_i = a]}{\displaystyle\sum_{i=1}^{t-1} \mathbb{1}[A_i = a]}$$</p>
+          <p class="math-note">
+            $\mathbb{1}[A_i = a]$ vale $1$ si en el paso $i$ se eligió el brazo $a$ y $0$ si no
+            (es un «contador» que solo suma las tiradas de ese brazo). Por la ley de los grandes
+            números, cuantas más veces probemos $a$, más se acercará $Q_t(a)$ a $q_*(a)$.
+          </p>
+        </div>
+
+        <h2 id="medias-incrementales">Aprender sin acumularlo todo: la media incremental</h2>
+        <p>
+          Guardar todas las recompensas pasadas para recalcular la media entera en cada paso es un
+          desperdicio de memoria y de cálculo. Hay una forma mucho mejor. Fijémonos en un solo
+          brazo y llamemos $Q_n$ a su estimación tras haberlo elegido $n-1$ veces, y $R_n$ a la
+          recompensa de su $n$-ésima elección. Queremos $Q_{n+1}$, la media de las primeras $n$
+          recompensas. Se deriva así:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ De la media a la regla incremental</div>
+          <p>$$Q_{n+1} = \frac{1}{n}\sum_{i=1}^{n} R_i = \frac{1}{n}\left(R_n + \sum_{i=1}^{n-1} R_i\right) = \frac{1}{n}\Big(R_n + (n-1)\,Q_n\Big)$$</p>
+          <p>y agrupando $\;(n-1)Q_n = nQ_n - Q_n\;$ obtenemos la <strong>regla de actualización incremental</strong>:</p>
+          <p>$$\boxed{\,Q_{n+1} = Q_n + \frac{1}{n}\big(R_n - Q_n\big)\,}$$</p>
+          <p class="math-note">
+            Solo hay que guardar el valor actual $Q_n$ y el contador $n$. El término $R_n - Q_n$ es
+            el <strong>error</strong>: la diferencia entre lo que esperábamos ($Q_n$) y lo que
+            realmente pasó ($R_n$). Movemos la estimación un poquito en la dirección de ese error.
+          </p>
+        </div>
+
+        <p>
+          Esta forma —<em>estimación nueva ← estimación vieja + paso · (objetivo − estimación
+          vieja)</em>— es un patrón que verás una y otra vez en todo el manual. En Q-Learning, en
+          TD, en las redes neuronales: casi todo el RL es esta misma idea con distintos «objetivos».
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 El patrón universal</div>
+          <p>$$\text{NuevaEstimación} \leftarrow \text{Vieja} + \alpha\,\big[\,\text{Objetivo} - \text{Vieja}\,\big]$$</p>
+          <p>
+            Aquí el paso es $\alpha = \tfrac{1}{n}$ y el objetivo es la recompensa $R_n$. Recuérdalo:
+            reaparecerá en casi todos los algoritmos que vienen.
+          </p>
+        </div>
+
+        <h2 id="paso-constante">Paso constante y problemas no estacionarios</h2>
+        <p>
+          El paso $\tfrac{1}{n}$ hace que, con el tiempo, cada nueva recompensa pese menos (la
+          media se vuelve «pesada» y deja de moverse). Eso está bien si el mundo es
+          <strong>estacionario</strong> (las $q_*(a)$ no cambian). Pero ¿y si la mejor máquina de
+          hoy deja de serlo mañana? Entonces conviene un <strong>paso constante</strong>
+          $\alpha \in (0, 1]$:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Actualización con paso constante</div>
+          <p>$$Q_{n+1} = Q_n + \alpha\,\big(R_n - Q_n\big)$$</p>
+          <p class="math-note">
+            Si desarrollas la recursión llegas a una media <strong>ponderada por recencia</strong>:
+          </p>
+          <p>$$Q_{n+1} = (1-\alpha)^n\,Q_1 + \sum_{i=1}^{n} \alpha\,(1-\alpha)^{\,n-i}\,R_i$$</p>
+          <p class="math-note">
+            El peso de una recompensa cae <strong>exponencialmente</strong> cuanto más antigua sea
+            (el factor $(1-\alpha)^{\,n-i}$). Así el agente «olvida» el pasado lejano y se adapta a
+            los cambios. Los pesos suman $1$, así que sigue siendo una media legítima.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ ¿Cuál elegir?</div>
+          <p>
+            Con $\alpha = \tfrac{1}{n}$ la media converge al valor real verdadero (ideal si nada
+            cambia). Con $\alpha$ constante <em>nunca</em> converge del todo: se queda fluctuando en
+            torno al valor actual, siempre atenta a los cambios. No es un defecto, es justo lo que
+            quieres en un entorno <strong>no estacionario</strong> —que es la norma en el RL real.
+          </p>
+        </div>
+
+        <h2 id="politicas">Políticas: <em>greedy</em> y <em>ε-greedy</em></h2>
+        <p>
+          Ya sabemos <em>estimar</em> valores. Falta la política: <em>cómo</em> elegimos la acción
+          a partir de esas estimaciones. La opción más obvia es la <strong>codiciosa</strong>
+          (<em>greedy</em>): elegir siempre el brazo con mayor estimación.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Política greedy</div>
+          <p>$$A_t = \arg\max_a Q_t(a)$$</p>
+          <p class="math-note">
+            $\arg\max_a$ devuelve la acción $a$ que maximiza $Q_t(a)$. Pura explotación: cero exploración.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Por qué la avaricia se atasca</div>
+          <p>
+            Si por mala suerte el brazo realmente óptimo te da un premio flojo las primeras veces,
+            su $Q$ se queda bajo y la política <em>greedy</em> <strong>deja de elegirlo para
+            siempre</strong>: nunca le da la oportunidad de demostrar su valía. Se queda «pegada» a
+            un brazo subóptimo. Sin una pizca de exploración, no hay forma de corregir ese error.
+          </p>
+        </div>
+
+        <p>
+          La solución mínima es <strong>ε-greedy</strong>: casi siempre explota, pero de vez en
+          cuando —con probabilidad pequeña $\varepsilon$— tira de un brazo <em>al azar</em>.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Política ε-greedy</div>
+          <p>$$A_t = \begin{cases} \arg\max_a Q_t(a) & \text{con probabilidad } 1-\varepsilon \quad(\text{explotar}) \\[4pt] \text{un brazo al azar} & \text{con probabilidad } \varepsilon \quad(\text{explorar}) \end{cases}$$</p>
+          <p class="math-note">
+            $\varepsilon \in [0, 1]$ regula cuánto exploras. Con $\varepsilon = 0$ recuperas la
+            política <em>greedy</em>. Valores típicos: $0{,}1$ (explora mucho, aprende rápido) o
+            $0{,}01$ (explora poco, más lento pero a la larga más rentable porque explota casi siempre).
+          </p>
+        </div>
+
+        <h2 id="ucb">UCB: optimismo ante la incertidumbre</h2>
+        <p>
+          El ε-greedy explora <em>a ciegas</em>: cuando decide explorar, elige cualquier brazo con
+          la misma probabilidad, incluso uno que ya ha probado mil veces y sabe que es malo. Parece
+          un desperdicio. ¿Y si dirigiéramos la exploración hacia los brazos <strong>más
+          prometedores o menos conocidos</strong>? Esa es la idea de <strong>UCB</strong> (<em>Upper
+          Confidence Bound</em>, cota superior de confianza).
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Selección UCB</div>
+          <p>$$A_t = \arg\max_a \left[\, Q_t(a) + c\,\sqrt{\dfrac{\ln t}{N_t(a)}} \,\right]$$</p>
+          <p class="math-note">
+            $Q_t(a)$ es la estimación de valor (el término de <strong>explotación</strong>).
+            $N_t(a)$ es el número de veces que se ha elegido $a$ antes de $t$. $\ln t$ es el
+            logaritmo natural del paso actual. $c > 0$ controla cuánta exploración quieres. Todo ese
+            término de la raíz es un <strong>bono de incertidumbre</strong>.
+          </p>
+        </div>
+
+        <p>
+          Cada acción se juzga por lo que <em>parece valer</em> ($Q_t(a)$) <strong>más</strong> un
+          bono que mide <em>lo poco seguros que estamos de ese valor</em>. Fíjate en el
+          comportamiento del bono $c\sqrt{\ln t / N_t(a)}$:
+        </p>
+        <ul>
+          <li>Si un brazo se ha probado <strong>poco</strong> ($N_t(a)$ pequeño), el bono es
+          <strong>grande</strong>: hay mucha incertidumbre, así que le damos el beneficio de la
+          duda. Es <em>optimismo ante la incertidumbre</em>.</li>
+          <li>Cada vez que lo elegimos, $N_t(a)$ crece y el bono <strong>encoge</strong>: la
+          incertidumbre se reduce, ya lo conocemos mejor.</li>
+          <li>El $\ln t$ del numerador crece (despacio) con el tiempo: si un brazo lleva mucho
+          <em>sin</em> elegirse, su bono vuelve a subir y acabará por reexaminarse. Nadie queda
+          olvidado para siempre.</li>
+        </ul>
+        <p>
+          Un detalle práctico: si $N_t(a) = 0$, el bono es infinito, de modo que UCB
+          <strong>prueba cada brazo al menos una vez</strong> antes de ponerse selectivo. En la
+          práctica, en este problema, UCB suele ser el que mejor arranca.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 En una frase</div>
+          <p>
+            ε-greedy explora tirando una moneda; UCB explora con criterio, apostando por lo que
+            <em>podría</em> ser bueno porque aún no lo ha descartado. «Sé optimista con lo que no conoces.»
+          </p>
+        </div>
+
+        <h3 id="gradiente">Otra vía: el gradiente de bandidos</h3>
+        <p>
+          No es la única familia de métodos. En vez de estimar valores, podríamos aprender una
+          <strong>preferencia</strong> numérica $H_t(a)$ por cada acción y convertirla en
+          probabilidades con la función <em>softmax</em>: $\pi_t(a) = e^{H_t(a)} / \sum_b e^{H_t(b)}$.
+          Las preferencias se ajustan por <strong>ascenso de gradiente</strong> sobre la recompensa
+          esperada, subiendo la de las acciones que rinden por encima de una recompensa media de
+          referencia y bajando las demás. Es el germen de los métodos de <strong>gradiente de
+          política</strong> que protagonizarán la Parte 3 del manual (capítulo 14 en adelante); por
+          ahora nos quedamos con ε-greedy y UCB.
+        </p>
+
+        <h2 id="algoritmo">El algoritmo, paso a paso</h2>
+        <p>Juntando todo, un agente de bandido con medias incrementales y ε-greedy hace esto:</p>
+        <ol>
+          <li>Inicializa $Q(a) \leftarrow 0$ y el contador $N(a) \leftarrow 0$ para cada brazo $a$.</li>
+          <li>Repite en cada paso $t = 1, 2, \dots$:
+            <ul>
+              <li>Elige $A$: con probabilidad $1-\varepsilon$ el $\arg\max_a Q(a)$; si no, un brazo al azar.</li>
+              <li>Tira del brazo $A$ y observa la recompensa $R$.</li>
+              <li>Actualiza el contador: $N(A) \leftarrow N(A) + 1$.</li>
+              <li>Actualiza la estimación: $Q(A) \leftarrow Q(A) + \tfrac{1}{N(A)}\big(R - Q(A)\big)$.</li>
+            </ul>
+          </li>
+        </ol>
+        <p>
+          Para UCB solo cambia la primera línea del bucle: se elige
+          $A = \arg\max_a\big[Q(a) + c\sqrt{\ln t / N(a)}\big]$ (tratando $N(a)=0$ como bono infinito).
+          Vamos a programarlo y a comparar las cuatro estrategias.
+        </p>
+
+        <h2 id="ejemplo">El testbed de 10 brazos, en Python</h2>
+        <p>
+          Reproducimos el experimento clásico de Sutton &amp; Barto. Creamos bandidos de $k=10$
+          brazos cuyos valores reales $q_*(a)$ salen de una normal $\mathcal{N}(0,1)$; la recompensa
+          de tirar del brazo $a$ es $q_*(a)$ más ruido gaussiano. Como una sola partida depende
+          mucho de la suerte, promediamos <strong>500 ejecuciones</strong> independientes de
+          <strong>1000 pasos</strong> cada una. Comparamos <em>greedy</em>, <em>ε-greedy</em> con
+          $\varepsilon = 0{,}1$ y $0{,}01$, y <em>UCB</em> con $c = 2$.
+        </p>
+        <p>
+          El truco para que corra en segundos: <strong>vectorizar con numpy</strong>. En vez de un
+          bucle por ejecución, avanzamos las 500 ejecuciones a la vez, como filas de una matriz.
+          Dibujamos las dos gráficas del libro: recompensa media por paso y porcentaje de veces que
+          se elige la acción óptima.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">bandidos.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+Bandido multibrazo: el testbed de 10 brazos de Sutton &amp; Barto.
+==============================================================
+
+Compara cuatro estrategias de seleccion de accion en el problema del
+bandido multibrazo con k = 10 brazos:
+
+  * greedy               (epsilon = 0): siempre explota, nunca explora.
+  * epsilon-greedy 0.01  (explora un 1 % de las veces).
+  * epsilon-greedy 0.1   (explora un 10 % de las veces).
+  * UCB con c = 2        (exploracion dirigida por la incertidumbre).
+
+Cada estrategia se promedia sobre 500 ejecuciones independientes de
+1000 pasos. En cada ejecucion los valores reales q*(a) se muestrean de
+una normal N(0, 1) y la recompensa de tirar del brazo a es
+R = q*(a) + ruido, con ruido ~ N(0, 1).
+
+Se dibujan dos graficas, como en el libro de Sutton &amp; Barto:
+  1) recompensa media por paso,
+  2) porcentaje de veces que se elige la accion optima.
+
+Todo esta vectorizado con numpy: las 500 ejecuciones avanzan en
+paralelo (una fila por ejecucion), asi que corre en pocos segundos.
+
+Como ejecutarlo:
+    pip install -r requirements.txt
+    python code/02-bandido-multibrazo/bandidos.py
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+def simular(k=10, n_ejec=500, n_pasos=1000, epsilon=0.0, ucb_c=None, semilla=0):
+    """Ejecuta n_ejec bandidos en paralelo y devuelve dos curvas promedio.
+
+    Parametros
+    ----------
+    k        : numero de brazos.
+    n_ejec   : numero de ejecuciones independientes que se promedian.
+    n_pasos  : pasos (tiradas) por ejecucion.
+    epsilon  : probabilidad de explorar (0 = greedy puro). Se ignora si ucb_c.
+    ucb_c    : si no es None, usa UCB con esta constante c en vez de e-greedy.
+    semilla  : semilla del generador para reproducibilidad.
+
+    Devuelve (recompensa_media, prop_optima): dos arrays de longitud
+    n_pasos con la recompensa promediada sobre ejecuciones en cada paso y
+    la proporcion de ejecuciones que eligieron la accion optima.
+    """
+    rng = np.random.default_rng(semilla)
+
+    # Valores reales q*(a): una fila por ejecucion, una columna por brazo.
+    q_estrella = rng.standard_normal((n_ejec, k))
+    accion_optima = np.argmax(q_estrella, axis=1)      # (n_ejec,)
+
+    Q = np.zeros((n_ejec, k))       # estimaciones Q_t(a)
+    N = np.zeros((n_ejec, k))       # veces que se ha elegido cada accion
+    filas = np.arange(n_ejec)       # indices [0, 1, ..., n_ejec-1]
+
+    recompensa_media = np.zeros(n_pasos)
+    prop_optima = np.zeros(n_pasos)
+
+    for t in range(n_pasos):
+        if ucb_c is not None:
+            # Cota superior de confianza (UCB). Un brazo nunca probado
+            # (N = 0) recibe prioridad infinita para forzar que se pruebe.
+            with np.errstate(divide="ignore", invalid="ignore"):
+                bonus = ucb_c * np.sqrt(np.log(t + 1) / N)
+            bonus[N == 0] = np.inf
+            A = np.argmax(Q + bonus, axis=1)
+        else:
+            A = np.argmax(Q, axis=1)                    # accion greedy
+            if epsilon &gt; 0:
+                explora = rng.random(n_ejec) &lt; epsilon
+                A_azar = rng.integers(0, k, size=n_ejec)
+                A = np.where(explora, A_azar, A)
+
+        # Recompensa de cada ejecucion: q*(A) mas ruido gaussiano.
+        R = q_estrella[filas, A] + rng.standard_normal(n_ejec)
+
+        # Media incremental: Q &lt;- Q + (1/N) (R - Q).
+        N[filas, A] += 1
+        Q[filas, A] += (R - Q[filas, A]) / N[filas, A]
+
+        recompensa_media[t] = R.mean()
+        prop_optima[t] = np.mean(A == accion_optima)
+
+    return recompensa_media, prop_optima
+
+
+# --- Comparamos las cuatro estrategias ---
+estrategias = {
+    "greedy (e=0)":      dict(epsilon=0.0),
+    "e-greedy (e=0.01)": dict(epsilon=0.01),
+    "e-greedy (e=0.1)":  dict(epsilon=0.1),
+    "UCB (c=2)":         dict(ucb_c=2.0),
+}
+
+resultados = {}
+print(f"{'Estrategia':20s} {'recomp. media':&gt;14s} {'% optima':&gt;10s}")
+print("-" * 46)
+for nombre, kwargs in estrategias.items():
+    rec, opt = simular(**kwargs)
+    resultados[nombre] = (rec, opt)
+    # Promedios sobre los ultimos 100 pasos (comportamiento ya asentado).
+    print(f"{nombre:20s} {rec[-100:].mean():14.3f} {100 * opt[-100:].mean():9.1f}%")
+
+# --- Dos graficas: recompensa media y % de accion optima ---
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.4))
+for nombre, (rec, opt) in resultados.items():
+    ax1.plot(rec, label=nombre, linewidth=1.3)
+    ax2.plot(100 * opt, label=nombre, linewidth=1.3)
+
+ax1.set_xlabel("Pasos")
+ax1.set_ylabel("Recompensa media")
+ax1.set_title("Recompensa media por paso")
+ax1.legend(fontsize=8)
+ax1.grid(alpha=0.3)
+
+ax2.set_xlabel("Pasos")
+ax2.set_ylabel("% de acciones optimas")
+ax2.set_title("Porcentaje de accion optima")
+ax2.set_ylim(0, 100)
+ax2.legend(fontsize=8)
+ax2.grid(alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong> (la primera vez tarda unos segundos en descargar Python
+          y numpy). Verás dos curvas muy elocuentes. En la de <em>acción óptima</em>, la política
+          <em>greedy</em> se estanca pronto muy por debajo del resto: se ha atascado. El
+          <em>ε-greedy</em> con $\varepsilon=0{,}1$ sube rápido pero hace techo (ese $10\%$ de
+          tiradas al azar le impide explotar del todo). El de $\varepsilon=0{,}01$ arranca más
+          lento pero termina más arriba, y a largo plazo acabaría superando al de $0{,}1$. Y
+          <em>UCB</em> suele ser el mejor de los cuatro en esta ventana de mil pasos.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Cambia $\varepsilon = 0{,}1$ por $\varepsilon = 0{,}4$: explorará tantísimo que la
+            recompensa media <em>bajará</em> —explorar de más también cuesta—. Prueba luego a subir
+            la $c$ de UCB de $2$ a $4$ y observa cómo explora aún más al principio. Jugar con estos
+            mandos es aprender a <em>dosificar</em> la exploración.
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          Este ejemplo usa solo numpy y matplotlib, así que corre igual en el navegador que en tu
+          máquina. Descarga <code>bandidos.py</code> (o cópialo) y lánzalo así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) ejecuta el ejemplo (abre una ventana con las dos gráficas)</span>
+<span class="prompt">$</span> python code/02-bandido-multibrazo/bandidos.py
+<span class="comment">Estrategia            recomp. media   % optima
+----------------------------------------------
+greedy (e=0)                  1.063      39.4%
+e-greedy (e=0.01)             1.320      64.2%
+e-greedy (e=0.1)              1.368      81.2%
+UCB (c=2)                     1.498      86.5%</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Como fijamos la semilla con <code>np.random.default_rng(0)</code>, obtendrás estos
+          mismos números al ejecutarlo, tanto en el navegador como en tu terminal. Cambia la semilla
+          para ver otras partidas.
+        </p>
+
+        <h2 id="comparativa">Resumen de las estrategias</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Estrategia</th><th>Cómo explora</th><th>Ventaja</th><th>Inconveniente</th></tr></thead>
+            <tbody>
+              <tr><td><em>greedy</em></td><td>No explora</td><td>Simplísima</td><td>Se atasca en un brazo subóptimo</td></tr>
+              <tr><td><em>ε-greedy</em> ($0{,}1$)</td><td>Al azar, mucho</td><td>Aprende rápido</td><td>Hace techo: sigue explorando de más</td></tr>
+              <tr><td><em>ε-greedy</em> ($0{,}01$)</td><td>Al azar, poco</td><td>Mejor a largo plazo</td><td>Lento al principio</td></tr>
+              <tr><td><em>UCB</em> ($c=2$)</td><td>Dirigida por incertidumbre</td><td>Muy eficiente aquí</td><td>Más difícil de extender a RL con estados</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>El <strong>bandido multibrazo</strong> es RL sin estados: aísla el dilema
+            <strong>explorar vs. explotar</strong>.</li>
+            <li>El valor real $q_*(a) = \mathbb{E}[R \mid A=a]$ es desconocido; lo estimamos con
+            $Q_t(a)$ promediando recompensas.</li>
+            <li>La <strong>media incremental</strong> $Q_{n+1} = Q_n + \tfrac{1}{n}(R_n - Q_n)$
+            actualiza sin guardar el historial. Con paso constante $\alpha$ se adapta a entornos
+            <strong>no estacionarios</strong>.</li>
+            <li><strong>greedy</strong> se atasca; <strong>ε-greedy</strong> explora al azar;
+            <strong>UCB</strong> explora con criterio, siendo optimista ante la incertidumbre.</li>
+            <li>El patrón <em>estimación ← estimación + paso · (objetivo − estimación)</em> es la
+            columna vertebral de casi todo lo que viene.</li>
+          </ul>
+        </div>
+
+        <p>
+          Hasta aquí, un mundo de un solo estado. En el <a href="03-mdp.html">capítulo 3</a> damos
+          el gran salto: introducimos <strong>estados que cambian según nuestras acciones</strong>
+          y el marco matemático que lo formaliza, los <strong>Procesos de Decisión de Markov</strong>.
+          Ahí, elegir bien no solo afecta al premio de ahora, sino a las situaciones futuras en las
+          que nos meteremos.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>4. Retornos y funciones de valor · Manual de RL</title>
+  <meta name="description" content="El corazón matemático del RL: retorno con descuento, funciones de valor V y Q, y las ecuaciones de Bellman de esperanza y de optimalidad, con un ejemplo en Python ejecutable." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="4">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 0 · Capítulo 4</span>
+        <h1>Retornos y funciones de valor</h1>
+        <p class="lead">
+          En el <a href="03-mdp.html">capítulo anterior</a> montamos el escenario: un
+          <strong>Proceso de Decisión de Markov</strong> con estados, acciones, transiciones y
+          recompensas. Ahora viene la pregunta que lo mueve todo: dado ese mundo y una forma de
+          comportarse, ¿<em>cuánto vale</em> estar en un sitio? La respuesta —la
+          <strong>función de valor</strong>— y la ecuación que la caracteriza —la de
+          <strong>Bellman</strong>— son el núcleo teórico de casi todo lo que viene después.
+        </p>
+
+        <h2 id="intuicion">La intuición: el valor es una predicción del futuro</h2>
+        <p>
+          Imagina una partida de ajedrez. Alguien te enseña una posición y te pregunta:
+          «¿es buena para las blancas?». No cuentas el material y ya está; piensas en cómo va a
+          <em>desarrollarse</em> la partida a partir de ahí si ambos juegan como suelen jugar.
+          Una posición «vale mucho» si, a partir de ella, esperas acabar ganando.
+        </p>
+        <p>
+          Eso es <strong>exactamente</strong> una función de valor. El valor de un estado no
+          mide el premio de <em>este</em> instante, sino todo el premio que esperas cosechar
+          <strong>desde aquí en adelante</strong> si sigues tu política. Es una predicción:
+          un resumen, en un solo número, de lo prometedor que es un estado.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Valor $=$ «¿cuánto premio total espero conseguir a partir de aquí?». Dos ideas clave:
+          </p>
+          <ul>
+            <li>Es <strong>a futuro</strong>: mira hacia adelante, nunca hacia el pasado.</li>
+            <li>Depende de <strong>tu política</strong> $\pi$: el valor de una casilla cambia según
+              cómo pienses jugar. La misma posición vale distinto para un principiante y para un maestro.</li>
+          </ul>
+        </div>
+
+        <h2 id="retorno">El retorno: sumar el futuro con descuento</h2>
+        <p>
+          Para hablar de «premio total futuro» necesitamos una cantidad precisa. La llamamos
+          <strong>retorno</strong> y la denotamos $G_t$ (la $G$ es de <em>gain</em>, ganancia).
+          Es la suma de todas las recompensas que llegarán a partir del instante $t$, pero
+          dando un poco <em>menos</em> de peso a las que tardan más en llegar. Ese descuento lo
+          controla un número $\gamma \in [0, 1]$, el <strong>factor de descuento</strong>.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El retorno con descuento</div>
+          <p>$$G_t \;=\; R_{t+1} + \gamma R_{t+2} + \gamma^2 R_{t+3} + \cdots \;=\; \sum_{k=0}^{\infty} \gamma^{k}\, R_{t+k+1}$$</p>
+          <p class="math-note">
+            $R_{t+k+1}$ es la recompensa recibida $k+1$ pasos después de $t$. El peso $\gamma^k$
+            decae con la distancia: una recompensa dentro de $k$ pasos vale $\gamma^k$ veces lo
+            que valdría ahora. Con $\gamma = 0$ solo cuenta el premio inmediato (agente
+            «impaciente»); con $\gamma \to 1$ el agente valora casi por igual el futuro lejano
+            (agente «paciente»).
+          </p>
+        </div>
+
+        <p>
+          ¿Por qué descontar? Por dos motivos. Uno <strong>práctico</strong>: si la interacción
+          puede no terminar nunca, la suma sin descuento podría ser infinita; con $\gamma &lt; 1$
+          y recompensas acotadas, la serie geométrica converge siempre. Otro <strong>conceptual</strong>:
+          el futuro es incierto, y un premio garantizado hoy suele valer más que uno posible
+          dentro de mil pasos. El truco algebraico que hará toda la magia es reescribir la suma
+          separando el primer término:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La recursión del retorno</div>
+          <p>$$G_t \;=\; R_{t+1} + \gamma\big(R_{t+2} + \gamma R_{t+3} + \cdots\big) \;=\; R_{t+1} + \gamma\, G_{t+1}$$</p>
+          <p class="math-note">
+            «El retorno de ahora es la recompensa del próximo paso más el retorno descontado de
+            lo que venga después». Esta identidad, casi trivial, es la semilla de todas las
+            ecuaciones de Bellman.
+          </p>
+        </div>
+
+        <h2 id="funciones-valor">Las funciones de valor $V^\pi$ y $Q^\pi$</h2>
+        <p>
+          El retorno $G_t$ es una variable <em>aleatoria</em>: depende del azar de las
+          transiciones y de las acciones que muestree la política. Para convertirlo en una
+          medida estable de «lo bueno que es un estado» tomamos su <strong>valor esperado</strong>.
+          Aparecen así dos funciones hermanas.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Función de valor de estado $V^\pi$</div>
+          <p>$$V^{\pi}(s) \;=\; \mathbb{E}_{\pi}\!\left[\, G_t \,\middle|\, S_t = s \,\right]$$</p>
+          <p class="math-note">
+            El retorno esperado si <strong>estás en el estado $s$</strong> y a partir de ahí eliges
+            las acciones según $\pi$. El subíndice $\pi$ en la esperanza recuerda que las acciones
+            futuras las dicta esa política. $V^\pi(s)$ es «el valor de la casilla $s$ para quien
+            juega como $\pi$».
+          </p>
+        </div>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Función de valor de acción $Q^\pi$</div>
+          <p>$$Q^{\pi}(s, a) \;=\; \mathbb{E}_{\pi}\!\left[\, G_t \,\middle|\, S_t = s,\; A_t = a \,\right]$$</p>
+          <p class="math-note">
+            El retorno esperado si estás en $s$, <strong>tomas ahora concretamente la acción $a$</strong>
+            (aunque tu política no la habría elegido) y <em>después</em> sigues con $\pi$. Responde a
+            «¿qué me conviene probar aquí?», por eso $Q$ será la protagonista del control en los
+            capítulos siguientes.
+          </p>
+        </div>
+
+        <p>
+          Ambas están ligadas por una relación muy natural. Si en $s$ tu política elige la acción
+          $a$ con probabilidad $\pi(a\mid s)$, el valor del estado es sencillamente el
+          <strong>promedio</strong> de los valores de acción, ponderado por lo probable que sea cada
+          acción:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ De $Q$ a $V$</div>
+          <p>$$V^{\pi}(s) \;=\; \sum_{a} \pi(a \mid s)\, Q^{\pi}(s, a)$$</p>
+          <p class="math-note">
+            El valor de una posición es la media de lo que valen tus jugadas posibles, pesada por
+            la frecuencia con que las juegas. Si $\pi$ es determinista y en $s$ siempre juega $a$,
+            entonces $V^\pi(s) = Q^\pi(s, a)$.
+          </p>
+        </div>
+
+        <h2 id="bellman">La ecuación de Bellman de esperanza</h2>
+        <p>
+          Aquí ocurre lo bonito. Vamos a meter la recursión $G_t = R_{t+1} + \gamma\,G_{t+1}$
+          dentro de la definición de $V^\pi$. Como el valor esperado es lineal:
+        </p>
+        <p>
+          $$V^{\pi}(s) = \mathbb{E}_{\pi}\!\left[\,R_{t+1} + \gamma\, G_{t+1} \mid S_t = s\,\right]
+          = \mathbb{E}_{\pi}\!\left[\,R_{t+1} \mid S_t = s\,\right]
+          + \gamma\, \mathbb{E}_{\pi}\!\left[\,G_{t+1} \mid S_t = s\,\right].$$
+        </p>
+        <p>
+          Ahora desarrollamos las dos esperanzas condicionando sobre lo que puede pasar: primero
+          la acción $a$ (según $\pi$), y luego el estado siguiente $s'$ (según la dinámica del MDP
+          $p(s' \mid s, a)$ que definimos en el <a href="03-mdp.html">capítulo 3</a>). La clave es
+          que $\mathbb{E}_\pi[G_{t+1} \mid S_{t+1} = s'] = V^\pi(s')$: ¡el mismo tipo de objeto,
+          pero un paso más adelante! Escribiendo $r(s,a)$ para la recompensa esperada inmediata,
+          obtenemos la estrella del capítulo.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Bellman de esperanza para $V^\pi$</div>
+          <p>$$V^{\pi}(s) \;=\; \sum_{a} \pi(a \mid s)\left[\, r(s, a) \;+\; \gamma \sum_{s'} p(s' \mid s, a)\, V^{\pi}(s') \,\right]$$</p>
+          <p class="math-note">
+            Símbolos: $\pi(a\mid s)$ probabilidad de elegir $a$ en $s$; $r(s,a)=\mathbb{E}[R_{t+1}\mid s,a]$
+            recompensa esperada inmediata; $p(s'\mid s,a)$ probabilidad de aterrizar en $s'$;
+            $\gamma$ el descuento. En palabras: <strong>el valor de hoy es la recompensa inmediata
+            esperada más el valor descontado de mañana</strong>. Es una ecuación de consistencia
+            que $V^\pi$ cumple en <em>todos</em> los estados a la vez.
+          </p>
+        </div>
+
+        <p>
+          El mismo razonamiento sobre $Q^\pi$ da su versión gemela. Ahora la acción actual $a$ ya
+          está fijada, así que no promediamos sobre ella; pero la <em>siguiente</em> acción $a'$
+          sí la elige $\pi$:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Bellman de esperanza para $Q^\pi$</div>
+          <p>$$Q^{\pi}(s, a) \;=\; r(s, a) \;+\; \gamma \sum_{s'} p(s' \mid s, a) \sum_{a'} \pi(a' \mid s')\, Q^{\pi}(s', a')$$</p>
+          <p class="math-note">
+            La suma interna $\sum_{a'} \pi(a'\mid s')\, Q^\pi(s', a')$ es justamente $V^\pi(s')$, de
+            modo que también podemos escribir de forma compacta
+            $Q^{\pi}(s,a) = r(s,a) + \gamma \sum_{s'} p(s'\mid s,a)\, V^{\pi}(s')$. Las dos
+            funciones se definen mutuamente.
+          </p>
+        </div>
+
+        <h2 id="optimalidad">De evaluar a lo óptimo: $V^*$ y $Q^*$</h2>
+        <p>
+          Hasta aquí hemos <em>evaluado</em> una política dada. Pero el objetivo final del RL es
+          <strong>encontrar la mejor</strong>. Definimos las funciones de valor
+          <strong>óptimas</strong> como el mejor valor alcanzable por cualquier política:
+        </p>
+        <p>
+          $$V^{*}(s) = \max_{\pi} V^{\pi}(s), \qquad\qquad Q^{*}(s, a) = \max_{\pi} Q^{\pi}(s, a).$$
+        </p>
+        <p>
+          Estas funciones satisfacen su propia ecuación de consistencia, pero con una diferencia
+          crucial: donde antes <em>promediábamos</em> sobre las acciones según $\pi$, ahora
+          <strong>elegimos la mejor</strong> con un $\max$. Es la <strong>ecuación de optimalidad
+          de Bellman</strong>.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Bellman de optimalidad</div>
+          <p>$$V^{*}(s) \;=\; \max_{a}\left[\, r(s, a) + \gamma \sum_{s'} p(s' \mid s, a)\, V^{*}(s') \,\right]$$</p>
+          <p>$$Q^{*}(s, a) \;=\; r(s, a) + \gamma \sum_{s'} p(s' \mid s, a)\, \max_{a'} Q^{*}(s', a')$$</p>
+          <p class="math-note">
+            El $\max$ dice: «un estado vale lo que valga <em>actuar de la mejor forma posible</em>
+            en él». Estas ecuaciones ya no dependen de ninguna $\pi$: caracterizan directamente lo
+            óptimo del problema.
+          </p>
+        </div>
+
+        <p>
+          Y de $Q^*$ sale la mejor forma de jugar casi gratis. Como $Q^*(s,a)$ ya te dice cuánto
+          vale cada acción suponiendo comportamiento óptimo después, basta con
+          quedarse con la mejor en cada estado:
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La política óptima es <em>greedy</em> respecto a $Q^*$</div>
+          <p>$$V^{*}(s) = \max_{a} Q^{*}(s, a), \qquad\qquad \pi^{*}(s) = \arg\max_{a} Q^{*}(s, a).$$</p>
+          <p>
+            Si conocieras $Q^*$, resolver el problema sería trivial: en cada estado, mira la fila
+            de $Q^*$ y toma la acción con mayor valor. Por eso gran parte del manual consiste, en
+            el fondo, en <strong>estimar $Q^*$</strong> (o $V^*$) lo mejor posible.
+          </p>
+        </div>
+
+        <h2 id="sistema-lineal">Calcular $V^\pi$ resolviendo un sistema lineal</h2>
+        <p>
+          Fíjate en un detalle precioso de la ecuación de Bellman <em>de esperanza</em> (la de
+          evaluar $\pi$): no tiene ningún $\max$. Es <strong>lineal</strong> en las incógnitas
+          $V^\pi(s)$. Si apilamos los valores en un vector $\mathbf{V} \in \mathbb{R}^{|\mathcal{S}|}$,
+          la recompensa media por estado en $\mathbf{r}_\pi$ y las probabilidades de transición
+          bajo la política en una matriz $P_\pi$, la ecuación se escribe de golpe para todos los
+          estados:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Bellman en forma matricial</div>
+          <p>$$\mathbf{V} = \mathbf{r}_\pi + \gamma\, P_\pi \mathbf{V} \quad\Longrightarrow\quad (\mathbf{I} - \gamma P_\pi)\,\mathbf{V} = \mathbf{r}_\pi \quad\Longrightarrow\quad \mathbf{V} = (\mathbf{I} - \gamma P_\pi)^{-1} \mathbf{r}_\pi$$</p>
+          <p class="math-note">
+            Donde $r_\pi(s) = \sum_a \pi(a\mid s)\, r(s,a)$ y $(P_\pi)_{s s'} = \sum_a \pi(a\mid s)\, p(s'\mid s, a)$.
+            Con $\gamma &lt; 1$ la matriz $\mathbf{I} - \gamma P_\pi$ siempre es invertible (sus valores
+            propios no pueden ser cero), así que <strong>hay solución única</strong>.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Ojo: lineal solo la de esperanza</div>
+          <p>
+            Este truco de «resolver un sistema» funciona para <strong>evaluar</strong> una política
+            fija, porque la ecuación es lineal. La de <strong>optimalidad</strong> lleva un $\max$
+            dentro y <em>no</em> es lineal: no se puede invertir una matriz para obtener $V^*$
+            directamente. Ese obstáculo es justo lo que motiva la
+            <a href="05-programacion-dinamica.html">programación dinámica</a> del próximo capítulo,
+            que la resuelve iterando.
+          </p>
+        </div>
+
+        <h2 id="ejemplo">Ejemplo: $V^\pi$ en un gridworld, dos formas</h2>
+        <p>
+          Vamos a hacerlo de verdad. El entorno es un <strong>gridworld de 4×4</strong>: 16
+          casillas numeradas de $0$ a $15$. Las dos esquinas opuestas ($0$ y $15$) son
+          <strong>terminales</strong>. Desde cualquier otra casilla el agente se mueve
+          arriba/abajo/izquierda/derecha; si choca con la pared, se queda donde está. Cada paso
+          cuesta $-1$ (queremos salir cuanto antes). La política a evaluar es la más tonta posible:
+          <strong>moverse al azar</strong>, con probabilidad $1/4$ en cada dirección.
+        </p>
+        <p>
+          Calcularemos $V^\pi$ de <strong>dos maneras independientes</strong> y comprobaremos que
+          coinciden: (1) la solución <strong>exacta</strong> del sistema
+          $\mathbf{V} = (\mathbf{I} - \gamma P_\pi)^{-1} \mathbf{r}_\pi$ con
+          <code>numpy.linalg.solve</code>; y (2) una estimación de <strong>Monte Carlo</strong>,
+          simulando miles de episodios y promediando el retorno descontado. Que ambas coincidan es
+          la mejor prueba de que la ecuación de Bellman <em>de verdad</em> describe el valor.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">valor_bellman.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+Retornos y funciones de valor: la ecuación de Bellman en un gridworld.
+
+Este script calcula la función de valor V^pi de una política fija (moverse al
+azar en las cuatro direcciones) sobre un gridworld de 4x4 con dos casillas
+terminales (las dos esquinas opuestas). Lo hace de dos formas y comprueba que
+coinciden:
+
+  1. EXACTA, resolviendo el sistema lineal de las ecuaciones de Bellman
+        V = (I - gamma * P_pi)^{-1} r_pi
+     con numpy.linalg.solve.
+
+  2. APROXIMADA, con una estimación de Monte Carlo: se simulan muchos
+     episodios desde cada estado, se promedia el retorno descontado y se
+     compara con la solución exacta.
+
+Al final dibuja el mapa de calor de V^pi y un diagrama de dispersión que
+confirma que Monte Carlo reproduce la solución de Bellman.
+
+Cómo ejecutarlo:
+    pip install -r requirements.txt
+    python code/04-retornos-y-valor/valor_bellman.py
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- El entorno: gridworld 4x4 -------------------------------------------
+FILAS, COLUMNAS = 4, 4
+N = FILAS * COLUMNAS          # 16 estados, numerados 0..15 (fila * 4 + columna)
+TERMINALES = {0, N - 1}       # las dos esquinas opuestas son terminales
+GAMMA = 0.9                   # factor de descuento
+
+# Cuatro acciones: 0=arriba, 1=abajo, 2=izquierda, 3=derecha
+MOVIMIENTOS = np.array([[-1, 0], [1, 0], [0, -1], [0, 1]])
+N_ACCIONES = len(MOVIMIENTOS)
+
+
+def siguiente_estado(s, a):
+    """Estado al que se llega desde s aplicando la acción a.
+
+    Si el movimiento sale del tablero, el agente se queda donde está.
+    Las casillas terminales son absorbentes: no se sale de ellas.
+    """
+    if s in TERMINALES:
+        return s
+    fila, col = divmod(s, COLUMNAS)
+    df, dc = MOVIMIENTOS[a]
+    nueva_fila = min(max(fila + df, 0), FILAS - 1)
+    nueva_col = min(max(col + dc, 0), COLUMNAS - 1)
+    return nueva_fila * COLUMNAS + nueva_col
+
+
+# Tabla de transiciones precalculada: sig[s, a] -&gt; estado siguiente
+SIG = np.array([[siguiente_estado(s, a) for a in range(N_ACCIONES)]
+                for s in range(N)])
+
+# Máscara de estados terminales (para vectorizar Monte Carlo)
+ES_TERMINAL = np.zeros(N, dtype=bool)
+for s in TERMINALES:
+    ES_TERMINAL[s] = True
+
+
+def construir_bellman():
+    """Devuelve (P_pi, r_pi) de la política uniforme (moverse al azar).
+
+    P_pi[s, s'] = probabilidad de pasar de s a s' bajo la política.
+    r_pi[s]     = recompensa esperada inmediata al salir de s.
+    Cada paso en una casilla no terminal cuesta -1; en las terminales, 0.
+    """
+    P = np.zeros((N, N))
+    r = np.zeros(N)
+    for s in range(N):
+        if s in TERMINALES:
+            P[s, s] = 1.0          # absorbente, sin recompensa
+            continue
+        r[s] = -1.0                # cada paso cuesta -1
+        for a in range(N_ACCIONES):
+            P[s, SIG[s, a]] += 1.0 / N_ACCIONES   # política uniforme
+    return P, r
+
+
+def valor_exacto(P, r, gamma):
+    """Resuelve V = (I - gamma * P)^{-1} r  sin invertir explícitamente."""
+    A = np.eye(N) - gamma * P
+    return np.linalg.solve(A, r)
+
+
+def valor_montecarlo(gamma, n_episodios=4000, max_pasos=400, semilla=0):
+    """Estima V^pi con Monte Carlo: promedio del retorno descontado.
+
+    Para cada estado inicial no terminal simula n_episodios en paralelo
+    (vectorizado con numpy) siguiendo la política uniforme y promedia G_0.
+    """
+    rng = np.random.default_rng(semilla)
+    V = np.zeros(N)
+    for inicio in range(N):
+        if ES_TERMINAL[inicio]:
+            continue  # V de un estado terminal es 0 por definición
+        actual = np.full(n_episodios, inicio)
+        activo = np.ones(n_episodios, dtype=bool)   # aún no ha terminado
+        G = np.zeros(n_episodios)
+        descuento = np.ones(n_episodios)
+        for _ in range(max_pasos):
+            if not activo.any():
+                break
+            acciones = rng.integers(0, N_ACCIONES, size=n_episodios)
+            # cada transición desde una casilla no terminal aporta -1
+            G += descuento * (-1.0) * activo
+            nuevo = SIG[actual, acciones]
+            actual = np.where(activo, nuevo, actual)
+            descuento *= gamma
+            activo = activo &amp; ~ES_TERMINAL[actual]
+        V[inicio] = G.mean()
+    return V
+
+
+def main():
+    P, r = construir_bellman()
+    V_exacto = valor_exacto(P, r, GAMMA)
+    V_mc = valor_montecarlo(GAMMA)
+
+    error = np.abs(V_exacto - V_mc)
+    print("V^pi por estado (gridworld 4x4, política uniforme, gamma = 0.9)")
+    print("estado |   Bellman | Monte Carlo | |dif|")
+    print("-------+-----------+-------------+------")
+    for s in range(N):
+        marca = " (terminal)" if ES_TERMINAL[s] else ""
+        print(f"  {s:2d}   | {V_exacto[s]:8.3f}  |  {V_mc[s]:8.3f}   | {error[s]:.3f}{marca}")
+    print(f"\nError máximo entre Bellman y Monte Carlo: {error.max():.3f}")
+
+    # --- Visualización -----------------------------------------------------
+    rejilla = V_exacto.reshape(FILAS, COLUMNAS)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.6))
+
+    im = ax1.imshow(rejilla, cmap="viridis")
+    ax1.set_title("$V^\\pi(s)$ exacta (ecuación de Bellman)")
+    ax1.set_xticks(range(COLUMNAS))
+    ax1.set_yticks(range(FILAS))
+    for s in range(N):
+        f, c = divmod(s, COLUMNAS)
+        etiqueta = "TERM" if ES_TERMINAL[s] else f"{V_exacto[s]:.2f}"
+        ax1.text(c, f, etiqueta, ha="center", va="center",
+                 color="white", fontsize=10, fontweight="bold")
+    fig.colorbar(im, ax=ax1, fraction=0.046, pad=0.04)
+
+    ax2.scatter(V_exacto, V_mc, s=60, edgecolor="black", zorder=3)
+    lo, hi = V_exacto.min() - 0.5, V_exacto.max() + 0.5
+    ax2.plot([lo, hi], [lo, hi], "--", color="crimson", label="y = x")
+    ax2.set_xlabel("Bellman (exacta)")
+    ax2.set_ylabel("Monte Carlo (estimada)")
+    ax2.set_title("Monte Carlo reproduce a Bellman")
+    ax2.legend()
+    ax2.grid(alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong>. En la tabla verás, columna a columna, la $V^\pi$
+          exacta de Bellman y la estimada por Monte Carlo: son prácticamente idénticas (el error
+          máximo es de apenas unas centésimas, y bajaría más con más episodios). El mapa de calor
+          muestra lo que la intuición predice: las casillas <strong>cerca de una salida</strong>
+          valen más (retorno menos negativo, colores claros) y las <strong>más alejadas de ambas
+          salidas</strong> —las dos esquinas opuestas y el interior— valen menos (colores oscuros).
+          El diagrama de la derecha pone cada punto casi
+          exactamente sobre la recta $y = x$: <strong>Bellman y la simulación cuentan la misma
+          historia</strong>.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Cambia <code>GAMMA = 0.9</code> a <code>0.99</code> y vuelve a ejecutar: como el agente
+            se vuelve más «paciente», los costes lejanos pesan más y todos los valores se hacen
+            más negativos. Prueba también <code>0.5</code>: el mapa se aplana, porque el futuro
+            lejano casi no cuenta. Estás viendo, en directo, cómo $\gamma$ moldea el significado
+            de «valor».
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          Como todos los ejemplos del manual, este corre igual fuera del navegador. Descarga el
+          archivo con «Descargar .py» (o cópialo) y lánzalo así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) ejecuta el ejemplo</span>
+<span class="prompt">$</span> python code/04-retornos-y-valor/valor_bellman.py
+<span class="comment">V^pi por estado (gridworld 4x4, política uniforme, gamma = 0.9)
+...
+Error máximo entre Bellman y Monte Carlo: 0.093</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Este ejemplo usa solo <code>numpy</code> y <code>matplotlib</code>, así que corre
+          entero en el navegador con <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>.
+          La ventana de la gráfica se muestra como imagen debajo de la salida.
+        </p>
+
+        <h2 id="v-vs-q">$V$ frente a $Q$: ¿cuál uso?</h2>
+        <p>
+          Las dos funciones dicen «cuánto premio esperar», pero se usan en momentos distintos.
+          Esta tabla te servirá de brújula en los próximos capítulos:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th></th><th>$V^\pi(s)$ — valor de estado</th><th>$Q^\pi(s,a)$ — valor de acción</th></tr></thead>
+            <tbody>
+              <tr><td>Responde a</td><td>¿Qué tan bueno es <em>estar</em> en $s$?</td><td>¿Qué tan bueno es <em>hacer</em> $a$ en $s$?</td></tr>
+              <tr><td>Para <strong>decidir</strong></td><td>Necesita el modelo $p(s'\mid s,a)$ para comparar acciones</td><td>Directo: eliges $\arg\max_a Q$, sin modelo</td></tr>
+              <tr><td>Protagonista en</td><td>Programación dinámica, evaluación (cap. 5–6)</td><td>Control sin modelo: SARSA, Q-Learning, DQN (cap. 8–12)</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>El <strong>retorno</strong> $G_t = \sum_{k\ge 0} \gamma^k R_{t+k+1}$ es el premio futuro acumulado y descontado; cumple la recursión $G_t = R_{t+1} + \gamma\, G_{t+1}$.</li>
+            <li>La <strong>función de valor</strong> $V^\pi(s) = \mathbb{E}_\pi[G_t\mid S_t=s]$ predice ese retorno desde un estado; $Q^\pi(s,a)$ lo hace fijando además la primera acción.</li>
+            <li>Se relacionan por $V^\pi(s) = \sum_a \pi(a\mid s)\, Q^\pi(s,a)$.</li>
+            <li>La <strong>ecuación de Bellman de esperanza</strong> liga el valor de hoy con el de mañana; al ser lineal, se resuelve con $\mathbf{V} = (\mathbf{I} - \gamma P_\pi)^{-1}\mathbf{r}_\pi$.</li>
+            <li>La <strong>ecuación de optimalidad</strong> cambia el promedio por un $\max$; caracteriza $V^*$ y $Q^*$, y la política óptima es $\pi^*(s) = \arg\max_a Q^*(s,a)$.</li>
+          </ul>
+        </div>
+
+        <p>
+          Ya tenemos las ecuaciones que definen «lo óptimo». Pero la de optimalidad tiene un $\max$
+          que impide resolverla de un tirón. En el
+          <a href="05-programacion-dinamica.html">capítulo 5</a> atacaremos ese muro con
+          <strong>programación dinámica</strong>: convertiremos la ecuación de Bellman en un
+          <em>algoritmo</em> que, iterando, encuentra $V^*$ y la política óptima. El valor deja de
+          ser un concepto y se vuelve una receta.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

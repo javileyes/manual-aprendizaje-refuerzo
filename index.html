@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manual de Aprendizaje por Refuerzo · de la intuición a las matemáticas</title>
+  <meta name="description" content="Manual interactivo de Aprendizaje por Refuerzo (RL): explicaciones intuitivas, las matemáticas detrás y ejemplos en Python ejecutables en el navegador." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body data-chapter="0">
+  <div class="progress-bar"></div>
+
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <div class="content-wrap">
+      <header class="hero">
+        <span class="kicker">Aprendizaje por Refuerzo</span>
+        <h1>Entiende el RL <span class="grad">de verdad</span>:<br>de la intuición a las matemáticas</h1>
+        <p class="sub">
+          Un manual que empieza con analogías sencillas y te lleva, paso a paso, hasta las
+          ecuaciones y algoritmos que hacen funcionar el aprendizaje por refuerzo —
+          de los bandidos multibrazo a PPO y el RLHF de los grandes modelos de lenguaje.
+          Con <strong>ejemplos en Python que se ejecutan aquí mismo</strong>, en tu navegador.
+        </p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="chapters/01-que-es-rl.html">Empezar por el capítulo 1 →</a>
+          <a class="btn btn-ghost" href="#indice">Ver el índice completo</a>
+        </div>
+      </header>
+
+      <section class="features">
+        <div class="feature">
+          <div class="ic">🧠</div>
+          <h3>Primero la intuición</h3>
+          <p>Cada idea empieza con una analogía cotidiana. La fórmula llega después, cuando ya sabes qué representa.</p>
+        </div>
+        <div class="feature">
+          <div class="ic">➗</div>
+          <h3>Las matemáticas, sin misterio</h3>
+          <p>Ecuaciones de Bellman, gradientes de política, entropía… derivadas con cuidado y renderizadas con MathJax.</p>
+        </div>
+        <div class="feature">
+          <div class="ic">🐍</div>
+          <h3>Python ejecutable</h3>
+          <p>Pulsa «Ejecutar» y el código corre en tu navegador (Pyodide). También puedes descargarlo y correrlo en tu terminal.</p>
+        </div>
+        <div class="feature">
+          <div class="ic">📈</div>
+          <h3>Escalonado y coherente</h3>
+          <p>21 capítulos donde cada algoritmo resuelve una limitación concreta del anterior. Sin saltos al vacío.</p>
+        </div>
+      </section>
+
+      <section class="toc-section" id="indice">
+        <h2>Índice del manual</h2>
+        <p class="toc-intro">La secuencia está pensada para que cada concepto se apoye solo en lo ya aprendido.</p>
+        <div id="index-toc"></div>
+      </section>
+
+      <footer class="site-footer">
+        <p>Manual de Aprendizaje por Refuerzo · Hecho para aprender haciendo.
+        Ejecuta el código en el navegador o en tu terminal — mira el <a href="chapters/01-que-es-rl.html">capítulo 1</a> para empezar.</p>
+      </footer>
+    </div>
+  </div>
+
+  <script src="assets/js/nav.js"></script>
+  <script src="assets/js/main.js"></script>
+</body>
+</html>

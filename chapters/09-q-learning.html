@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>9. Q-Learning: control TD off-policy · Manual de RL</title>
+  <meta name="description" content="Q-Learning, el algoritmo de control TD off-policy por excelencia: la regla del max, por qué aprende Q* con independencia de la exploración, el sesgo de maximización y una comparación ejecutable con SARSA en Cliff Walking." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="9">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 1 · Capítulo 9</span>
+        <h1>Q-Learning: control TD off-policy</h1>
+        <p class="lead">
+          Q-Learning es, probablemente, <strong>el algoritmo más famoso del aprendizaje por
+          refuerzo</strong>. Cambia una sola cosa respecto a <a href="08-sarsa.html">SARSA</a>
+          —una función <em>max</em> en el objetivo— y con ese pequeño gesto pasa a aprender
+          directamente la política óptima $Q^\ast$, sin importar lo caótica que sea la política
+          exploratoria que use para recoger datos. Eso es lo que significa <strong>off-policy</strong>,
+          y es lo que lo convierte en la base de casi todo lo que viene después (incluido el
+          <a href="12-dqn.html">DQN</a> del capítulo 12).
+        </p>
+
+        <h2 id="de-sarsa">De SARSA a Q-Learning: cambiar una sola cosa</h2>
+        <p>
+          En el <a href="07-td-aprendizaje.html">capítulo 7</a> aprendimos a estimar valores paso a
+          paso con <em>bootstrapping</em> (TD(0)). En el <a href="08-sarsa.html">capítulo 8</a>
+          convertimos eso en <strong>control</strong> con SARSA: estimábamos $Q(S,A)$ y mejorábamos
+          la política a la vez. La regla de SARSA usaba la tupla $(S, A, R, S', A')$ —de ahí su
+          nombre— y su objetivo era $R + \gamma\, Q(S', A')$, donde $A'$ es la acción que la política
+          <strong>realmente</strong> tomará en el siguiente estado.
+        </p>
+        <p>
+          Q-Learning pregunta algo distinto y más ambicioso. En lugar de «¿cuánto vale la acción
+          $A'$ que voy a tomar de verdad?», pregunta «<strong>¿cuánto valdría actuar de forma
+          óptima a partir de $S'$?</strong>». Y eso es exactamente lo que mide $\max_a Q(S', a)$.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Imagina que estás explorando una ciudad y de vez en cuando tomas un desvío al azar para
+            no aburrirte (eso es explorar). SARSA aprende teniendo en cuenta esos desvíos: valora
+            cada sitio contando con que a veces harás una tontería. Q-Learning, en cambio, evalúa
+            cada sitio <em>como si a partir de ahí fueras a comportarte de forma impecable</em>,
+            aunque en la práctica sigas dándote tus caprichos exploratorios.
+          </p>
+          <p>
+            Por eso Q-Learning aprende la <strong>mejor ruta posible</strong>. Y por eso, como
+            veremos, en un entorno con un precipicio al lado aprende a caminar justo por el borde:
+            sabe que ese es el camino óptimo, aunque durante el entrenamiento se caiga más a menudo
+            por culpa de sus propios desvíos.
+          </p>
+        </div>
+
+        <h2 id="la-regla">La regla de actualización</h2>
+        <p>
+          En cada transición observamos la tupla $(S_t, A_t, R_{t+1}, S_{t+1})$: estábamos en el
+          estado $S_t$, tomamos la acción $A_t$, recibimos la recompensa $R_{t+1}$ y aterrizamos en
+          $S_{t+1}$. Con eso, Q-Learning corrige su estimación así:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La actualización de Q-Learning</div>
+          <p>$$Q(S_t, A_t) \;\leftarrow\; Q(S_t, A_t) \;+\; \alpha\,\Big[\; \underbrace{R_{t+1} + \gamma\,\max_{a} Q(S_{t+1}, a)}_{\text{objetivo TD}} \;-\; Q(S_t, A_t)\;\Big]$$</p>
+          <p class="math-note">
+            Símbolo a símbolo: $Q(S_t,A_t)$ es el valor estimado de tomar la acción $A_t$ en el
+            estado $S_t$; $\alpha \in (0,1]$ es la <strong>tasa de aprendizaje</strong> (cuánto nos
+            fiamos de la nueva información); $R_{t+1}$ es la recompensa recibida; $\gamma \in [0,1]$
+            es el <strong>factor de descuento</strong>; y $\max_a Q(S_{t+1}, a)$ es el valor de la
+            <strong>mejor</strong> acción disponible en el siguiente estado. La cantidad entre
+            corchetes es el <strong>error TD</strong> $\delta_t$: la diferencia entre lo que ahora
+            creemos ($R_{t+1} + \gamma\max_a Q(S_{t+1},a)$) y lo que creíamos ($Q(S_t,A_t)$). Movemos
+            la estimación una fracción $\alpha$ en la dirección de ese error.
+          </p>
+        </div>
+
+        <p>
+          Compara los dos objetivos uno al lado del otro. Es literalmente lo único que separa a los
+          dos algoritmos:
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Algoritmo</th><th>Objetivo TD (lo que persigue $Q(S_t,A_t)$)</th><th>Tipo</th></tr></thead>
+            <tbody>
+              <tr><td>SARSA</td><td>$R_{t+1} + \gamma\, Q(S_{t+1}, A_{t+1})$</td><td>on-policy</td></tr>
+              <tr><td>Q-Learning</td><td>$R_{t+1} + \gamma\, \max_a Q(S_{t+1}, a)$</td><td>off-policy</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          SARSA usa $A_{t+1}$, la acción que su política exploratoria <em>va a</em> ejecutar de
+          verdad. Q-Learning usa el $\max$, que equivale a la acción <em>greedy</em>
+          $\arg\max_a Q(S_{t+1}, a)$: la que tomaría una política perfecta. Si por casualidad la
+          política de comportamiento eligiera siempre la acción greedy (es decir, con exploración
+          $\varepsilon = 0$), ambos objetivos coincidirían. La diferencia solo aflora cuando
+          exploramos.
+        </p>
+
+        <h2 id="off-policy">¿Por qué es «off-policy»?</h2>
+        <p>
+          En control tabular manejamos, en realidad, <strong>dos políticas</strong>:
+        </p>
+        <ul>
+          <li>La <strong>política de comportamiento</strong> $b$ (del inglés <em>behavior</em>): la
+          que de verdad usamos para elegir acciones y recoger experiencia. Típicamente
+          $\varepsilon$-greedy, porque necesita explorar.</li>
+          <li>La <strong>política objetivo</strong> $\pi$ (<em>target</em>): la que queremos
+          aprender y evaluar. Aquí es la <strong>greedy</strong> respecto a $Q$.</li>
+        </ul>
+        <p>
+          Un método es <strong>on-policy</strong> cuando esas dos políticas son la misma: SARSA
+          aprende el valor de la propia política $\varepsilon$-greedy que está ejecutando. Es
+          <strong>off-policy</strong> cuando difieren: Q-Learning se comporta con $b$
+          ($\varepsilon$-greedy, exploradora) pero aprende sobre $\pi$ (la greedy, óptima). El
+          $\max$ es justo el mecanismo que «desengancha» lo que aprende de lo que hace.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La idea que hay que llevarse</div>
+          <p>
+            Q-Learning puede aprender la política <strong>óptima</strong> mientras se comporta de
+            forma <strong>subóptima</strong> (explorando). No paga «impuesto de exploración» en lo
+            que aprende: la exploración solo sirve para <em>visitar</em> pares estado-acción, no
+            para contaminar el objetivo. SARSA, en cambio, aprende una política que ya tiene en
+            cuenta su propia torpeza exploratoria.
+          </p>
+        </div>
+
+        <h2 id="convergencia">La conexión con Bellman y la convergencia a Q*</h2>
+        <p>
+          Que el $\max$ aparezca no es un truco: sale directamente de la
+          <strong>ecuación de optimalidad de Bellman</strong> para la función de valor de acción,
+          que vimos en el <a href="04-retornos-y-valor.html">capítulo 4</a>. Recuerda que $Q^\ast$
+          —el valor de acción óptimo— satisface
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Bellman óptimo para $Q^\ast$</div>
+          <p>$$Q^\ast(s, a) \;=\; \mathbb{E}\Big[\, R_{t+1} + \gamma\,\max_{a'} Q^\ast(S_{t+1}, a') \;\Big|\; S_t = s,\, A_t = a \,\Big]$$</p>
+          <p class="math-note">
+            La esperanza $\mathbb{E}[\cdot]$ es sobre la aleatoriedad del entorno (la recompensa
+            $R_{t+1}$ y el estado siguiente $S_{t+1}$). El $\max$ interior codifica «a partir de
+            $S_{t+1}$ actúo de forma óptima».
+          </p>
+        </div>
+
+        <p>
+          Fíjate en el paralelismo: el objetivo de Q-Learning,
+          $R_{t+1} + \gamma\max_{a'} Q(S_{t+1}, a')$, es una <strong>muestra</strong> del lado
+          derecho de esa ecuación. Q-Learning no es más que <em>aproximación estocástica</em> del
+          operador de Bellman óptimo: cada actualización empuja $Q$ un pasito hacia satisfacer esa
+          igualdad. No necesita conocer las probabilidades de transición (es
+          <strong>sin modelo</strong>) porque las muestrea del propio entorno.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 ¿Y por qué no hace falta corregir por la exploración?</div>
+          <p>
+            En muchos métodos off-policy hay que reponderar las muestras con <em>importance
+            sampling</em> porque se generaron con una política distinta de la que evaluamos.
+            Q-Learning se libra de ello por una razón elegante: su política objetivo es
+            <strong>determinista</strong> (la greedy), y el operador de Bellman óptimo ya contiene
+            el $\max$, que selecciona esa acción objetivo directamente. No preguntamos «¿qué acción
+            tomó la política de comportamiento?», sino «¿cuál es la mejor?». La política de
+            comportamiento solo decide <em>qué pares $(s,a)$ visitamos</em>, no el valor hacia el
+            que apuntamos.
+          </p>
+        </div>
+
+        <p>
+          Con esto, el resultado de convergencia (Watkins y Dayan, 1992) es de los más bonitos del
+          campo:
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Convergencia de Q-Learning</div>
+          <p>
+            $Q$ converge a $Q^\ast$ con probabilidad 1 si se cumplen dos condiciones:
+          </p>
+          <ul>
+            <li>Todo par estado-acción se visita <strong>infinitas veces</strong> (por eso hace
+            falta seguir explorando: $\varepsilon &gt; 0$).</li>
+            <li>Las tasas de aprendizaje cumplen las condiciones de Robbins-Monro:
+            $\sum_t \alpha_t = \infty$ y $\sum_t \alpha_t^2 &lt; \infty$ (por ejemplo,
+            $\alpha_t \to 0$ despacio).</li>
+          </ul>
+          <p class="math-note">
+            Y aquí lo notable: converge a $Q^\ast$ <strong>sea cual sea la política de
+            comportamiento</strong>, con tal de que explore lo suficiente. SARSA, en cambio,
+            converge al valor de la política $\varepsilon$-greedy que usa; solo alcanza $Q^\ast$ si
+            reducimos $\varepsilon \to 0$ gradualmente (una política «GLIE»).
+          </p>
+        </div>
+
+        <h2 id="algoritmo">El algoritmo, paso a paso</h2>
+        <p>
+          En pseudocódigo, Q-Learning tabular cabe en una tarjeta:
+        </p>
+        <ol>
+          <li>Inicializa $Q(s, a)$ de forma arbitraria (por ejemplo, a cero) para todo $s, a$.</li>
+          <li>Repite para cada <strong>episodio</strong>:
+            <ul>
+              <li>Observa el estado inicial $S$.</li>
+              <li>Repite para cada <strong>paso</strong> del episodio, hasta que $S$ sea terminal:
+                <ol>
+                  <li>Elige $A$ desde $S$ con la política de comportamiento derivada de $Q$
+                  (por ejemplo, $\varepsilon$-greedy).</li>
+                  <li>Ejecuta $A$; observa la recompensa $R$ y el nuevo estado $S'$.</li>
+                  <li>Actualiza:
+                  $Q(S, A) \leftarrow Q(S, A) + \alpha\big[R + \gamma\max_a Q(S', a) - Q(S, A)\big]$.</li>
+                  <li>$S \leftarrow S'$.</li>
+                </ol>
+              </li>
+            </ul>
+          </li>
+        </ol>
+        <p>
+          Compáralo mentalmente con SARSA: allí teníamos que elegir $A'$ <em>antes</em> de
+          actualizar (porque el objetivo lo necesitaba) y arrastrarlo al siguiente paso. Aquí el
+          objetivo se calcula solo con $S'$ vía el $\max$, así que la acción del siguiente paso se
+          vuelve a elegir libremente. Es un detalle sutil pero cómodo: el objetivo de Q-Learning no
+          depende de lo que decidamos hacer después.
+        </p>
+
+        <h2 id="sesgo-max">La trampa del max: el sesgo de maximización</h2>
+        <p>
+          El $\max$ es la fuerza de Q-Learning, pero también su talón de Aquiles. El problema es que
+          <strong>tomamos el máximo sobre estimaciones ruidosas</strong>, y el máximo de varias
+          estimaciones ruidosas está sistemáticamente sesgado hacia arriba.
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El máximo sobreestima</div>
+          <p>
+            Sea cual sea el conjunto de estimadores $\hat{Q}(a)$, se cumple, por la desigualdad de
+            Jensen (el máximo es una función convexa):
+          </p>
+          <p>$$\mathbb{E}\Big[\max_a \hat{Q}(a)\Big] \;\ge\; \max_a \mathbb{E}\big[\hat{Q}(a)\big].$$</p>
+          <p>
+            Imagina un estado donde el valor verdadero de todas las acciones es exactamente $0$,
+            pero tus estimaciones tienen ruido: algunas salen $+0.3$, otras $-0.2$… Al quedarte con
+            el máximo, casi siempre escoges una que <em>por azar</em> salió alta. En promedio,
+            $\max_a \hat{Q}(a) &gt; 0$, cuando la verdad es $0$. Ese error positivo se propaga hacia
+            atrás con el <em>bootstrapping</em> y hace que Q-Learning sea <strong>optimista</strong>
+            sobre acciones que no lo merecen.
+          </p>
+        </div>
+
+        <p>
+          La raíz del problema es que usamos <em>la misma</em> estimación $Q$ para dos cosas a la
+          vez: <strong>elegir</strong> qué acción es la mejor ($\arg\max$) y <strong>evaluar</strong>
+          cuánto vale ($\max$). Si la estimación tiene suerte al alza en una acción, la seleccionamos
+          <em>y</em> nos creemos su valor inflado. La cura, <strong>Double Q-Learning</strong>,
+          consiste en usar dos estimadores independientes: uno decide cuál es la mejor acción y el
+          otro dice cuánto vale. Así, un golpe de suerte en un estimador no se autoconfirma con el
+          otro. Lo desarrollaremos en el <a href="13-mejoras-dqn.html">capítulo 13</a>, donde
+          reaparece como una de las mejoras clave de DQN (Double DQN).
+        </p>
+
+        <h2 id="cliff">Cliff Walking: arriesgado frente a seguro</h2>
+        <p>
+          Nada ilustra mejor la diferencia entre off-policy y on-policy que el entorno
+          <strong>Cliff Walking</strong> («el paseo por el acantilado»), el ejemplo 6.6 del clásico
+          de Sutton y Barto. Es una rejilla de 4 filas por 12 columnas. Sales de la esquina inferior
+          izquierda (<strong>S</strong>) y quieres llegar a la inferior derecha (<strong>G</strong>).
+          Cada paso cuesta $-1$. Pero toda la fila inferior entre S y G es un
+          <strong>acantilado</strong>: si pisas ahí, recibes $-100$ y vuelves de golpe al inicio.
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="0 0 560 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Rejilla de Cliff Walking con el camino arriesgado y el camino seguro">
+            <defs>
+              <marker id="ar-risk" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" fill="#4f46e5" />
+              </marker>
+              <marker id="ar-safe" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" fill="#0ea5e9" />
+              </marker>
+            </defs>
+            <!-- casillas especiales -->
+            <rect x="55" y="145" width="450" height="45" fill="#f6b6b6" />
+            <rect x="10" y="145" width="45" height="45" fill="#eef2ff" />
+            <rect x="505" y="145" width="45" height="45" fill="#bfe3bf" />
+            <!-- rejilla -->
+            <rect x="10" y="10" width="540" height="180" fill="none" stroke="#94a3b8" stroke-width="1.5" />
+            <line x1="55"  y1="10" x2="55"  y2="190" stroke="#cbd5e0" stroke-width="1" />
+            <line x1="100" y1="10" x2="100" y2="190" stroke="#cbd5e0" stroke-width="1" />
+            <line x1="145" y1="10" x2="145" y2="190" stroke="#cbd5e0" stroke-width="1" />
+            <line x1="190" y1="10" x2="190" y2="190" stroke="#cbd5e0" stroke-width="1" />
+            <line x1="235" y1="10" x2="235" y2="190" stroke="#cbd5e0" stroke-width="1" />
+            <line x1="280" y1="10" x2="280" y2="190" stroke="#cbd5e0" stroke-width="1" />
+            <line x1="325" y1="10" x2="325" y2="190" stroke="#cbd5e0" stroke-width="1" />
+            <line x1="370" y1="10" x2="370" y2="190" stroke="#cbd5e0" stroke-width="1" />
+            <line x1="415" y1="10" x2="415" y2="190" stroke="#cbd5e0" stroke-width="1" />
+            <line x1="460" y1="10" x2="460" y2="190" stroke="#cbd5e0" stroke-width="1" />
+            <line x1="505" y1="10" x2="505" y2="190" stroke="#cbd5e0" stroke-width="1" />
+            <line x1="10" y1="55"  x2="550" y2="55"  stroke="#cbd5e0" stroke-width="1" />
+            <line x1="10" y1="100" x2="550" y2="100" stroke="#cbd5e0" stroke-width="1" />
+            <line x1="10" y1="145" x2="550" y2="145" stroke="#cbd5e0" stroke-width="1" />
+            <!-- etiquetas -->
+            <text x="32.5" y="173" text-anchor="middle" fill="#3730a3" font-size="16" font-family="sans-serif" font-weight="700">S</text>
+            <text x="527.5" y="173" text-anchor="middle" fill="#166534" font-size="16" font-family="sans-serif" font-weight="700">G</text>
+            <text x="280" y="171" text-anchor="middle" fill="#7a1f1f" font-size="13" font-family="sans-serif">Acantilado — caer cuesta −100</text>
+            <!-- camino seguro (SARSA): sube hasta arriba del todo -->
+            <polyline points="32.5,167.5 32.5,32.5 527.5,32.5 527.5,167.5" fill="none" stroke="#0ea5e9" stroke-width="3" stroke-linejoin="round" marker-end="url(#ar-safe)" />
+            <!-- camino arriesgado (Q-Learning): pegado al acantilado -->
+            <polyline points="32.5,167.5 32.5,122.5 527.5,122.5 527.5,167.5" fill="none" stroke="#4f46e5" stroke-width="3" stroke-linejoin="round" marker-end="url(#ar-risk)" />
+            <!-- leyenda -->
+            <line x1="30" y1="222" x2="70" y2="222" stroke="#4f46e5" stroke-width="3" />
+            <text x="78" y="226" fill="#4a5568" font-size="13" font-family="sans-serif">Q-Learning (óptimo, arriesgado)</text>
+            <line x1="320" y1="222" x2="360" y2="222" stroke="#0ea5e9" stroke-width="3" />
+            <text x="368" y="226" fill="#4a5568" font-size="13" font-family="sans-serif">SARSA (seguro)</text>
+          </svg>
+          <figcaption>
+            El camino óptimo (13 pasos) va pegado al acantilado; el camino seguro (17 pasos) se
+            aleja del borde. Con exploración, pisar el borde es peligroso: un desvío al azar te tira
+            al vacío.
+          </figcaption>
+        </figure>
+
+        <p>
+          Aquí está el dilema. El camino <strong>óptimo</strong> —el de menor coste— va justo por la
+          fila pegada al acantilado: sube una casilla, avanza a lo largo del borde y baja a la meta,
+          $13$ pasos en total ($-13$ de recompensa). Pero es peligroso: como durante el
+          entrenamiento exploramos con probabilidad $\varepsilon$, de vez en cuando un paso al azar
+          nos empuja al vacío ($-100$). El camino <strong>seguro</strong> sube hasta la fila de
+          arriba, lejos del borde, y solo entonces avanza: cuesta más pasos ($17$, es decir $-17$),
+          pero un desvío accidental casi nunca es fatal.
+        </p>
+        <p>
+          La predicción teórica es preciosa: <strong>Q-Learning</strong> aprende el camino óptimo
+          (el arriesgado), porque su objetivo con el $\max$ ignora la exploración y evalúa el borde
+          como lo que es: la mejor ruta. <strong>SARSA</strong> aprende el camino seguro, porque su
+          objetivo <em>sí</em> incorpora que a veces explorará, y caminar por el borde con un
+          $\varepsilon$ de probabilidad de caer sale carísimo. La consecuencia contraintuitiva:
+          durante el entrenamiento, <strong>SARSA obtiene mejor recompensa por episodio</strong>
+          (se cae menos), aunque su política final sea un poco más lenta.
+        </p>
+
+        <h3>El experimento</h3>
+        <p>
+          Vamos a comprobarlo. El siguiente programa entrena Q-Learning y SARSA sobre exactamente el
+          mismo Cliff Walking, con los mismos hiperparámetros ($\alpha = 0.5$, $\gamma = 1$,
+          $\varepsilon = 0.1$), promedia la recompensa por episodio sobre varias semillas para que
+          las curvas queden limpias, y al final dibuja las <strong>dos políticas greedy
+          resultantes</strong> sobre la rejilla, para que veas con tus ojos el camino que ha
+          aprendido cada uno. Fíjate en el código en que <strong>lo único que cambia entre ambos es
+          la línea del <em>bootstrap</em></strong>: $Q(S', A')$ para SARSA, $\max_a Q(S', a)$ para
+          Q-Learning.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">q_learning_cliff.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+Q-Learning vs SARSA en el entorno Cliff Walking (el "paseo por el acantilado").
+================================================================================
+
+Este script compara los dos algoritmos de control por diferencias temporales
+del Capitulo 9 del Manual de RL sobre el mismo problema:
+
+  * Q-Learning: control TD *off-policy*. En el objetivo usa max_a Q(S', a),
+    es decir, aprende asumiendo que a partir del siguiente estado actuara de
+    forma OPTIMA, aunque durante el entrenamiento explore.
+  * SARSA: control TD *on-policy*. En el objetivo usa Q(S', A'), donde A' es la
+    accion que realmente tomara la politica exploratoria (epsilon-greedy).
+
+La leccion clasica (Sutton &amp; Barto, ejemplo 6.6): Q-Learning aprende el camino
+OPTIMO pegado al acantilado (recompensa -13), pero durante el entrenamiento se
+cae mas a menudo por culpa de la exploracion. SARSA aprende un camino mas SEGURO
+y alejado del borde, con lo que su recompensa media *durante* el entrenamiento es
+mayor, aunque su camino final sea un poco mas largo.
+
+Al ejecutarlo veras:
+  1) Un resumen numerico por pantalla (recompensa media final y longitud del
+     camino greedy de cada algoritmo).
+  2) Una grafica con la recompensa por episodio de ambos.
+  3) Una grafica con las dos politicas greedy resultantes sobre la rejilla.
+
+Como ejecutarlo:
+    pip install -r requirements.txt
+    python code/09-q-learning/q_learning_cliff.py
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- El entorno: Cliff Walking, una rejilla de 4 filas x 12 columnas ---
+FILAS, COLS = 4, 12
+INICIO = (FILAS - 1, 0)         # esquina inferior izquierda
+META = (FILAS - 1, COLS - 1)    # esquina inferior derecha
+N_ESTADOS = FILAS * COLS
+N_ACCIONES = 4                  # 0=arriba, 1=derecha, 2=abajo, 3=izquierda
+MOV = {0: (-1, 0), 1: (0, 1), 2: (1, 0), 3: (0, -1)}
+
+
+def idx(fila, col):
+    """Convierte coordenadas (fila, columna) en un indice de estado 0..47."""
+    return fila * COLS + col
+
+
+def es_acantilado(fila, col):
+    """El acantilado ocupa la fila inferior entre el inicio y la meta."""
+    return fila == FILAS - 1 and 0 &lt; col &lt; COLS - 1
+
+
+def paso(estado, accion):
+    """Dinamica del entorno: devuelve (nuevo_estado, recompensa, terminado)."""
+    fila, col = divmod(estado, COLS)
+    dfila, dcol = MOV[accion]
+    fila = min(max(fila + dfila, 0), FILAS - 1)
+    col = min(max(col + dcol, 0), COLS - 1)
+    if es_acantilado(fila, col):
+        return idx(*INICIO), -100.0, False   # te caes: -100 y vuelta al inicio
+    if (fila, col) == META:
+        return idx(fila, col), -1.0, True     # meta alcanzada
+    return idx(fila, col), -1.0, False        # cada paso cuesta -1
+
+
+def epsilon_greedy(Q, estado, epsilon, rng):
+    """Elige accion epsilon-greedy con desempate aleatorio entre las mejores."""
+    if rng.random() &lt; epsilon:
+        return int(rng.integers(N_ACCIONES))
+    q = Q[estado]
+    return int(rng.choice(np.flatnonzero(q == q.max())))
+
+
+def entrena(algoritmo, n_episodios, alpha, gamma, epsilon, semilla, max_pasos=1000):
+    """Entrena 'q-learning' o 'sarsa'. Devuelve (Q, recompensa_por_episodio)."""
+    rng = np.random.default_rng(semilla)
+    Q = np.zeros((N_ESTADOS, N_ACCIONES))
+    retornos = np.zeros(n_episodios)
+    for ep in range(n_episodios):
+        estado = idx(*INICIO)
+        accion = epsilon_greedy(Q, estado, epsilon, rng)   # A inicial (SARSA)
+        total = 0.0
+        for _ in range(max_pasos):
+            s2, r, fin = paso(estado, accion)
+            # Misma politica de comportamiento en ambos: la accion que se tomara en s2.
+            a2 = epsilon_greedy(Q, s2, epsilon, rng)
+            # La UNICA diferencia entre SARSA y Q-Learning esta en el objetivo TD:
+            if algoritmo == "sarsa":
+                bootstrap = Q[s2, a2]        # on-policy: Q(S', A') con la accion real
+            else:                            # q-learning
+                bootstrap = Q[s2].max()      # off-policy: max_a Q(S', a), la MEJOR accion
+            objetivo = r + gamma * bootstrap * (0.0 if fin else 1.0)
+            Q[estado, accion] += alpha * (objetivo - Q[estado, accion])
+            estado, accion = s2, a2
+            total += r
+            if fin:
+                break
+        retornos[ep] = total
+    return Q, retornos
+
+
+def promedia_semillas(algoritmo, n_runs, n_episodios, **kw):
+    """Promedia las curvas de recompensa sobre varias semillas (menos ruido).
+
+    Devuelve tambien la Q de la PRIMERA semilla (semilla 0), que usaremos como
+    politica representativa: al ser una semilla fija, el resultado es
+    reproducible en cualquier maquina.
+    """
+    curvas = np.zeros((n_runs, n_episodios))
+    Q0 = None
+    for k in range(n_runs):
+        Q, curvas[k] = entrena(algoritmo, n_episodios, semilla=k, **kw)
+        if k == 0:
+            Q0 = Q
+    return Q0, curvas.mean(axis=0)
+
+
+def media_movil(x, w=10):
+    """Suaviza una serie con una media movil de ventana w."""
+    c = np.cumsum(np.insert(x, 0, 0.0))
+    return (c[w:] - c[:-w]) / w
+
+
+def camino_greedy(Q, max_pasos=200):
+    """Recorre la politica greedy pura desde el inicio.
+
+    Devuelve (pasos, llego). 'llego' es False si la politica entra en un ciclo
+    y nunca alcanza la meta (algo que le puede pasar a la Q de SARSA en estados
+    poco visitados, porque sus valores incluyen el coste de explorar).
+    """
+    estado, pasos, visitados = idx(*INICIO), 0, set()
+    while pasos &lt; max_pasos:
+        if estado in visitados:
+            return pasos, False       # ciclo: la politica no llega a la meta
+        visitados.add(estado)
+        s2, _, fin = paso(estado, int(np.argmax(Q[estado])))
+        pasos += 1
+        estado = s2
+        if fin:
+            return pasos, True
+    return pasos, False
+
+
+def dibuja_politica(ax, Q, titulo):
+    """Dibuja en 'ax' la accion greedy de cada casilla como una flecha."""
+    flechas = {0: "↑", 1: "→", 2: "↓", 3: "←"}
+    ax.set_title(titulo, fontsize=11)
+    ax.set_xlim(-0.5, COLS - 0.5)
+    ax.set_ylim(FILAS - 0.5, -0.5)   # fila 0 arriba
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_aspect("equal")
+    for f in range(FILAS):
+        for c in range(COLS):
+            ax.add_patch(plt.Rectangle((c - 0.5, f - 0.5), 1, 1,
+                                       fill=False, edgecolor="#cbd5e0", lw=0.8))
+            if es_acantilado(f, c):
+                ax.add_patch(plt.Rectangle((c - 0.5, f - 0.5), 1, 1, color="#f6b6b6"))
+                ax.text(c, f, "✕", ha="center", va="center", color="#7a1f1f")
+            elif (f, c) == INICIO:
+                ax.text(c, f, "S", ha="center", va="center", fontweight="bold")
+            elif (f, c) == META:
+                ax.add_patch(plt.Rectangle((c - 0.5, f - 0.5), 1, 1, color="#bfe3bf"))
+                ax.text(c, f, "G", ha="center", va="center", fontweight="bold")
+            else:
+                a = int(np.argmax(Q[idx(f, c)]))
+                ax.text(c, f, flechas[a], ha="center", va="center", fontsize=13)
+
+
+def main():
+    params = dict(alpha=0.5, gamma=1.0, epsilon=0.1)
+    n_episodios, n_runs = 500, 6
+
+    Q_q, rec_q = promedia_semillas("q-learning", n_runs, n_episodios, **params)
+    Q_s, rec_s = promedia_semillas("sarsa", n_runs, n_episodios, **params)
+
+    # --- Resumen numerico ---
+    lq, _ = camino_greedy(Q_q)
+    ls, _ = camino_greedy(Q_s)
+    print("Cliff Walking  |  alpha=0.5, gamma=1.0, epsilon=0.1, "
+          f"{n_episodios} episodios, media de {n_runs} semillas")
+    print("-" * 66)
+    print(f"{'':14s}{'recompensa media':&gt;20s}{'camino greedy':&gt;18s}")
+    print(f"{'Q-Learning':14s}{rec_q[-100:].mean():&gt;20.1f}{lq:&gt;13d} pasos")
+    print(f"{'SARSA':14s}{rec_s[-100:].mean():&gt;20.1f}{ls:&gt;13d} pasos")
+    print("-" * 66)
+    print("Q-Learning encuentra el camino mas corto (pegado al acantilado) pero,")
+    print("al explorar, se cae mas durante el entrenamiento. SARSA aprende un")
+    print("camino mas seguro y logra mejor recompensa mientras aprende.")
+
+    # --- Grafica 1: recompensa por episodio ---
+    plt.figure(figsize=(8, 4.2))
+    ep = np.arange(len(media_movil(rec_q)))
+    plt.plot(ep, media_movil(rec_q), label="Q-Learning (off-policy)", color="#4f46e5")
+    plt.plot(ep, media_movil(rec_s), label="SARSA (on-policy)", color="#0ea5e9")
+    plt.axhline(-13, ls="--", lw=1, color="#94a3b8")
+    plt.text(len(ep) * 0.5, -13 + 1.5, "camino optimo (-13)", color="#64748b", fontsize=9)
+    plt.ylim(-100, -5)
+    plt.xlabel("Episodio")
+    plt.ylabel("Recompensa por episodio (media movil)")
+    plt.title("Recompensa durante el entrenamiento en Cliff Walking")
+    plt.legend(loc="lower right")
+    plt.grid(alpha=0.2)
+    plt.tight_layout()
+
+    # --- Grafica 2: politicas greedy resultantes ---
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 4.6))
+    dibuja_politica(ax1, Q_q, "Q-Learning: camino OPTIMO y arriesgado (borde del acantilado)")
+    dibuja_politica(ax2, Q_s, "SARSA: camino SEGURO (se aleja del acantilado)")
+    plt.tight_layout()
+
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong> (la primera vez tarda unos segundos en descargar el
+          intérprete). Verás dos gráficas y un resumen. La curva de recompensa cuenta la historia de
+          un vistazo: <strong>SARSA queda por encima de Q-Learning</strong> durante todo el
+          entrenamiento (se cae menos), aunque ambas se mantienen por debajo del $-13$ óptimo por
+          culpa de la exploración. Y las dos rejillas de flechas revelan lo esencial: la política de
+          Q-Learning avanza por la fila pegada al acantilado (una hilera de flechas «→»), mientras
+          que la de SARSA empuja hacia arriba («↑»), alejándose del borde. El camino greedy resulta
+          de <strong>13 pasos para Q-Learning</strong> y <strong>17 para SARSA</strong>: exactamente
+          lo previsto.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Baja $\varepsilon$ de $0.1$ a $0.01$ y vuelve a ejecutar. Con muy poca exploración, el
+            precipicio deja de ser peligroso y las dos curvas se acercan: SARSA también se atreve a
+            caminar por el borde, porque ya casi no se cae. Es la mejor forma de <em>sentir</em> que
+            la diferencia entre ambos vive por completo en la exploración. Prueba también a subir
+            $\varepsilon$ a $0.25$: la brecha se ensancha y SARSA se aleja aún más del acantilado.
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          Como todos los ejemplos del manual, este también corre fuera del navegador. Descarga el
+          archivo con «Descargar .py» (o cópialo) y ejecútalo así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual (numpy y matplotlib)</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) ejecuta el ejemplo</span>
+<span class="prompt">$</span> python code/09-q-learning/q_learning_cliff.py
+<span class="comment">Cliff Walking  |  alpha=0.5, gamma=1.0, epsilon=0.1, 500 episodios, media de 6 semillas
+------------------------------------------------------------------
+                  recompensa media     camino greedy
+Q-Learning                   -50.7           13 pasos
+SARSA                        -27.4           17 pasos</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Este ejemplo usa solo <code>numpy</code> y <code>matplotlib</code>, así que corre
+          entero en el navegador con <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>.
+          Los números exactos de recompensa media pueden variar un pelín entre versiones de las
+          librerías; las longitudes de los caminos ($13$ y $17$) son deterministas gracias a la
+          semilla fija.
+        </p>
+
+        <h2 id="resumen">Cierre</h2>
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>Q-Learning actualiza con
+            $Q(S,A) \leftarrow Q(S,A) + \alpha\,[R + \gamma\max_a Q(S',a) - Q(S,A)]$. La
+            <strong>única</strong> diferencia con SARSA es el $\max$.</li>
+            <li>Es <strong>off-policy</strong>: se comporta con una política exploradora ($b$,
+            $\varepsilon$-greedy) pero aprende sobre la política greedy óptima ($\pi$). El $\max$ es
+            lo que desengancha lo que aprende de lo que hace.</li>
+            <li>Su objetivo es una muestra del <strong>operador de Bellman óptimo</strong>: converge
+            a $Q^\ast$ si se visita todo par $(s,a)$ infinitas veces y las tasas $\alpha$ cumplen
+            Robbins-Monro, <em>con independencia</em> de la política de comportamiento.</li>
+            <li>El $\max$ sobre estimaciones ruidosas produce <strong>sesgo de maximización</strong>
+            (sobreestimación); Double Q-Learning lo corrige separando la selección de la evaluación
+            (capítulo 13).</li>
+            <li>En Cliff Walking, Q-Learning aprende el camino <strong>óptimo</strong> (pegado al
+            acantilado) y SARSA el <strong>seguro</strong>: durante el entrenamiento SARSA obtiene
+            mejor recompensa porque se cae menos.</li>
+          </ul>
+        </div>
+
+        <p>
+          Con SARSA y Q-Learning tenemos los dos pilares del control TD. Pero hemos vivido en dos
+          extremos: TD(0) mira un solo paso hacia delante, mientras que Monte Carlo
+          (<a href="06-monte-carlo.html">capítulo 6</a>) espera al final del episodio. En el
+          <a href="10-td-lambda.html">capítulo 10</a> los unificamos con las <strong>trazas de
+          elegibilidad</strong> y TD($\lambda$): un mando que interpola con suavidad entre uno y
+          otro extremo. Después dejaremos las tablas atrás y empezaremos a
+          <a href="11-aproximacion-funciones.html">aproximar funciones</a>, el salto que nos llevará
+          hasta las redes neuronales profundas.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

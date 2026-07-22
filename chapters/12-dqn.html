@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>12. Deep Q-Networks (DQN) · Manual de RL</title>
+  <meta name="description" content="DQN: una red neuronal como función Q, estabilizada con repetición de experiencia (replay buffer) y red objetivo. Implementación desde cero en NumPy y versión con PyTorch." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="12">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 2 · Capítulo 12</span>
+        <h1>Deep Q-Networks (DQN)</h1>
+        <p class="lead">
+          En el <a href="11-aproximacion-funciones.html">capítulo 11</a> sustituimos la tabla de
+          valores por un aproximador para poder generalizar entre estados parecidos. Ahora damos el
+          salto que abrió la era del <em>Deep RL</em>: ese aproximador será una <strong>red neuronal
+          profunda</strong>. Suena inmediato —cambia la tabla por una red y entrena—, pero hacerlo
+          «a lo bruto» <strong>diverge</strong>. DQN es la receta con la que DeepMind consiguió que
+          funcionara y aprendió a jugar a decenas de juegos de Atari (2015) mirando solo los píxeles.
+          El secreto son dos trucos sencillos: <strong>repetición de experiencia</strong> y
+          <strong>red objetivo</strong>.
+        </p>
+
+        <h2 id="de-la-tabla-a-la-red">De la tabla a la red</h2>
+        <p>
+          Recuerda el <a href="09-q-learning.html">Q-learning</a> tabular. Guardábamos un número
+          $Q(s,a)$ por cada par estado-acción y lo corregíamos hacia su objetivo TD:
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ Q-learning tabular (recordatorio)</div>
+          <p>$$Q(s,a) \leftarrow Q(s,a) + \alpha\Big[\underbrace{r + \gamma \max_{a'} Q(s',a')}_{\text{objetivo}} - Q(s,a)\Big]$$</p>
+          <p class="math-note">
+            $s$ es el estado actual, $a$ la acción tomada, $r$ la recompensa, $s'$ el estado siguiente,
+            $\gamma \in [0,1]$ el factor de descuento y $\alpha$ la tasa de aprendizaje. Esto solo
+            sirve si podemos <em>indexar</em> una casilla por cada $(s,a)$.
+          </p>
+        </div>
+        <p>
+          Cuando el estado es continuo o enorme (los cuatro sensores de un carro, o los 84×84 píxeles
+          de una pantalla) no hay tabla que valga. Sustituimos $Q$ por una función parametrizada
+          $Q(s,a;\theta)$ —una red neuronal con pesos $\theta$— que <strong>recibe el estado y devuelve
+          un valor $Q$ por cada acción</strong>. En vez de escribir en una casilla, ahora
+          <em>ajustamos $\theta$</em> con descenso de gradiente para que la red prediga mejor.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Piensa en la red como en un «mapa de valor» flexible: le enseñas el valor en unos cuantos
+            estados y ella <strong>interpola</strong> a los que nunca vio, como en el capítulo 11.
+            La diferencia es que ahora la interpolación es <strong>no lineal</strong>: la red puede
+            aprender fronteras curvas y combinaciones de features que un modelo lineal no captaría.
+            A cambio de esa potencia, pierde las garantías de convergencia que teníamos con tablas.
+          </p>
+        </div>
+
+        <h2 id="por-que-diverge">Por qué la versión ingenua diverge</h2>
+        <p>
+          La idea evidente sería: en cada paso, coge la transición $(s,a,r,s')$ que acabas de vivir,
+          calcula su objetivo y da un paso de gradiente para acercar $Q(s,a;\theta)$ a ese objetivo.
+          En la práctica esto <strong>oscila o explota</strong>. Hay dos culpables, y cada truco de DQN
+          ataca uno.
+        </p>
+
+        <h3>Problema 1: las experiencias consecutivas están correlacionadas</h3>
+        <p>
+          Los pasos seguidos de un episodio se parecen muchísimo entre sí (el carro apenas se mueve de
+          un instante al siguiente). Entrenar una red con datos tan correlacionados es como estudiar
+          leyendo la misma frase mil veces: la red se sobreajusta a la racha reciente y
+          <strong>olvida</strong> lo aprendido antes. El aprendizaje supervisado evita esto barajando
+          el conjunto de datos; aquí haremos lo mismo.
+        </p>
+
+        <h3>Problema 2: perseguimos nuestra propia cola</h3>
+        <p>
+          Mira el objetivo $y = r + \gamma \max_{a'} Q(s',a';\theta)$. Depende de <em>la misma red</em>
+          que estamos entrenando. Cada paso de gradiente cambia $\theta$ y, con él, el objetivo al que
+          intentábamos acercarnos. Es como disparar a una diana que se mueve justo cuando aprietas el
+          gatillo: la retroalimentación se realimenta y el valor se dispara.
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ La «tríada mortal»</div>
+          <p>
+            Combinar <strong>bootstrapping</strong> (objetivos que usan la propia estimación),
+            <strong>aprendizaje off-policy</strong> (el $\max$ de Q-learning) y
+            <strong>aproximación de funciones</strong> es la famosa <em>deadly triad</em> de Sutton
+            &amp; Barto: juntas, pueden hacer que el valor diverja. DQN no elimina la tríada, pero la
+            <strong>domestica</strong> con los dos trucos que vienen ahora.
+          </p>
+        </div>
+
+        <h2 id="replay">Truco 1: repetición de experiencia (replay buffer)</h2>
+        <p>
+          En lugar de aprender de la última transición y tirarla, la <strong>guardamos</strong> en una
+          memoria circular $\mathcal{D}$ —el <em>replay buffer</em>— junto con las miles anteriores.
+          Para entrenar, sacamos un <strong>minibatch aleatorio</strong> de $\mathcal{D}$. Al barajar,
+          rompemos la correlación temporal y, de paso, <strong>reutilizamos</strong> cada experiencia
+          muchas veces (mucho más eficiente en muestras).
+        </p>
+        <div class="callout key">
+          <div class="callout-title">🔑 Qué guarda el buffer</div>
+          <p>
+            Cada entrada es una tupla $(s, a, r, s', \text{fin})$: estado, acción, recompensa, estado
+            siguiente y un indicador de si el episodio terminó de verdad. Cuando la memoria se llena,
+            las experiencias más viejas se descartan (cola FIFO de capacidad fija).
+          </p>
+        </div>
+
+        <h2 id="target">Truco 2: red objetivo (target network)</h2>
+        <p>
+          Para dejar de perseguir nuestra cola, <strong>congelamos</strong> la diana. Mantenemos una
+          <strong>segunda</strong> copia de la red, la <em>red objetivo</em>, con sus propios pesos
+          $\theta^{-}$. El objetivo se calcula con ella:
+          $y = r + \gamma \max_{a'} Q(s',a';\theta^{-})$. Mientras entrenamos $\theta$ paso a paso,
+          $\theta^{-}$ permanece <strong>fija</strong>; solo cada $C$ pasos la sincronizamos copiando
+          $\theta^{-} \leftarrow \theta$. Así el objetivo cambia a saltos, despacio, y el entrenamiento
+          se parece mucho más a una regresión estable con una diana quieta.
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="0 0 700 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Flujo de datos de DQN: entorno, replay buffer, red online, red objetivo y pérdida">
+            <defs>
+              <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#4f46e5" />
+              </marker>
+              <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#0ea5e9" />
+              </marker>
+            </defs>
+
+            <!-- Entorno -->
+            <rect x="20" y="20" width="150" height="56" rx="12" fill="#0ea5e9" />
+            <text x="95" y="53" text-anchor="middle" fill="#fff" font-size="18" font-family="sans-serif" font-weight="700">Entorno</text>
+
+            <!-- Replay buffer -->
+            <rect x="20" y="140" width="150" height="72" rx="12" fill="#4f46e5" />
+            <text x="95" y="170" text-anchor="middle" fill="#fff" font-size="16" font-family="sans-serif" font-weight="700">Replay buffer</text>
+            <text x="95" y="192" text-anchor="middle" fill="#dfe3ff" font-size="13" font-family="sans-serif">𝒟 : (s, a, r, s′)</text>
+
+            <!-- Red online -->
+            <rect x="300" y="20" width="180" height="72" rx="12" fill="#4f46e5" />
+            <text x="390" y="50" text-anchor="middle" fill="#fff" font-size="16" font-family="sans-serif" font-weight="700">Red online</text>
+            <text x="390" y="74" text-anchor="middle" fill="#dfe3ff" font-size="14" font-family="sans-serif">Q(s,a; θ)</text>
+
+            <!-- Red objetivo -->
+            <rect x="300" y="230" width="180" height="72" rx="12" fill="#64748b" />
+            <text x="390" y="260" text-anchor="middle" fill="#fff" font-size="16" font-family="sans-serif" font-weight="700">Red objetivo</text>
+            <text x="390" y="284" text-anchor="middle" fill="#e2e8f0" font-size="14" font-family="sans-serif">Q(s',a'; θ⁻)</text>
+
+            <!-- Pérdida -->
+            <rect x="560" y="120" width="120" height="90" rx="12" fill="#059669" />
+            <text x="620" y="152" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">Pérdida</text>
+            <text x="620" y="176" text-anchor="middle" fill="#eafaf2" font-size="14" font-family="sans-serif">(y − Q)²</text>
+
+            <!-- Entorno -> buffer -->
+            <path d="M95,76 L95,138" fill="none" stroke="#0ea5e9" stroke-width="2.5" marker-end="url(#arrow2)" />
+            <text x="105" y="112" text-anchor="start" fill="#4a5568" font-size="12" font-family="sans-serif">guarda</text>
+
+            <!-- buffer -> online (minibatch) -->
+            <path d="M170,168 C230,150 250,90 298,66" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow)" />
+            <!-- buffer -> objetivo (minibatch s') -->
+            <path d="M170,196 C230,220 250,255 298,262" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow)" />
+            <text x="205" y="245" text-anchor="middle" fill="#4a5568" font-size="12" font-family="sans-serif">minibatch</text>
+
+            <!-- online -> pérdida -->
+            <path d="M480,66 C520,80 528,120 558,140" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow)" />
+            <!-- objetivo -> pérdida (y) -->
+            <path d="M480,262 C520,245 528,205 558,188" fill="none" stroke="#059669" stroke-width="2.5" marker-end="url(#arrow)" />
+            <text x="545" y="235" text-anchor="middle" fill="#4a5568" font-size="12" font-family="sans-serif">y = r+γ·max</text>
+
+            <!-- pérdida -> online (gradiente) -->
+            <path d="M620,120 C620,40 540,30 482,34" fill="none" stroke="#059669" stroke-width="2.5" stroke-dasharray="2 0" marker-end="url(#arrow)" />
+            <text x="560" y="26" text-anchor="middle" fill="#4a5568" font-size="12" font-family="sans-serif">∇θ (gradiente)</text>
+
+            <!-- online -.-> objetivo (copia cada C) -->
+            <path d="M390,92 L390,228" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#arrow)" />
+            <text x="400" y="164" text-anchor="start" fill="#4a5568" font-size="12" font-family="sans-serif">copia θ⁻←θ</text>
+            <text x="400" y="180" text-anchor="start" fill="#4a5568" font-size="12" font-family="sans-serif">cada C pasos</text>
+          </svg>
+          <figcaption>
+            El flujo de DQN. El entorno alimenta el buffer; un minibatch aleatorio pasa por las dos
+            redes; la red objetivo (gris, congelada) fabrica el objetivo $y$; el gradiente solo
+            actualiza la red online; cada $C$ pasos se copia en la objetivo.
+          </figcaption>
+        </figure>
+
+        <h2 id="matematicas">La función de pérdida, con cuidado</h2>
+        <p>
+          Ya no «escribimos en una casilla»: definimos una <strong>pérdida</strong> y la minimizamos por
+          descenso de gradiente, exactamente como en aprendizaje supervisado. La diana de cada ejemplo
+          es su objetivo TD, calculado con la red objetivo.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La pérdida de DQN</div>
+          <p>$$L(\theta) = \mathbb{E}_{(s,a,r,s') \sim \mathcal{D}}\Big[\big(y - Q(s,a;\theta)\big)^2\Big], \qquad y = r + \gamma \max_{a'} Q(s',a';\theta^{-})$$</p>
+          <p class="math-note">
+            $\theta$ son los pesos de la red <strong>online</strong> (la que aprende);
+            $\theta^{-}$ los de la red <strong>objetivo</strong> (congelada);
+            $\mathcal{D}$ es el replay buffer, del que muestreamos las transiciones;
+            $y$ es el <strong>objetivo TD</strong>, tratado como una constante. La esperanza
+            $\mathbb{E}$ se aproxima promediando sobre el minibatch.
+          </p>
+        </div>
+
+        <p>
+          Al derivar hay un detalle sutil pero crucial: aunque $y$ también contiene una $Q$,
+          <strong>no</strong> derivamos a través de ella. Congelamos $y$ (por eso usa $\theta^{-}$).
+          El gradiente resultante se llama <em>semi-gradiente</em>:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Semi-gradiente y actualización</div>
+          <p>$$\nabla_\theta L(\theta) = -2\,\mathbb{E}\Big[\big(y - Q(s,a;\theta)\big)\,\nabla_\theta Q(s,a;\theta)\Big]$$</p>
+          <p>Con un minibatch, un paso de descenso de gradiente (con tasa $\alpha$) queda:</p>
+          <p>$$\theta \leftarrow \theta + \alpha \, \frac{1}{|B|}\sum_{(s,a,r,s') \in B} \big(y - Q(s,a;\theta)\big)\,\nabla_\theta Q(s,a;\theta)$$</p>
+          <p class="math-note">
+            $B$ es el minibatch y $|B|$ su tamaño. El factor constante $2$ del gradiente se ha
+            <strong>absorbido en la tasa $\alpha$</strong> (por eso no reaparece arriba): es la forma
+            habitual del semi-gradiente. Fíjate en el parecido con el error TD tabular
+            $\big(y - Q(s,a)\big)$: es el mismo residuo, pero ahora lo repartimos entre todos los pesos
+            $\theta$ según $\nabla_\theta Q$. Solo se actualiza la salida de la <strong>acción tomada</strong>
+            $a$; las demás no entran en la pérdida de ese ejemplo.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Un final por tiempo no es un final de verdad</div>
+          <p>
+            Cuando el episodio se corta por límite de pasos (y no porque se haya alcanzado un estado
+            terminal real), <strong>no</strong> debes poner a cero el valor futuro. Es decir, el factor
+            $(1-\text{fin})$ que multiplica a $\gamma \max_{a'} Q(s',a';\theta^{-})$ solo vale $0$ en un
+            final <em>auténtico</em>. Guardar mal ese indicador es uno de los errores más comunes al
+            implementar DQN. En los dos ejemplos distinguimos «terminado» de «truncado».
+          </p>
+        </div>
+
+        <h2 id="algoritmo">El algoritmo, paso a paso</h2>
+        <ol>
+          <li>Inicializa la red online $Q(\cdot;\theta)$ y copia sus pesos en la red objetivo: $\theta^{-} \leftarrow \theta$. Crea un buffer $\mathcal{D}$ vacío.</li>
+          <li>Observa el estado $s$ y elige la acción $a$ con <strong>$\varepsilon$-greedy</strong> sobre $Q(s,\cdot;\theta)$: con probabilidad $\varepsilon$ una acción al azar, si no la de mayor $Q$.</li>
+          <li>Ejecuta $a$, observa $r$, $s'$ y si el episodio ha terminado. Guarda $(s,a,r,s',\text{fin})$ en $\mathcal{D}$.</li>
+          <li>Muestrea un minibatch aleatorio de $\mathcal{D}$ y calcula el objetivo $y = r + \gamma\,(1-\text{fin})\max_{a'} Q(s',a';\theta^{-})$.</li>
+          <li>Da un paso de descenso de gradiente sobre $\big(y - Q(s,a;\theta)\big)^2$ para actualizar $\theta$.</li>
+          <li>Cada $C$ pasos, sincroniza $\theta^{-} \leftarrow \theta$. Reduce $\varepsilon$ poco a poco. Vuelve al paso 2.</li>
+        </ol>
+
+        <h2 id="ejemplo-numpy">Ejemplo 1: DQN desde cero, solo con NumPy</h2>
+        <p>
+          Nada de cajas negras: aquí tienes DQN con la red, la retropropagación, el replay buffer y la
+          red objetivo escritos <strong>a mano</strong>. La red es un MLP de una capa oculta
+          ($\text{estado} \to 64 \to$ valores $Q$) y el entorno es un <strong>mundo continuo 2D</strong>
+          barato: un agente parte de la zona inferior-izquierda de un cuadrado y debe llegar a la meta
+          de la esquina opuesta, cobrando $-0{,}05$ por paso y $+1$ al llegar. Es una versión
+          <em>didáctica</em> (hiperparámetros modestos), pensada para correr en el navegador en un par
+          de segundos.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">dqn_desde_cero.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+DQN desde cero, solo con NumPy (version didactica).
+=====================================================
+
+Este script implementa un Deep Q-Network COMPLETO sin usar ninguna libreria de
+aprendizaje profundo: la red neuronal (un MLP de una capa oculta), la
+retropropagacion (backprop manual), el buffer de repeticion de experiencia
+(replay) y la red objetivo (target network) estan escritos a mano con NumPy.
+
+El objetivo es que veas, sin cajas negras, las DOS piezas que hacen estable a
+DQN frente a un simple Q-learning con red neuronal:
+  1) el replay buffer, que rompe la correlacion entre transiciones consecutivas;
+  2) la red objetivo congelada, que evita "perseguir nuestra propia cola".
+
+El entorno es un mundo continuo 2D barato de simular: un agente que parte de la
+zona inferior-izquierda de un cuadrado [0,1]x[0,1] y debe llegar a una meta en la
+esquina superior-derecha. Recibe -0.05 por paso y +1 al alcanzar la meta, asi que
+aprender = llegar en los menos pasos posibles.
+
+Ejecutar:
+    pip install -r requirements.txt
+    python code/12-dqn/dqn_desde_cero.py
+
+Es ligero: unos 200 episodios que terminan en 1-2 segundos y dibujan la
+recompensa por episodio. Con la semilla fijada el resultado es reproducible.
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+from collections import deque
+
+# Semilla unica: reproducibilidad de entorno, exploracion e inicializacion.
+rng = np.random.default_rng(0)
+
+
+# ----------------------------------------------------------------------------
+# 1) EL ENTORNO: un mundo continuo 2D (barato de simular)
+# ----------------------------------------------------------------------------
+class MundoContinuo:
+    """Agente en [0,1]x[0,1] que debe alcanzar una meta moviendose en 4 direcciones.
+
+    step() devuelve (estado, recompensa, terminado, truncado):
+      - terminado = True solo cuando se alcanza la meta (fin "real" del episodio);
+      - truncado  = True cuando se agota el limite de pasos (fin por tiempo).
+    La distincion importa para el objetivo de DQN: al bootstrapear, solo ponemos
+    a cero el valor futuro en un final REAL, no cuando cortamos por tiempo.
+    """
+
+    def __init__(self):
+        self.meta = np.array([0.9, 0.9])
+        self.radio = 0.12                 # se considera "meta" si te acercas tanto
+        self.dmov = 0.05                  # cuanto avanzas por paso
+        self.max_pasos = 100
+        # 4 acciones: +x, -x, +y, -y
+        self.moves = np.array([[1, 0], [-1, 0], [0, 1], [0, -1]], dtype=float) * self.dmov
+        self.n_acciones = 4
+        self.dim_estado = 2
+
+    def reset(self):
+        self.pos = rng.uniform(0.0, 0.5, size=2)   # arranca abajo-izquierda (aleatorio)
+        self.t = 0
+        return self.pos.copy()
+
+    def step(self, a):
+        self.pos = np.clip(self.pos + self.moves[a], 0.0, 1.0)
+        self.t += 1
+        dist = np.hypot(*(self.pos - self.meta))
+        if dist &lt; self.radio:
+            return self.pos.copy(), 1.0, True, False     # meta: fin real
+        if self.t &gt;= self.max_pasos:
+            return self.pos.copy(), -0.05, False, True    # se acabo el tiempo
+        return self.pos.copy(), -0.05, False, False       # un paso mas cuesta -0.05
+
+
+# ----------------------------------------------------------------------------
+# 2) LA RED Q: un MLP de 2 capas (entrada -&gt; oculta ReLU -&gt; salida lineal)
+#    Estado (2) -&gt; oculta (H) -&gt; Q de las 4 acciones (4). Todo a mano.
+# ----------------------------------------------------------------------------
+def crear_red(din, h, dout):
+    """Inicializacion He para las capas ReLU; sesgos a cero."""
+    return {
+        "W1": rng.normal(0, np.sqrt(2 / din), (din, h)),
+        "b1": np.zeros(h),
+        "W2": rng.normal(0, np.sqrt(2 / h), (h, dout)),
+        "b2": np.zeros(dout),
+    }
+
+
+def forward(red, S):
+    """Paso hacia delante para un lote S de forma (B, din).
+
+    Devuelve Q de forma (B, dout) y la cache (Z1, A1) que necesita el backprop.
+    """
+    Z1 = S @ red["W1"] + red["b1"]     # pre-activacion de la capa oculta
+    A1 = np.maximum(Z1, 0.0)           # ReLU
+    Q = A1 @ red["W2"] + red["b2"]     # salida lineal: un valor Q por accion
+    return Q, (Z1, A1)
+
+
+class Adam:
+    """Optimizador Adam minimo (el DQN original usaba RMSProp; Adam va igual de bien)."""
+
+    def __init__(self, red, lr):
+        self.lr, self.b1, self.b2, self.eps, self.t = lr, 0.9, 0.999, 1e-8, 0
+        self.m = {k: np.zeros_like(v) for k, v in red.items()}
+        self.v = {k: np.zeros_like(v) for k, v in red.items()}
+
+    def paso(self, red, grads):
+        self.t += 1
+        for k in red:
+            self.m[k] = self.b1 * self.m[k] + (1 - self.b1) * grads[k]
+            self.v[k] = self.b2 * self.v[k] + (1 - self.b2) * grads[k] ** 2
+            mhat = self.m[k] / (1 - self.b1 ** self.t)
+            vhat = self.v[k] / (1 - self.b2 ** self.t)
+            red[k] -= self.lr * mhat / (np.sqrt(vhat) + self.eps)
+
+
+# ----------------------------------------------------------------------------
+# 3) HIPERPARAMETROS
+# ----------------------------------------------------------------------------
+GAMMA = 0.95        # factor de descuento
+H = 64              # neuronas de la capa oculta
+LR = 1e-3           # tasa de aprendizaje
+BATCH = 32          # tamano del minibatch que sacamos del replay
+CAP = 5000          # capacidad del replay buffer
+WARMUP = 300        # no entrenamos hasta tener estas transiciones guardadas
+C = 300             # cada C pasos copiamos la red online en la red objetivo
+EPS_INI, EPS_FIN = 1.0, 0.05    # epsilon-greedy: de explorar todo a casi explotar
+EPISODIOS = 200
+
+env = MundoContinuo()
+q = crear_red(env.dim_estado, H, env.n_acciones)     # red ONLINE (la que aprende)
+q_obj = {k: v.copy() for k, v in q.items()}          # red OBJETIVO (congelada)
+opt = Adam(q, LR)
+buffer = deque(maxlen=CAP)                            # replay: (s, a, r, s', done)
+
+
+def epsilon(ep):
+    """Decrece linealmente durante el 70% de los episodios y luego se mantiene."""
+    frac = min(1.0, ep / (0.7 * EPISODIOS))
+    return EPS_INI + frac * (EPS_FIN - EPS_INI)
+
+
+# ----------------------------------------------------------------------------
+# 4) BUCLE DE ENTRENAMIENTO
+# ----------------------------------------------------------------------------
+recompensas = []
+paso_global = 0
+for ep in range(EPISODIOS):
+    s = env.reset()
+    total, fin, eps = 0.0, False, epsilon(ep)
+    while not fin:
+        # --- politica epsilon-greedy sobre la red online ---
+        if rng.random() &lt; eps:
+            a = int(rng.integers(env.n_acciones))
+        else:
+            qv, _ = forward(q, s[None, :])
+            a = int(np.argmax(qv[0]))
+
+        s2, r, done, trunc = env.step(a)
+        buffer.append((s, a, r, s2, done))     # guardamos la experiencia
+        s, total, fin = s2, total + r, (done or trunc)
+        paso_global += 1
+
+        # --- una actualizacion de gradiente por paso (cuando ya hay datos) ---
+        if len(buffer) &gt;= WARMUP:
+            # 1. Muestreamos un minibatch ALEATORIO: rompe la correlacion temporal.
+            idx = rng.integers(0, len(buffer), BATCH)
+            S = np.array([buffer[i][0] for i in idx])
+            A = np.array([buffer[i][1] for i in idx])
+            R = np.array([buffer[i][2] for i in idx])
+            S2 = np.array([buffer[i][3] for i in idx])
+            D = np.array([buffer[i][4] for i in idx], dtype=float)
+
+            # 2. Objetivo con la red OBJETIVO congelada: y = r + gamma * max_a' Q-(s',a').
+            Qobj, _ = forward(q_obj, S2)
+            y = R + GAMMA * np.max(Qobj, axis=1) * (1.0 - D)
+
+            # 3. Prediccion de la red online y perdida MSE solo en la accion tomada.
+            Q, (Z1, A1) = forward(q, S)
+            qsa = Q[np.arange(BATCH), A]
+
+            # 4. Backprop manual de L = mean((qsa - y)^2).
+            dQ = np.zeros_like(Q)
+            dQ[np.arange(BATCH), A] = (2.0 / BATCH) * (qsa - y)
+            grads = {"W2": A1.T @ dQ, "b2": dQ.sum(0)}
+            dA1 = dQ @ q["W2"].T
+            dZ1 = dA1 * (Z1 &gt; 0)                # derivada de la ReLU
+            grads["W1"] = S.T @ dZ1
+            grads["b1"] = dZ1.sum(0)
+            opt.paso(q, grads)
+
+            # 5. Cada C pasos, sincronizamos la red objetivo (theta- &lt;- theta).
+            if paso_global % C == 0:
+                q_obj = {k: v.copy() for k, v in q.items()}
+
+    recompensas.append(total)
+
+recompensas = np.array(recompensas)
+
+
+# ----------------------------------------------------------------------------
+# 5) RESULTADOS: evaluacion greedy y grafica de la recompensa por episodio
+# ----------------------------------------------------------------------------
+exitos, pasos_tot = 0, 0
+for _ in range(50):
+    s, fin = env.reset(), False
+    while not fin:
+        qv, _ = forward(q, s[None, :])
+        s, r, done, trunc = env.step(int(np.argmax(qv[0])))
+        fin = done or trunc
+    exitos += int(done)
+    pasos_tot += env.t
+
+print(f"Recompensa media primeros 10 episodios: {recompensas[:10].mean():+.2f}")
+print(f"Recompensa media ultimos  10 episodios: {recompensas[-10:].mean():+.2f}")
+print(f"Politica final (greedy): llega a la meta en {exitos}/50 episodios "
+      f"({pasos_tot / 50:.0f} pasos de media).")
+
+ventana = 10
+media_movil = np.convolve(recompensas, np.ones(ventana) / ventana, mode="valid")
+
+plt.figure(figsize=(8, 4.5))
+plt.plot(recompensas, color="#b8c0e0", lw=1, label="recompensa por episodio")
+plt.plot(np.arange(ventana - 1, len(recompensas)), media_movil,
+         color="#4f46e5", lw=2.5, label=f"media movil ({ventana})")
+plt.axhline(0.0, color="#94a3b8", lw=0.8, ls="--")
+plt.xlabel("episodio")
+plt.ylabel("recompensa acumulada")
+plt.title("DQN desde cero (NumPy): aprende a alcanzar la meta")
+plt.legend(loc="lower right")
+plt.grid(alpha=0.2)
+plt.tight_layout()
+plt.show()
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong>. Verás que la recompensa por episodio empieza clavada en el
+          suelo (el agente vaga sin encontrar la meta y agota el tiempo) y, según el replay y la red
+          objetivo hacen su trabajo, la curva <strong>sube</strong> hasta rozar el cero: la política
+          aprendida lleva al agente a la meta en pocos pasos. La media móvil deja ver la tendencia por
+          encima del ruido de los arranques aleatorios.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Prueba a <strong>desactivar</strong> la red objetivo (haz que <code>q_obj</code> sea siempre
+            una referencia a <code>q</code> en vez de una copia periódica) o a reducir el buffer a una
+            capacidad minúscula (por ejemplo <code>CAP = BATCH</code>, casi sin barajar). Verás cómo la
+            curva se vuelve inestable o deja de aprender: acabas de comprobar, con tus manos, por qué
+            los dos trucos son necesarios.
+          </p>
+        </div>
+
+        <h2 id="terminal-numpy">Ejecutarlo en tu terminal</h2>
+        <p>Descarga el archivo (o cópialo) y ejecútalo. Solo necesita NumPy y Matplotlib:</p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) entorno virtual e instalación de dependencias</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 2) ejecuta el DQN desde cero (abre una ventana con la curva de aprendizaje)</span>
+<span class="prompt">$</span> python code/12-dqn/dqn_desde_cero.py
+<span class="comment">Recompensa media primeros 10 episodios: -5.00
+Recompensa media ultimos  10 episodios: -0.13
+Politica final (greedy): llega a la meta en 47/50 episodios (27 pasos de media).</span></pre>
+        </div>
+
+        <h2 id="ejemplo-torch">Ejemplo 2: DQN idiomático con PyTorch y Gymnasium</h2>
+        <p>
+          El código de arriba es estupendo para <em>entender</em>, pero en la práctica nadie escribe la
+          retropropagación a mano. Aquí tienes el <strong>mismo</strong> DQN como se hace de verdad: la
+          red es un <code>nn.Module</code>, <code>optim.Adam</code> actualiza los pesos y el autograd de
+          PyTorch calcula los gradientes por ti. El entorno es el clásico <strong>CartPole-v1</strong>
+          de Gymnasium: mantén en pie un poste sobre un carro moviéndolo a izquierda o derecha.
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Este ejemplo se ejecuta en tu terminal</div>
+          <p>
+            <code>torch</code> y <code>gymnasium</code> son demasiado pesados para el navegador, así que
+            este bloque <strong>no</strong> tiene botón «Ejecutar». Descárgalo o cópialo y córrelo en tu
+            máquina con las instrucciones de más abajo. En una CPU normal aprende a sostener el poste en
+            uno o dos minutos.
+          </p>
+        </div>
+
+        <div class="code-example">
+          <div class="code-header">
+            <span class="file-name">dqn_torch.py</span>
+            <div class="code-actions">
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+DQN idiomatico con PyTorch + Gymnasium sobre CartPole-v1 (para TERMINAL).
+========================================================================
+
+Este es el "mismo" DQN que la version desde cero en NumPy, pero escrito como se
+hace en la practica: la red es un `nn.Module`, el optimizador es `optim.Adam`, el
+autograd de PyTorch calcula la retropropagacion por nosotros y el entorno lo pone
+Gymnasium. Reconoceras las mismas dos piezas clave que estabilizan el metodo:
+
+  * ReplayBuffer  -&gt; rompe la correlacion entre transiciones consecutivas.
+  * red objetivo  -&gt; un juego de pesos congelado que da el objetivo y = r + gamma*max Q-.
+
+CartPole-v1: un carro con un poste articulado. Estado de 4 numeros (posicion y
+velocidad del carro, angulo y velocidad angular del poste), 2 acciones (empujar a
+izquierda o derecha) y +1 de recompensa por cada paso que el poste siga en pie
+(maximo 500). Se considera "resuelto" con una recompensa media &gt;= 475.
+
+NO corre en el navegador (torch y gymnasium son demasiado pesados). Ejecutalo en tu
+terminal:
+
+    pip install -r requirements.txt
+    python code/12-dqn/dqn_torch.py
+
+En una CPU normal aprende a mantener el poste en pie en uno o dos minutos.
+"""
+
+import random
+from collections import deque
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import gymnasium as gym
+
+# --------------------------------------------------------------------------- #
+# Hiperparametros
+# --------------------------------------------------------------------------- #
+SEMILLA = 0
+GAMMA = 0.99             # factor de descuento
+LR = 1e-3               # tasa de aprendizaje de Adam
+BATCH = 128             # tamano del minibatch
+CAP = 10_000           # capacidad del replay buffer
+WARMUP = 1_000         # transiciones minimas antes de empezar a entrenar
+SYNC_OBJETIVO = 500     # cada cuantos PASOS copiamos theta -&gt; theta-
+EPS_INI, EPS_FIN = 1.0, 0.05
+EPS_DECAY = 6_000       # constante de la caida exponencial de epsilon (en pasos)
+MAX_EPISODIOS = 800
+OBJETIVO_RESUELTO = 475.0    # media de las ultimas 100 recompensas para "resolver"
+
+DISPOSITIVO = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+# --------------------------------------------------------------------------- #
+# La red Q: un MLP que mapea estado (4) -&gt; valor Q de cada accion (2)
+# --------------------------------------------------------------------------- #
+class RedQ(nn.Module):
+    def __init__(self, dim_estado, n_acciones, oculta=128):
+        super().__init__()
+        self.red = nn.Sequential(
+            nn.Linear(dim_estado, oculta), nn.ReLU(),
+            nn.Linear(oculta, oculta), nn.ReLU(),
+            nn.Linear(oculta, n_acciones),
+        )
+
+    def forward(self, x):
+        return self.red(x)
+
+
+# --------------------------------------------------------------------------- #
+# Replay buffer: guarda (s, a, r, s', terminado) y devuelve minibatches al azar
+# --------------------------------------------------------------------------- #
+class ReplayBuffer:
+    def __init__(self, capacidad):
+        self.memoria = deque(maxlen=capacidad)
+
+    def guardar(self, s, a, r, s2, terminado):
+        self.memoria.append((s, a, r, s2, terminado))
+
+    def muestrear(self, batch):
+        lote = random.sample(self.memoria, batch)
+        s, a, r, s2, term = zip(*lote)
+        return (
+            torch.as_tensor(np.array(s), dtype=torch.float32, device=DISPOSITIVO),
+            torch.as_tensor(a, dtype=torch.int64, device=DISPOSITIVO).unsqueeze(1),
+            torch.as_tensor(r, dtype=torch.float32, device=DISPOSITIVO).unsqueeze(1),
+            torch.as_tensor(np.array(s2), dtype=torch.float32, device=DISPOSITIVO),
+            torch.as_tensor(term, dtype=torch.float32, device=DISPOSITIVO).unsqueeze(1),
+        )
+
+    def __len__(self):
+        return len(self.memoria)
+
+
+def epsilon(paso):
+    """Caida exponencial de epsilon: mucho explorar al principio, casi nada al final."""
+    return EPS_FIN + (EPS_INI - EPS_FIN) * np.exp(-paso / EPS_DECAY)
+
+
+def entrenar():
+    random.seed(SEMILLA)
+    np.random.seed(SEMILLA)
+    torch.manual_seed(SEMILLA)
+
+    env = gym.make("CartPole-v1")
+    env.action_space.seed(SEMILLA)          # que las acciones al azar tambien sean reproducibles
+    dim_estado = env.observation_space.shape[0]
+    n_acciones = env.action_space.n
+
+    q = RedQ(dim_estado, n_acciones).to(DISPOSITIVO)          # red ONLINE (aprende)
+    q_obj = RedQ(dim_estado, n_acciones).to(DISPOSITIVO)      # red OBJETIVO (congelada)
+    q_obj.load_state_dict(q.state_dict())
+    q_obj.eval()
+
+    opt = optim.Adam(q.parameters(), lr=LR)
+    buffer = ReplayBuffer(CAP)
+
+    paso_global = 0
+    mejor_media = float("-inf")
+    historico = deque(maxlen=100)
+
+    for ep in range(1, MAX_EPISODIOS + 1):
+        estado, _ = env.reset(seed=SEMILLA + ep)
+        recompensa_ep = 0.0
+        terminado = truncado = False
+
+        while not (terminado or truncado):
+            # --- politica epsilon-greedy sobre la red online ---
+            eps = epsilon(paso_global)
+            if random.random() &lt; eps:
+                accion = env.action_space.sample()
+            else:
+                with torch.no_grad():
+                    s = torch.as_tensor(estado, dtype=torch.float32, device=DISPOSITIVO)
+                    accion = int(q(s).argmax().item())
+
+            sig, recompensa, terminado, truncado, _ = env.step(accion)
+            # Guardamos SOLO 'terminado' (el poste cae): un corte por tiempo
+            # (truncado) no debe poner a cero el valor futuro al bootstrapear.
+            buffer.guardar(estado, accion, recompensa, sig, terminado)
+            estado = sig
+            recompensa_ep += recompensa
+            paso_global += 1
+
+            # --- una actualizacion de gradiente por paso ---
+            if len(buffer) &gt;= WARMUP:
+                s, a, r, s2, term = buffer.muestrear(BATCH)
+
+                # Q(s,a) de la red online, seleccionando la accion tomada.
+                q_sa = q(s).gather(1, a)
+
+                # Objetivo con la red objetivo congelada (sin gradiente).
+                with torch.no_grad():
+                    max_q2 = q_obj(s2).max(dim=1, keepdim=True).values
+                    objetivo = r + GAMMA * max_q2 * (1.0 - term)
+
+                # La misma perdida MSE del capitulo. Para mas estabilidad puedes
+                # cambiarla por la de Huber: nn.functional.smooth_l1_loss(q_sa, objetivo).
+                perdida = nn.functional.mse_loss(q_sa, objetivo)
+
+                opt.zero_grad()
+                perdida.backward()
+                nn.utils.clip_grad_norm_(q.parameters(), 10.0)   # evita pasos gigantes
+                opt.step()
+
+                # Sincronizacion periodica de la red objetivo: theta- &lt;- theta.
+                if paso_global % SYNC_OBJETIVO == 0:
+                    q_obj.load_state_dict(q.state_dict())
+
+        historico.append(recompensa_ep)
+        media100 = np.mean(historico)
+        mejor_media = max(mejor_media, media100)
+        if ep % 10 == 0:
+            print(f"Episodio {ep:4d} | recompensa {recompensa_ep:6.1f} | "
+                  f"media100 {media100:6.1f} | epsilon {epsilon(paso_global):.3f}")
+
+        if len(historico) == 100 and media100 &gt;= OBJETIVO_RESUELTO:
+            print(f"\nResuelto en el episodio {ep}: media de las ultimas 100 "
+                  f"recompensas = {media100:.1f} (&gt;= {OBJETIVO_RESUELTO:.0f}).")
+            break
+    else:
+        # Si llegamos aqui, no se cruzo el umbral de "resuelto" en MAX_EPISODIOS.
+        print(f"\nFin del entrenamiento ({MAX_EPISODIOS} episodios). "
+              f"Mejor media de 100 episodios = {mejor_media:.1f}.")
+        print("La politica aprende a sostener el poste cientos de pasos y alcanza a "
+              "menudo el maximo de 500, pero el DQN 'a secas' sufre colapsos ocasionales "
+              "por sobreestimacion de Q. Esa inestabilidad es justo lo que atacan "
+              "Double DQN, Dueling y PER en el capitulo 13.")
+
+    env.close()
+    return q
+
+
+if __name__ == "__main__":
+    entrenar()
+</code></pre>
+        </div>
+
+        <p>
+          Reconocerás punto por punto el algoritmo: el <code>ReplayBuffer</code>, las dos redes
+          (<code>q</code> y <code>q_obj</code>), el objetivo calculado con <code>torch.no_grad()</code>
+          sobre la red objetivo, el <code>gather</code> que selecciona el $Q$ de la acción tomada y la
+          sincronización periódica con <code>load_state_dict</code>. Fíjate también en cómo se guarda
+          solo <code>terminado</code> (no <code>truncado</code>) en el buffer.
+        </p>
+
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># instala PyTorch + Gymnasium (ya están en requirements.txt) y ejecuta</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+<span class="prompt">$</span> python code/12-dqn/dqn_torch.py
+<span class="comment">Episodio   10 | recompensa   17.0 | media100   21.1 | epsilon 0.967
+Episodio  200 | recompensa  126.0 | media100   52.3 | epsilon 0.326
+Episodio  400 | recompensa  128.0 | media100  112.3 | epsilon 0.060
+Episodio  480 | recompensa  500.0 | media100  210.2 | epsilon 0.050
+Episodio  600 | recompensa  500.0 | media100  298.8 | epsilon 0.050
+Episodio  800 | recompensa  430.0 | media100  232.0 | epsilon 0.050
+
+Fin del entrenamiento (800 episodios). Mejor media de 100 episodios = 342.9.
+La politica aprende a sostener el poste cientos de pasos y alcanza a menudo el maximo
+de 500, pero el DQN 'a secas' sufre colapsos ocasionales por sobreestimacion de Q.
+Esa inestabilidad es justo lo que atacan Double DQN, Dueling y PER en el capitulo 13.</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Los números exactos varían con tu máquina, la versión de las librerías y el azar; lo que
+          importa es la <strong>tendencia</strong>: la recompensa sube desde $\sim 20$ hasta rozar el
+          máximo de $500$. Verás también que, cada tanto, la media se <strong>desploma</strong>: el DQN
+          «a secas» es inestable (sobreestima los valores), y ese es justo el problema que ataca el
+          <a href="13-mejoras-dqn.html">capítulo 13</a>.
+        </p>
+
+        <h2 id="detalles">Detalles que marcan la diferencia</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Ingrediente</th><th>Para qué sirve</th></tr></thead>
+            <tbody>
+              <tr><td>Replay buffer grande</td><td>Rompe correlaciones y reutiliza experiencia (eficiencia de muestras).</td></tr>
+              <tr><td>Red objetivo + sincronización cada $C$</td><td>Estabiliza el objetivo; evita la realimentación divergente.</td></tr>
+              <tr><td>$\varepsilon$ decreciente</td><td>Explora mucho al principio, explota lo aprendido al final.</td></tr>
+              <tr><td>Pérdida de Huber (<em>smooth L1</em>)</td><td>Alternativa robusta al MSE: recorta el efecto de errores enormes.</td></tr>
+              <tr><td>Recorte de gradiente</td><td>Impide pasos gigantes que desestabilizan la red.</td></tr>
+              <tr><td>Fase de calentamiento (<em>warmup</em>)</td><td>No entrenar hasta tener suficientes datos variados en el buffer.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          El DQN original de DeepMind añadía además <strong>recorte de recompensas</strong> a
+          $[-1,1]$ y apilaba varios fotogramas para percibir movimiento, entre otros trucos propios de
+          Atari. La estructura, sin embargo, es exactamente la que acabas de implementar.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>DQN aproxima la función de acción-valor con una <strong>red neuronal</strong> $Q(s,a;\theta)$ y la entrena minimizando la pérdida $\big(y - Q(s,a;\theta)\big)^2$.</li>
+            <li>El objetivo es $y = r + \gamma\,(1-\text{fin})\max_{a'} Q(s',a';\theta^{-})$, con la <strong>red objetivo</strong> $\theta^{-}$ congelada; se deriva como <strong>semi-gradiente</strong>.</li>
+            <li>La <strong>repetición de experiencia</strong> baraja las transiciones (rompe la correlación); la <strong>red objetivo</strong> mantiene la diana quieta (evita perseguir la cola).</li>
+            <li>Con estos dos trucos, más $\varepsilon$-greedy decreciente, la «tríada mortal» se vuelve manejable y el aprendizaje converge.</li>
+          </ul>
+        </div>
+
+        <p>
+          DQN es la base, pero tiene defectos conocidos: <strong>sobreestima</strong> los valores, mezcla
+          «cuánto vale este estado» con «cuánto aporta cada acción», y muestrea el buffer sin prioridad.
+          En el <a href="13-mejoras-dqn.html">capítulo 13</a> los arreglamos uno a uno con
+          <strong>Double DQN</strong>, <strong>Dueling</strong> y <strong>repetición priorizada (PER)</strong>.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

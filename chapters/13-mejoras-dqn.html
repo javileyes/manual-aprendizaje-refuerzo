@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>13. Mejoras de DQN · Manual de RL</title>
+  <meta name="description" content="Tres mejoras que hacen a DQN fiable: Double DQN corrige la sobreestimación, Dueling separa valor y ventaja, y Prioritized Replay muestrea lo sorprendente. Con ejemplos en Python." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="13">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 2 · Capítulo 13</span>
+        <h1>Mejoras de DQN</h1>
+        <p class="lead">
+          El <a href="12-dqn.html">DQN</a> del capítulo anterior ya aprende a jugar mirando píxeles,
+          pero en la práctica es <strong>inestable y demasiado optimista</strong>. En este capítulo
+          añadimos tres mejoras clásicas que lo transforman en un algoritmo robusto:
+          <strong>Double DQN</strong> (contra la sobreestimación), <strong>Dueling</strong>
+          (una arquitectura más lista) y <strong>Prioritized Experience Replay</strong>
+          (aprender más de lo que sorprende). Juntas son la mitad del célebre <em>Rainbow</em>.
+        </p>
+
+        <h2 id="punto-de-partida">De dónde venimos y qué falla</h2>
+        <p>
+          Recuerda la pieza central de DQN: entrenamos una red $Q(s,a;\theta)$ para que se parezca
+          a un <strong>objetivo</strong> construido con una red <em>target</em> congelada $\theta^-$,
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ El objetivo de DQN (repaso)</div>
+          <p>$$y = r + \gamma \max_{a'} Q(s', a'; \theta^-)$$</p>
+          <p class="math-note">
+            Aquí $r$ es la recompensa recibida, $\gamma \in [0,1)$ el factor de descuento,
+            $s'$ el estado siguiente, $\theta$ los pesos de la red que entrenamos y $\theta^-$ los
+            de la red <em>target</em> (una copia antigua que sincronizamos cada cierto tiempo). La
+            red aprende minimizando el error cuadrático (o de Huber) entre $Q(s,a;\theta)$ e $y$.
+          </p>
+        </div>
+        <p>
+          Ese inocente $\max_{a'}$ esconde un problema serio. Vamos a diseccionarlo, porque es la
+          raíz de la primera —y más importante— mejora.
+        </p>
+
+        <h2 id="sesgo">El sesgo de maximización</h2>
+        <p>
+          Imagina que quieres saber cuánto vale la mejor de diez cajas, pero solo puedes estimar el
+          valor de cada una con un ruido de medición. Si abres todas, miras tus estimaciones y te
+          quedas con la <strong>mayor</strong>, casi seguro que esa caja tuvo <em>suerte</em> en la
+          medición: elegir el máximo selecciona sistemáticamente los errores hacia arriba.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            El operador $\max$ es un <strong>optimista incorregible</strong>. Si tus estimaciones
+            de $Q$ son ruidosas pero <em>insesgadas</em> (a veces se pasan, a veces se quedan
+            cortas), tomar el máximo de ellas ya no es insesgado: tiende a coger justo las que se
+            pasaron. Y en Q-learning esa sobreestimación se <strong>propaga</strong>: un valor
+            inflado en $s'$ infla el objetivo $y$, que infla $Q(s,a)$, que infla el siguiente
+            objetivo… una bola de nieve de optimismo.
+          </p>
+        </div>
+
+        <p>Formalmente, el máximo de variables aleatorias es una función convexa, y por la
+        desigualdad de Jensen su esperanza queda por encima del máximo de las esperanzas:</p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Por qué el máximo sobreestima</div>
+          <p>$$\mathbb{E}\!\left[\max_{a} \hat{Q}(s',a)\right] \;\ge\; \max_{a}\, \mathbb{E}\!\left[\hat{Q}(s',a)\right] \;=\; \max_{a} Q(s',a)$$</p>
+          <p class="math-note">
+            $\hat{Q}(s',a)$ es tu <em>estimación</em> ruidosa del valor real $Q(s',a)$. La igualdad
+            de la derecha vale solo si tus estimaciones son insesgadas. La desigualdad de la
+            izquierda dice que, aun así, el <strong>valor esperado del máximo estimado</strong>
+            supera al máximo verdadero. Es decir: aunque cada $\hat{Q}$ acierte en promedio, su
+            máximo <em>siempre</em> tira hacia arriba. Cuantas más acciones haya y más ruido, peor.
+          </p>
+        </div>
+
+        <p>
+          Este fenómeno se ve nítido en un MDP minúsculo que introdujeron Sutton y Barto. Hay un
+          estado inicial $A$ con dos acciones: <strong>«derecha»</strong> termina el episodio con
+          recompensa $0$, y <strong>«izquierda»</strong> lleva a un estado $B$ del que salen
+          <em>muchas</em> acciones, cada una terminando con una recompensa aleatoria de media
+          $-0{,}1$ y bastante ruido. Como el valor esperado de cualquier acción desde $B$ es
+          negativo, <strong>lo óptimo es ir a la derecha</strong>. Pero Q-learning, engañado por el
+          $\max$ sobre las estimaciones ruidosas de $B$, cree durante mucho tiempo que $B$ es un
+          chollo y elige «izquierda» demasiado a menudo. Lo veremos correr más abajo.
+        </p>
+
+        <h2 id="double">Double DQN: separar elegir de evaluar</h2>
+        <p>
+          La causa del sesgo es que <strong>usamos la misma red para dos cosas a la vez</strong>:
+          para <em>elegir</em> qué acción es la mejor en $s'$ y para <em>evaluar</em> cuánto vale
+          esa elección. Fíjate en que el objetivo de DQN se puede reescribir así, sin cambiar nada:
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ El max, reescrito</div>
+          <p>$$y \;=\; r + \gamma\, Q\!\big(s',\, \underbrace{\arg\max_{a'} Q(s',a';\theta^-)}_{\text{elige}} \,;\, \underbrace{\theta^-}_{\text{evalúa}}\big)$$</p>
+          <p class="math-note">
+            La <strong>misma</strong> red $\theta^-$ decide cuál es la mejor acción y a la vez pone
+            su precio. Si esa red se ha equivocado al alza en una acción concreta, la elige
+            <em>y</em> se cree su valor inflado. Nadie la contradice.
+          </p>
+        </div>
+
+        <p>
+          La idea de <strong>Double DQN</strong> es genial por lo simple: que una red proponga la
+          acción y <em>otra</em> la evalúe. Como en DQN ya tenemos dos redes (la <em>online</em>
+          $\theta$ y la <em>target</em> $\theta^-$), las aprovechamos:
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 El objetivo de Double DQN</div>
+          <p>$$y \;=\; r + \gamma\, Q\!\big(s',\, \underbrace{\arg\max_{a'} Q(s',a';\theta)}_{\text{la }\textit{online}\text{ elige}} \,;\, \underbrace{\theta^-}_{\text{la }\textit{target}\text{ evalúa}}\big)$$</p>
+          <p class="math-note">
+            La red <em>online</em> $\theta$ señala la acción $a^\star = \arg\max_{a'} Q(s',a';\theta)$;
+            la red <em>target</em> $\theta^-$ dice cuánto vale $Q(s',a^\star;\theta^-)$. Como las dos
+            redes cometen errores <strong>distintos</strong> y con ruidos poco correlacionados, es
+            improbable que ambas se equivoquen al alza en la misma acción. El optimismo se desinfla.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Un cambio de una línea</div>
+          <p>
+            En código, pasar de DQN a Double DQN es literalmente cambiar cómo calculas el objetivo:
+            en lugar de tomar el <code>max</code> de la red <em>target</em> sobre $s'$, tomas el
+            <code>argmax</code> de la <em>online</em> y luego indexas la <em>target</em> con él. Sin
+            redes nuevas, sin coste extra apreciable. Lo verás en el ejemplo con PyTorch del final.
+          </p>
+        </div>
+
+        <h2 id="dueling">Dueling: separar «cómo de bueno es el estado» de «qué acción conviene»</h2>
+        <p>
+          En muchos estados <strong>da igual lo que hagas</strong>: si el coche va derecho por una
+          recta vacía, todas las acciones valen casi lo mismo. En otros, la acción es crítica. La
+          red DQN normal tiene que aprender el valor de <em>cada</em> par $(s,a)$ por separado, y
+          malgasta esfuerzo reaprendiendo, para cada acción, cuánto vale el estado.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Descompón el valor de una acción en dos preguntas independientes: <strong>¿cómo de
+            bueno es estar en este estado?</strong> —eso es el <em>valor</em> $V(s)$— y
+            <strong>¿cuánto mejor (o peor) que la media es esta acción concreta?</strong> —eso es la
+            <em>ventaja</em> $A(s,a)$—. Una red <em>dueling</em> tiene dos «cabezas» que estiman
+            cada pregunta por su lado y las recombina. Así el valor del estado se aprende <em>una
+            vez</em> y se comparte entre todas las acciones.
+          </p>
+        </div>
+
+        <p>La relación entre valor, valor-acción y ventaja es una definición, no un misterio:</p>
+        <div class="callout math">
+          <div class="callout-title">➗ Valor, ventaja y su suma</div>
+          <p>$$A^\pi(s,a) \;=\; Q^\pi(s,a) - V^\pi(s) \qquad\Longleftrightarrow\qquad Q^\pi(s,a) \;=\; V^\pi(s) + A^\pi(s,a)$$</p>
+          <p class="math-note">
+            $V^\pi(s)$ es lo que esperas ganar desde $s$ siguiendo la política $\pi$; $A^\pi(s,a)$
+            mide cuánto se desvía la acción $a$ respecto a ese valor medio. Una acción con ventaja
+            positiva es mejor que lo típico en ese estado; con ventaja negativa, peor. La ventaja de
+            la <strong>mejor</strong> acción bajo la política greedy es $0$.
+          </p>
+        </div>
+
+        <p>
+          Aquí surge un problema técnico. Si simplemente hacemos $Q = V + A$ con dos cabezas
+          libres, la red no puede saber <strong>cuánto de $Q$ es $V$ y cuánto es $A$</strong>:
+          podríamos sumar $10$ a todas las salidas de $V$ y restar $10$ a todas las de $A$ y obtener
+          el mismo $Q$. Son <em>no identificables</em>. La solución es anclar la ventaja restándole
+          su media sobre las acciones:
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La combinación dueling</div>
+          <p>$$Q(s,a;\theta) \;=\; V(s;\theta) + \left(A(s,a;\theta) - \frac{1}{|\mathcal{A}|}\sum_{a'} A(s,a';\theta)\right)$$</p>
+          <p class="math-note">
+            $|\mathcal{A}|$ es el número de acciones. Al forzar que la ventaja tenga <strong>media
+            cero</strong>, fijamos la ambigüedad: ahora $V(s;\theta)$ representa de verdad el valor
+            medio del estado y $A$ solo las diferencias relativas. (El artículo original prueba también
+            con restar el $\max$ en vez de la media; la media resulta más estable en la práctica.)
+          </p>
+        </div>
+
+        <figure class="figure">
+          <svg viewBox="0 0 640 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Arquitectura dueling: un tronco compartido que se divide en dos ramas V y A y se recombina en Q">
+            <defs>
+              <marker id="arrow13" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#4f46e5" />
+              </marker>
+            </defs>
+            <!-- estado -->
+            <rect x="20" y="105" width="90" height="50" rx="10" fill="#0ea5e9" />
+            <text x="65" y="135" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">estado $s$</text>
+            <!-- tronco -->
+            <rect x="150" y="100" width="130" height="60" rx="10" fill="#6366f1" />
+            <text x="215" y="126" text-anchor="middle" fill="#fff" font-size="13" font-family="sans-serif" font-weight="700">capas</text>
+            <text x="215" y="144" text-anchor="middle" fill="#fff" font-size="13" font-family="sans-serif" font-weight="700">compartidas</text>
+            <!-- rama V -->
+            <rect x="330" y="40" width="150" height="48" rx="10" fill="#10b981" />
+            <text x="405" y="70" text-anchor="middle" fill="#fff" font-size="14" font-family="sans-serif" font-weight="700">valor  $V(s)$</text>
+            <!-- rama A -->
+            <rect x="330" y="172" width="150" height="48" rx="10" fill="#f59e0b" />
+            <text x="405" y="202" text-anchor="middle" fill="#fff" font-size="14" font-family="sans-serif" font-weight="700">ventaja  $A(s,a)$</text>
+            <!-- Q -->
+            <rect x="530" y="105" width="90" height="50" rx="10" fill="#4f46e5" />
+            <text x="575" y="135" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">$Q(s,a)$</text>
+            <!-- flechas -->
+            <path d="M110,130 L148,130" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow13)" />
+            <path d="M280,120 C305,120 305,66 328,64" fill="none" stroke="#10b981" stroke-width="2.5" marker-end="url(#arrow13)" />
+            <path d="M280,140 C305,140 305,194 328,196" fill="none" stroke="#f59e0b" stroke-width="2.5" marker-end="url(#arrow13)" />
+            <path d="M480,64 C505,64 505,120 528,124" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow13)" />
+            <path d="M480,196 C505,196 505,140 528,136" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow13)" />
+          </svg>
+          <figcaption>La red <em>dueling</em>: un tronco común alimenta dos ramas, $V(s)$ y $A(s,a)$, que se recombinan (restando la media de $A$) para dar $Q(s,a)$.</figcaption>
+        </figure>
+
+        <h2 id="per">Prioritized Experience Replay: aprender de lo que sorprende</h2>
+        <p>
+          DQN reutiliza experiencias pasadas muestreándolas <strong>al azar</strong> de la memoria
+          de repetición (<em>replay buffer</em>). Pero no todas las transiciones enseñan lo mismo.
+          Una en la que el agente predijo el resultado casi perfecto no aporta apenas señal; una en
+          la que se llevó una sorpresa mayúscula contiene mucho por corregir. ¿Por qué darles la
+          misma probabilidad?
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Es como estudiar para un examen repasando <strong>lo que fallas</strong> más que lo que
+            ya dominas. La «sorpresa» de una transición se mide con su <strong>error TD</strong>
+            $\delta$: cuánto se desvió la realidad de lo que la red predijo. Prioritized Experience
+            Replay (PER) muestrea con más frecuencia las transiciones de $|\delta|$ grande, para que
+            el aprendizaje se concentre donde más falta hace.
+          </p>
+        </div>
+
+        <p>Recordemos el error TD, el mismo que aparece dentro de la pérdida de DQN:</p>
+        <div class="callout math">
+          <div class="callout-title">➗ Prioridad a partir del error TD</div>
+          <p>$$\delta_i \;=\; \underbrace{r + \gamma \max_{a'} Q(s',a';\theta^-)}_{\text{objetivo}} \;-\; Q(s,a;\theta), \qquad p_i \;=\; |\delta_i| + \varepsilon$$</p>
+          <p class="math-note">
+            $\delta_i$ es el error TD de la transición $i$; $p_i$ es su <strong>prioridad</strong>,
+            que es simplemente su magnitud. El $\varepsilon &gt; 0$ es una constante pequeña que
+            garantiza que <em>ninguna</em> transición tenga probabilidad cero (si no, una transición
+            con error momentáneamente nulo no volvería a muestrearse nunca).
+          </p>
+        </div>
+
+        <p>
+          Con las prioridades convertimos cada transición en una probabilidad de muestreo. Un
+          exponente $\alpha$ regula <em>cuánta</em> prioridad aplicamos:
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ De prioridad a probabilidad</div>
+          <p>$$P(i) \;=\; \frac{p_i^{\,\alpha}}{\sum_k p_k^{\,\alpha}}$$</p>
+          <p class="math-note">
+            $\alpha \in [0,1]$ interpola entre dos extremos: con $\alpha = 0$ todas las
+            probabilidades son iguales y recuperamos el muestreo <strong>uniforme</strong> de DQN;
+            con $\alpha = 1$ muestreamos en proporción directa al error. Un valor intermedio
+            (típicamente $\alpha \approx 0{,}6$) prioriza sin obsesionarse.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Muestrear sesgado obliga a corregir</div>
+          <p>
+            Hay una trampa. El gradiente de DQN es correcto <em>en esperanza</em> solo si las
+            transiciones se muestrean con la distribución con la que llegaron a la memoria. Al
+            muestrear más las de error alto, cambiamos esa distribución y <strong>sesgamos</strong>
+            la actualización. Para compensarlo, pesamos cada muestra con un <em>peso de muestreo por
+            importancia</em> (<em>importance sampling</em>) que baja la influencia de las
+            transiciones que hemos sobre-muestreado:
+          </p>
+          <p>$$w_i \;=\; \left(\frac{1}{N \cdot P(i)}\right)^{\!\beta}, \qquad \tilde{w}_i \;=\; \frac{w_i}{\max_j w_j}$$</p>
+          <p class="math-note">
+            $N$ es el tamaño de la memoria y $P(i)$ la probabilidad con la que muestreamos esa
+            transición. El exponente $\beta \in [0,1]$ gradúa la corrección: $\beta = 1$ la corrige
+            del todo, $\beta = 0$ no la corrige. En la práctica se <em>anneala</em> $\beta$ desde un
+            valor bajo (p. ej. $0{,}4$) hasta $1$ al final del entrenamiento, cuando la convergencia
+            importa más. Se normaliza por $\max_j w_j$ para que los pesos solo escalen hacia abajo y
+            no disparen la tasa de aprendizaje. Cada pérdida se multiplica por su $\tilde{w}_i$.
+          </p>
+        </div>
+
+        <p>
+          En la implementación eficiente, la memoria se organiza con una <em>sum-tree</em> que
+          permite muestrear proporcionalmente en tiempo $O(\log N)$, y tras cada actualización se
+          refrescan las prioridades de las transiciones usadas con su nuevo $|\delta|$.
+        </p>
+
+        <h2 id="ejemplo">Ejemplo 1: el sesgo de maximización, en vivo</h2>
+        <p>
+          Antes de tocar redes neuronales, veamos el corazón del problema en su forma más pura y
+          tabular. Este experimento reproduce el MDP $A \to B$ que describimos arriba y compara
+          <strong>Q-learning</strong> con <strong>Double Q-learning</strong> (la versión tabular de
+          la misma idea que Double DQN). Medimos con qué frecuencia cada método elige la acción
+          «izquierda» —la mala— desde el estado inicial. Como lo óptimo es ir a la derecha y la
+          exploración es $\varepsilon$-greedy con $\varepsilon = 0{,}1$, un agente perfecto elegiría
+          «izquierda» solo por exploración: un $\varepsilon/2 = 5\%$ de las veces.
+        </p>
+        <p>
+          Todo está <strong>vectorizado con numpy</strong> sobre $2000$ ejecuciones paralelas, así
+          que corre en un par de segundos. Pulsa <strong>▶ Ejecutar</strong>.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">sesgo_maximizacion.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+sesgo_maximizacion.py - El sesgo de maximizacion y como lo corrige Double Q-learning.
+
+Reproduce el experimento clasico (Sutton &amp; Barto, Ejemplo 6.7). Un MDP diminuto:
+  - Estado inicial A con dos acciones: "izquierda" lleva a B (recompensa 0),
+    "derecha" termina el episodio (recompensa 0).
+  - Estado B con N_B acciones; cada una termina con recompensa ~ Normal(-0.1, 1).
+Como la recompensa media en B es NEGATIVA (-0.1), la accion optima desde A es
+"derecha". Pero Q-learning usa max_a Q(B,a) sobre estimaciones ruidosas y las
+sobreestima: cree que B es bueno y elige "izquierda" demasiado a menudo. Double
+Q-learning separa la seleccion y la evaluacion de la accion, y corrige el sesgo.
+
+Todo esta vectorizado sobre RUNS ejecuciones independientes con numpy, asi que
+corre en pocos segundos (tambien en el navegador con Pyodide).
+
+Ejecucion en tu terminal:
+    python code/13-mejoras-dqn/sesgo_maximizacion.py
+"""
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- Parametros del MDP y del aprendizaje ---
+N_B = 10               # numero de acciones en el estado B
+MU, SIGMA = -0.1, 1.0  # recompensa en B ~ Normal(-0.1, 1): en MEDIA es negativa
+ALPHA = 0.1            # tasa de aprendizaje
+EPS = 0.1              # exploracion epsilon-greedy
+GAMMA = 1.0
+RUNS = 2000            # ejecuciones independientes que promediamos
+EPISODES = 300         # episodios por ejecucion
+
+rng = np.random.default_rng(0)
+idx = np.arange(RUNS)  # indice de filas para leer/escribir por-run
+
+
+def eps_greedy(Q):
+    """Accion epsilon-greedy por fila, vectorizada sobre las RUNS ejecuciones."""
+    R, n = Q.shape
+    # desempate aleatorio con ruido minusculo (no altera diferencias reales)
+    greedy = np.argmax(Q + rng.uniform(0, 1e-9, size=(R, n)), axis=1)
+    aleatoria = rng.integers(0, n, size=R)
+    explora = rng.random(R) &lt; EPS
+    return np.where(explora, aleatoria, greedy)
+
+
+def q_learning():
+    """Q-learning tabular. Devuelve el % de veces que elige 'izquierda' por episodio."""
+    QA = np.zeros((RUNS, 2))    # A: 0=izquierda-&gt;B, 1=derecha-&gt;fin
+    QB = np.zeros((RUNS, N_B))  # B: N_B acciones -&gt; fin (recompensa ruidosa)
+    pct_izq = np.zeros(EPISODES)
+    for ep in range(EPISODES):
+        aA = eps_greedy(QA)
+        izq = aA == 0
+        der = ~izq
+        pct_izq[ep] = izq.mean()
+        # "derecha": termina con recompensa 0  -&gt;  objetivo = 0
+        QA[idx[der], 1] += ALPHA * (0.0 - QA[idx[der], 1])
+        # "izquierda": pasa a B (recompensa 0) -&gt;  objetivo = GAMMA * max_a Q(B,a)
+        objetivo = GAMMA * QB.max(axis=1)
+        QA[idx[izq], 0] += ALPHA * (objetivo[izq] - QA[idx[izq], 0])
+        # en B: elegimos accion y terminamos con recompensa ruidosa
+        aB = eps_greedy(QB)
+        r = rng.normal(MU, SIGMA, size=RUNS)
+        nuevo = QB[idx, aB] + ALPHA * (r - QB[idx, aB])
+        QB[idx[izq], aB[izq]] = nuevo[izq]   # solo las runs que fueron a B
+    return pct_izq
+
+
+def bootstrap_doble(Q_sel, Q_eval):
+    """Objetivo Double en B (no terminal): Q_sel ELIGE la accion, Q_eval la EVALUA."""
+    a_star = np.argmax(Q_sel, axis=1)
+    return GAMMA * Q_eval[idx, a_star]
+
+
+def double_q_learning():
+    """Double Q-learning tabular con dos tablas Q1 y Q2."""
+    Q1A = np.zeros((RUNS, 2)); Q2A = np.zeros((RUNS, 2))
+    Q1B = np.zeros((RUNS, N_B)); Q2B = np.zeros((RUNS, N_B))
+    pct_izq = np.zeros(EPISODES)
+    for ep in range(EPISODES):
+        aA = eps_greedy(Q1A + Q2A)   # comportamiento: epsilon-greedy sobre Q1+Q2
+        izq = aA == 0
+        der = ~izq
+        pct_izq[ep] = izq.mean()
+
+        # --- transicion desde A (una moneda por run decide que tabla se actualiza) ---
+        c = rng.random(RUNS) &lt; 0.5       # True -&gt; actualizar Q1 ; False -&gt; Q2
+        tA1 = bootstrap_doble(Q1B, Q2B)  # si toca Q1: selecciona con Q1, evalua con Q2
+        tA2 = bootstrap_doble(Q2B, Q1B)
+        m = c &amp; izq;  Q1A[idx[m], 0] += ALPHA * (tA1[m] - Q1A[idx[m], 0])
+        m = c &amp; der;  Q1A[idx[m], 1] += ALPHA * (0.0    - Q1A[idx[m], 1])
+        m = ~c &amp; izq; Q2A[idx[m], 0] += ALPHA * (tA2[m] - Q2A[idx[m], 0])
+        m = ~c &amp; der; Q2A[idx[m], 1] += ALPHA * (0.0    - Q2A[idx[m], 1])
+
+        # --- transicion desde B (solo runs "izquierda"); es terminal: objetivo = r ---
+        aB = eps_greedy(Q1B + Q2B)
+        r = rng.normal(MU, SIGMA, size=RUNS)
+        c = rng.random(RUNS) &lt; 0.5
+        m = c &amp; izq;  Q1B[idx[m], aB[m]] += ALPHA * (r[m] - Q1B[idx[m], aB[m]])
+        m = ~c &amp; izq; Q2B[idx[m], aB[m]] += ALPHA * (r[m] - Q2B[idx[m], aB[m]])
+    return pct_izq
+
+
+print(f"Entrenando: {RUNS} ejecuciones x {EPISODES} episodios (vectorizado)...")
+ql = q_learning()
+dq = double_q_learning()
+optimo = EPS / 2  # con epsilon-greedy y 2 acciones, elegir la mala baja como mucho a eps/2
+
+print(f"Q-learning        -&gt; % 'izquierda': inicio={100*ql[:10].mean():5.1f}%  final={100*ql[-50:].mean():4.1f}%")
+print(f"Double Q-learning -&gt; % 'izquierda': inicio={100*dq[:10].mean():5.1f}%  final={100*dq[-50:].mean():4.1f}%")
+print(f"Optimo (eps/2)    -&gt; {100*optimo:.1f}%")
+
+plt.figure(figsize=(8, 4.5))
+plt.plot(100 * ql, label="Q-learning", color="#dc2626", lw=2)
+plt.plot(100 * dq, label="Double Q-learning", color="#4f46e5", lw=2)
+plt.axhline(100 * optimo, ls="--", color="#4a5568", lw=1, label="optimo (eps/2 = 5%)")
+plt.xlabel("Episodio")
+plt.ylabel("% de acciones 'izquierda' desde A")
+plt.title("Sesgo de maximizacion: Q-learning vs Double Q-learning")
+plt.legend()
+plt.grid(alpha=0.25)
+plt.tight_layout()
+plt.show()
+</code></pre>
+        </div>
+
+        <p>
+          Verás que <strong>Q-learning</strong> arranca eligiendo «izquierda» en una fracción muy
+          alta de episodios y, aunque va bajando, tarda muchísimo en acercarse al $5\%$ óptimo:
+          el máximo sobre las estimaciones ruidosas de $B$ lo mantiene engañado. <strong>Double
+          Q-learning</strong>, en cambio, baja hacia el $5\%$ mucho antes, porque separar la
+          selección de la evaluación desactiva el optimismo. La curva roja por encima de la azul
+          <em>es</em> el sesgo de maximización hecho gráfica.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Sube <code>N_B</code> de $10$ a $50$: con más acciones ruidosas en $B$, el $\max$ tiene
+            más candidatos entre los que «elegir suerte» y el sesgo de Q-learning empeora. O sube
+            <code>SIGMA</code>: más ruido, más sobreestimación. ¿Cuánto le cuesta a Double
+            Q-learning en comparación?
+          </p>
+        </div>
+
+        <h2 id="pytorch">Ejemplo 2: Double + Dueling en CartPole (PyTorch)</h2>
+        <p>
+          Ahora llevamos dos de las mejoras a una red neuronal de verdad sobre
+          <strong>CartPole-v1</strong>. Este ejemplo combina el <strong>objetivo de Double DQN</strong>
+          (la <em>online</em> elige, la <em>target</em> evalúa) con la <strong>arquitectura
+          dueling</strong> de dos ramas $V$ y $A$. Añadir PER encima sería el siguiente paso: solo
+          hay que cambiar el <em>replay buffer</em> uniforme por uno con prioridades.
+        </p>
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Este ejemplo se ejecuta en tu terminal</div>
+          <p>
+            Usa <code>torch</code> y <code>gymnasium</code>, demasiado pesados para el navegador. No
+            tiene botón «Ejecutar»: cópialo o descárgalo y lánzalo en tu máquina con las
+            instrucciones de más abajo.
+          </p>
+        </div>
+
+        <div class="code-example">
+          <div class="code-header">
+            <span class="file-name">double_dueling_torch.py</span>
+            <div class="code-actions">
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+double_dueling_torch.py - DQN con Double Q-learning y arquitectura Dueling sobre
+CartPole-v1 (PyTorch + Gymnasium).
+
+SOLO TERMINAL: este ejemplo usa torch y gymnasium, demasiado pesados para el
+navegador. Reune dos mejoras de DQN del capitulo 13:
+
+  * Double DQN: la red 'online' ELIGE la mejor accion en s' (argmax) y la red
+    'target' la EVALUA. Asi se rompe el sesgo de sobreestimacion del max.
+        y = r + gamma * Q_target(s', argmax_a Q_online(s', a))
+
+  * Dueling: la red se separa en dos ramas, V(s) (como de bueno es el estado) y
+    A(s,a) (la ventaja de cada accion sobre la media), y las recombina como
+        Q(s,a) = V(s) + (A(s,a) - media_a A(s,a))
+
+Anadir Prioritized Experience Replay (PER) es una extension natural: bastaria
+sustituir el ReplayBuffer uniforme por uno que muestree segun |error TD|.
+
+Requisitos:
+    pip install torch gymnasium
+Ejecucion:
+    python code/13-mejoras-dqn/double_dueling_torch.py
+"""
+import random
+from collections import deque, namedtuple
+
+import numpy as np
+import gymnasium as gym
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# --- Reproducibilidad ---
+SEED = 0
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+
+Transicion = namedtuple("Transicion", ["s", "a", "r", "s2", "fin"])
+
+
+class ReplayBuffer:
+    """Memoria de repeticion uniforme (muestreo al azar sin prioridad)."""
+
+    def __init__(self, cap=50_000):
+        self.buf = deque(maxlen=cap)
+
+    def push(self, *args):
+        self.buf.append(Transicion(*args))
+
+    def sample(self, n):
+        lote = random.sample(self.buf, n)
+        s = torch.as_tensor(np.array([t.s for t in lote]), dtype=torch.float32)
+        a = torch.as_tensor([t.a for t in lote], dtype=torch.int64).unsqueeze(1)
+        r = torch.as_tensor([t.r for t in lote], dtype=torch.float32).unsqueeze(1)
+        s2 = torch.as_tensor(np.array([t.s2 for t in lote]), dtype=torch.float32)
+        fin = torch.as_tensor([t.fin for t in lote], dtype=torch.float32).unsqueeze(1)
+        return s, a, r, s2, fin
+
+    def __len__(self):
+        return len(self.buf)
+
+
+class DuelingQNet(nn.Module):
+    """Red Dueling: Q(s,a) = V(s) + (A(s,a) - media_a A(s,a))."""
+
+    def __init__(self, n_obs, n_acc, oculto=128):
+        super().__init__()
+        self.cuerpo = nn.Sequential(
+            nn.Linear(n_obs, oculto), nn.ReLU(),
+            nn.Linear(oculto, oculto), nn.ReLU(),
+        )
+        self.valor = nn.Linear(oculto, 1)        # rama V(s)   -&gt; escalar
+        self.ventaja = nn.Linear(oculto, n_acc)  # rama A(s,a) -&gt; una por accion
+
+    def forward(self, x):
+        h = self.cuerpo(x)
+        v = self.valor(h)                        # (batch, 1)
+        a = self.ventaja(h)                      # (batch, n_acc)
+        # restar la media de la ventaja fija la ambiguedad V/A y estabiliza
+        return v + (a - a.mean(dim=1, keepdim=True))
+
+
+def entrenar(episodios=400):
+    env = gym.make("CartPole-v1")
+    n_obs = env.observation_space.shape[0]
+    n_acc = env.action_space.n
+
+    online = DuelingQNet(n_obs, n_acc)
+    target = DuelingQNet(n_obs, n_acc)
+    target.load_state_dict(online.state_dict())
+    opt = torch.optim.Adam(online.parameters(), lr=1e-3)
+
+    buffer = ReplayBuffer()
+    GAMMA = 0.99
+    BATCH = 64
+    EPS_INI, EPS_FIN, EPS_DECAY = 1.0, 0.02, 3000.0
+    SYNC_CADA = 500          # pasos entre sincronizaciones de la red target
+    INICIO_APRENDER = 1000   # transiciones minimas antes de entrenar
+    pasos = 0
+    historial = deque(maxlen=20)
+
+    for ep in range(1, episodios + 1):
+        s, _ = env.reset(seed=SEED + ep)
+        total, done = 0.0, False
+        while not done:
+            eps = EPS_FIN + (EPS_INI - EPS_FIN) * np.exp(-pasos / EPS_DECAY)
+            if random.random() &lt; eps:
+                a = env.action_space.sample()
+            else:
+                with torch.no_grad():
+                    q = online(torch.as_tensor(s, dtype=torch.float32).unsqueeze(0))
+                    a = int(q.argmax(dim=1).item())
+
+            s2, r, term, trunc, _ = env.step(a)
+            done = term or trunc
+            # 'term' (no 'trunc') marca el fin real del episodio para el bootstrap
+            buffer.push(s, a, r, s2, float(term))
+            s = s2
+            total += r
+            pasos += 1
+
+            # --- paso de aprendizaje ---
+            if len(buffer) &gt;= INICIO_APRENDER:
+                bs, ba, br, bs2, bfin = buffer.sample(BATCH)
+                q_sa = online(bs).gather(1, ba)                 # Q(s,a) actual
+                with torch.no_grad():
+                    # DOUBLE DQN: online elige la accion, target la evalua
+                    a_star = online(bs2).argmax(dim=1, keepdim=True)
+                    q_next = target(bs2).gather(1, a_star)
+                    y = br + GAMMA * (1.0 - bfin) * q_next
+                perdida = F.smooth_l1_loss(q_sa, y)
+                opt.zero_grad()
+                perdida.backward()
+                nn.utils.clip_grad_norm_(online.parameters(), 10.0)
+                opt.step()
+
+            if pasos % SYNC_CADA == 0:
+                target.load_state_dict(online.state_dict())
+
+        historial.append(total)
+        if ep % 20 == 0:
+            media = np.mean(historial)
+            print(f"Episodio {ep:3d} | recompensa media (ult. 20) = {media:6.1f} | eps = {eps:.3f}")
+
+    env.close()
+    print("Listo. CartPole-v1 se considera resuelto con recompensa media &gt;= 475.")
+
+
+if __name__ == "__main__":
+    entrenar()
+</code></pre>
+        </div>
+
+        <p>
+          Fíjate en el bloque de aprendizaje: <code>a_star = online(bs2).argmax(...)</code> usa la
+          red <em>online</em> para <strong>elegir</strong>, y <code>target(bs2).gather(1, a_star)</code>
+          usa la <em>target</em> para <strong>evaluar</strong>. Eso es Double DQN, exactamente la
+          fórmula del recuadro morado. Y en <code>DuelingQNet.forward</code>, la línea
+          <code>v + (a - a.mean(...))</code> es la combinación dueling con media cero. Dos mejoras,
+          apenas un puñado de líneas.
+        </p>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          El primer ejemplo también corre fuera del navegador; el segundo <em>solo</em> corre aquí.
+          Descarga los archivos (o cópialos) y lánzalos así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) entorno virtual e instalación de dependencias</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+<span class="prompt">$</span> pip install -r requirements.txt   <span class="comment"># numpy, matplotlib, torch, gymnasium</span>
+
+<span class="comment"># 2) el sesgo de maximización (numpy, unos segundos, abre una gráfica)</span>
+<span class="prompt">$</span> python code/13-mejoras-dqn/sesgo_maximizacion.py
+<span class="comment">Entrenando: 2000 ejecuciones x 300 episodios (vectorizado)...
+Q-learning        -> % 'izquierda': inicio= 69.4%  final=12.4%
+Double Q-learning -> % 'izquierda': inicio= 49.2%  final= 7.1%
+Optimo (eps/2)    -> 5.0%</span>
+
+<span class="comment"># 3) Double + Dueling sobre CartPole (torch, unos minutos en CPU)</span>
+<span class="prompt">$</span> python code/13-mejoras-dqn/double_dueling_torch.py
+<span class="comment"># La recompensa media sube desde ~20 hasta acercarse a 500
+# (el tope de CartPole-v1) en unos cientos de episodios.</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Como en todo el manual, los ejemplos con <code>torch</code> o <code>gymnasium</code>
+          son demasiado pesados para el navegador: el intérprete de Pyodide no los incluye. Por eso
+          el segundo ejemplo se entrega como archivo <code>.py</code> listo para tu terminal.
+        </p>
+
+        <h2 id="rainbow">Las piezas juntas: hacia Rainbow</h2>
+        <p>
+          Ninguna de estas mejoras compite con las otras: son <strong>ortogonales</strong> y se
+          suman. El famoso agente <em>Rainbow</em> (2017) combinó seis extensiones de DQN en un solo
+          algoritmo, y las tres de este capítulo están entre ellas. Este es el mapa:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Mejora</th><th>Qué ataca</th><th>Cambio esencial</th></tr></thead>
+            <tbody>
+              <tr><td>Double DQN</td><td>Sobreestimación por el $\max$</td><td>La <em>online</em> elige, la <em>target</em> evalúa</td></tr>
+              <tr><td>Dueling</td><td>Aprender $V$ repetido por acción</td><td>Dos ramas: $Q = V + (A - \bar{A})$</td></tr>
+              <tr><td>Prioritized Replay</td><td>Muestreo ciego de experiencias</td><td>Muestrear $\propto |\delta|^\alpha$, corregir con $w_i$</td></tr>
+              <tr><td>Multi-step ($n$-step)</td><td>Propagación lenta de recompensa</td><td>Objetivo con $n$ recompensas reales</td></tr>
+              <tr><td>Distributional (C51)</td><td>Solo estimar la media de $Q$</td><td>Aprender la <em>distribución</em> del retorno</td></tr>
+              <tr><td>Noisy Nets</td><td>Exploración con $\varepsilon$ fijo</td><td>Ruido aprendible en los pesos</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>El operador $\max$ de Q-learning <strong>sobreestima</strong> los valores cuando las
+            estimaciones son ruidosas (desigualdad de Jensen), y el error se propaga por
+            <em>bootstrapping</em>.</li>
+            <li><strong>Double DQN</strong> lo corrige separando <em>elegir</em> de <em>evaluar</em>:
+            $y = r + \gamma\, Q(s', \arg\max_{a'} Q(s',a';\theta); \theta^-)$. Cambio de una línea.</li>
+            <li><strong>Dueling</strong> descompone $Q(s,a) = V(s) + (A(s,a) - \bar{A}(s))$, aprende
+            el valor del estado una sola vez y comparte esfuerzo entre acciones.</li>
+            <li><strong>Prioritized Experience Replay</strong> muestrea $\propto p_i^\alpha$ con
+            $p_i \approx |\delta_i|$, y corrige el sesgo resultante con pesos de importancia
+            $w_i = (N\,P(i))^{-\beta}$.</li>
+            <li>Son mejoras <strong>ortogonales</strong>: combinadas dan agentes como <em>Rainbow</em>.</li>
+          </ul>
+        </div>
+
+        <p>
+          Con esto cerramos la familia de métodos basados en <strong>valor</strong>: hemos ido de la
+          tabla $Q$ a redes profundas y a un DQN robusto. Pero todos comparten una limitación —
+          aprenden $Q$ y <em>derivan</em> la política del $\arg\max$, lo que complica las acciones
+          continuas y las políticas estocásticas. En el <a href="14-policy-gradient-reinforce.html">capítulo 14</a>
+          damos un giro: en lugar de aprender valores, optimizaremos <strong>directamente la
+          política</strong> por ascenso de gradiente. Empieza así la Parte 3.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

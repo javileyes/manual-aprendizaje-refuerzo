@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>18. RL basado en modelo: de Dyna-Q a MuZero · Manual de RL</title>
+  <meta name="description" content="Aprender o usar un modelo del entorno para planificar y ganar eficiencia de datos: la arquitectura Dyna, Dyna-Q en un laberinto, la búsqueda en árbol MCTS, AlphaZero y MuZero." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="18">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 4 · Capítulo 18</span>
+        <h1>RL basado en modelo: de Dyna-Q a MuZero</h1>
+        <p class="lead">
+          Hasta ahora casi todos nuestros agentes han aprendido <strong>sin modelo</strong>
+          (<em>model-free</em>): probando en el mundo real y ajustando valores o políticas a partir
+          de lo que ocurría. Funciona, pero es <strong>caro en datos</strong>. En este capítulo damos
+          un giro: dejamos que el agente construya (o aprenda) un <strong>modelo del entorno</strong>
+          y <strong>planifique</strong> con él —«practique en su cabeza»— para exprimir muchísimo más
+          cada experiencia real. Recorreremos el camino desde <strong>Dyna-Q</strong>, que entrelaza
+          aprender y planificar, hasta <strong>MuZero</strong>, que aprende su propio modelo y planifica
+          en un espacio latente sin conocer siquiera las reglas del juego.
+        </p>
+
+        <h2 id="sin-y-con-modelo">Sin modelo y con modelo: dos formas de aprender</h2>
+        <p>
+          Un algoritmo <strong>sin modelo</strong> como <a href="09-q-learning.html">Q-learning</a> o
+          <a href="12-dqn.html">DQN</a> nunca se pregunta «¿qué pasaría si hago esto?». Solo actúa,
+          recoge la recompensa real y corrige. No sabe cómo funciona el mundo; se limita a memorizar
+          <em>qué acciones han salido bien</em>. Un algoritmo <strong>basado en modelo</strong>
+          (<em>model-based</em>) hace algo distinto: aprende —o ya tiene— una descripción de la
+          <strong>dinámica</strong> del entorno y la usa para <strong>planificar</strong> antes de
+          decidir.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Piensa en dos ajedrecistas. El primero solo ha memorizado, tras miles de partidas, qué
+            jugadas suelen funcionar en cada posición; juega «por instinto». El segundo, además,
+            <strong>imagina</strong> jugadas en su cabeza: «si muevo aquí, mi rival responderá allí, y
+            entonces…». Ese segundo jugador <em>planifica</em> usando un modelo del juego. Con la misma
+            experiencia real, aprende mucho más rápido, porque cada partida jugada le sirve para
+            <strong>simular</strong> muchas más en su mente. El RL basado en modelo persigue exactamente
+            esa ventaja: <strong>eficiencia de datos</strong>.
+          </p>
+        </div>
+
+        <p>
+          Formalicemos qué es un <strong>modelo</strong>. En un <a href="03-mdp.html">MDP</a>, la
+          dinámica del entorno se resume en la probabilidad de que, tomando la acción $a$ en el estado
+          $s$, acabemos en $s'$ recibiendo la recompensa $r$:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Qué es un modelo del entorno</div>
+          <p>$$p(s', r \mid s, a) = \Pr\{\,S_{t+1} = s',\, R_{t+1} = r \mid S_t = s,\, A_t = a\,\}$$</p>
+          <p class="math-note">
+            Un <strong>modelo</strong> es cualquier cosa que nos permita <em>responder</em> a esta
+            pregunta: dado $(s, a)$, ¿qué $(s', r)$ cabe esperar? Distinguimos dos tipos. Un modelo
+            <strong>de distribución</strong> devuelve las probabilidades completas $p(s', r \mid s, a)$.
+            Un modelo <strong>de muestreo</strong> (más barato) solo devuelve una <em>muestra</em>
+            $(s', r)$ como haría el entorno real. Con cualquiera de los dos podemos generar experiencia
+            <strong>simulada</strong> sin tocar el mundo. En el laberinto de más abajo, como el entorno
+            es <strong>determinista</strong>, el modelo se reduce a una tabla $(s, a) \mapsto (r, s')$.
+          </p>
+        </div>
+
+        <p>
+          Con esta pieza sobre la mesa aparecen dos verbos que conviene no confundir, porque son el
+          corazón de todo el capítulo:
+        </p>
+        <ul>
+          <li><strong>Aprender</strong> (<em>learning</em>): mejorar la política o los valores usando
+            experiencia <strong>real</strong>, la que produce el entorno.</li>
+          <li><strong>Planificar</strong> (<em>planning</em>): mejorar la política o los valores usando
+            experiencia <strong>simulada</strong>, la que produce el modelo.</li>
+        </ul>
+        <p>
+          Lo bonito es que ambos comparten la misma maquinaria interna. La
+          <a href="05-programacion-dinamica.html">programación dinámica</a> del capítulo 5 ya era
+          <em>planificación</em> pura: mejorábamos $V$ y $\pi$ barriendo un modelo <strong>conocido</strong>.
+          Q-learning era <em>aprendizaje</em> puro. Lo que viene ahora es <strong>mezclar los dos</strong>
+          en un mismo agente.
+        </p>
+
+        <h2 id="dyna">Dyna: entrelazar aprender y planificar</h2>
+        <p>
+          La arquitectura <strong>Dyna</strong> de Richard Sutton (1990) es la forma más limpia de
+          combinar ambos mundos. La idea es que cada trozo de experiencia real hace un
+          <strong>doble trabajo</strong>:
+        </p>
+        <ol>
+          <li>Sirve para el <strong>aprendizaje directo</strong>: una actualización de $Q$ como la de
+            Q-learning, con la transición real.</li>
+          <li>Sirve para <strong>aprender el modelo</strong>: registramos qué $(r, s')$ produjo ese
+            $(s, a)$, para poder revivirlo después.</li>
+        </ol>
+        <p>
+          Y entre paso y paso real, el agente hace además $n$ pasos de <strong>planificación</strong>:
+          muestrea transiciones del modelo aprendido y aplica sobre ellas exactamente la misma
+          actualización de $Q$. Es como si, tras cada jugada real, el agente cerrara los ojos y repasara
+          $n$ jugadas imaginadas. La información de una recompensa lejana, en lugar de propagarse
+          hacia atrás <em>un</em> estado por episodio, se difunde por toda la tabla en un instante.
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="0 0 660 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diagrama de la arquitectura Dyna: la experiencia real alimenta el aprendizaje directo y el modelo; el modelo genera experiencia simulada para planificar.">
+            <defs>
+              <marker id="arrowD" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#4f46e5" />
+              </marker>
+              <marker id="arrowG" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#059669" />
+              </marker>
+            </defs>
+            <!-- Cajas -->
+            <rect x="240" y="18" width="180" height="52" rx="12" fill="#4f46e5" />
+            <text x="330" y="42" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">Política / valor</text>
+            <text x="330" y="60" text-anchor="middle" fill="#dfe3ff" font-size="13" font-family="sans-serif">Q(s, a)</text>
+
+            <rect x="40" y="140" width="180" height="52" rx="12" fill="#0ea5e9" />
+            <text x="130" y="164" text-anchor="middle" fill="#fff" font-size="14" font-family="sans-serif" font-weight="700">Entorno real</text>
+            <text x="130" y="182" text-anchor="middle" fill="#e0f4ff" font-size="12.5" font-family="sans-serif">experiencia (s,a,r,s′)</text>
+
+            <rect x="440" y="140" width="180" height="52" rx="12" fill="#059669" />
+            <text x="530" y="164" text-anchor="middle" fill="#fff" font-size="14" font-family="sans-serif" font-weight="700">Modelo</text>
+            <text x="530" y="182" text-anchor="middle" fill="#dcfce7" font-size="12.5" font-family="sans-serif">(s,a) → (r, s′)</text>
+
+            <rect x="440" y="250" width="180" height="46" rx="12" fill="#10b981" opacity="0.85" />
+            <text x="530" y="278" text-anchor="middle" fill="#fff" font-size="13.5" font-family="sans-serif" font-weight="700">Experiencia simulada</text>
+
+            <!-- Flechas -->
+            <!-- actuar: politica -> entorno -->
+            <path d="M240,52 C150,60 130,100 130,138" fill="none" stroke="#4f46e5" stroke-width="2.2" marker-end="url(#arrowD)" />
+            <text x="150" y="104" text-anchor="middle" fill="#4a5568" font-size="12.5" font-family="sans-serif">actuar</text>
+            <!-- aprendizaje directo: entorno -> politica -->
+            <path d="M170,138 C210,96 250,84 288,70" fill="none" stroke="#4f46e5" stroke-width="2.2" marker-end="url(#arrowD)" />
+            <text x="238" y="120" text-anchor="middle" fill="#4a5568" font-size="12.5" font-family="sans-serif">aprendizaje directo</text>
+            <!-- aprender modelo: entorno -> modelo -->
+            <path d="M220,166 C320,166 360,166 438,166" fill="none" stroke="#059669" stroke-width="2.2" marker-end="url(#arrowG)" />
+            <text x="330" y="156" text-anchor="middle" fill="#4a5568" font-size="12.5" font-family="sans-serif">aprender modelo</text>
+            <!-- modelo -> experiencia simulada -->
+            <path d="M530,192 C530,212 530,222 530,248" fill="none" stroke="#059669" stroke-width="2.2" marker-end="url(#arrowG)" />
+            <!-- experiencia simulada -> politica (planificacion) -->
+            <path d="M530,250 C530,150 480,90 422,58" fill="none" stroke="#059669" stroke-width="2.2" stroke-dasharray="6 4" marker-end="url(#arrowG)" />
+            <text x="470" y="235" text-anchor="middle" fill="#4a5568" font-size="12.5" font-family="sans-serif">planificación (×n)</text>
+          </svg>
+          <figcaption>
+            La arquitectura Dyna. La experiencia real (azul) actualiza $Q$ directamente y, a la vez,
+            afina el modelo (verde). El modelo genera experiencia simulada con la que se hacen $n$
+            actualizaciones más de $Q$ por cada paso real. Aprender y planificar comparten la misma regla.
+          </figcaption>
+        </figure>
+
+        <h2 id="algoritmo">El algoritmo Dyna-Q</h2>
+        <p>
+          Cuando el aprendizaje directo y la planificación son ambos <strong>Q-learning</strong>, la
+          arquitectura Dyna recibe el nombre de <strong>Dyna-Q</strong>. Recordemos la actualización de
+          Q-learning del <a href="09-q-learning.html">capítulo 9</a>, que aplicaremos tanto a las
+          transiciones reales como a las imaginadas:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La regla de actualización (real e imaginada)</div>
+          <p>$$Q(S, A) \leftarrow Q(S, A) + \alpha\,\big[\,\underbrace{R + \gamma\,\max_{a} Q(S', a)}_{\text{objetivo}} - Q(S, A)\,\big]$$</p>
+          <p class="math-note">
+            Donde $Q(s, a)$ es el valor estimado del par estado-acción; $\alpha \in (0, 1]$ es la
+            <strong>tasa de aprendizaje</strong>; $\gamma \in [0, 1]$ el <strong>factor de descuento</strong>;
+            $R$ la recompensa observada (real o recordada por el modelo); y $S'$ el estado siguiente. El
+            $\max_a$ hace que sea <strong>off-policy</strong>: apuntamos siempre al mejor futuro posible.
+            Si $S'$ es terminal, tomamos $Q(S', \cdot) = 0$ y el objetivo se reduce a $R$. La clave de
+            Dyna-Q es que <em>esta misma línea</em> se ejecuta con experiencia real y, $n$ veces más, con
+            experiencia que fabrica el modelo.
+          </p>
+        </div>
+
+        <p>
+          El modelo, en el caso determinista de nuestro laberinto, es una simple tabla que memoriza el
+          resultado de cada par visitado:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El modelo tabular (entorno determinista)</div>
+          <p>$$\text{Modelo}(S, A) \leftarrow (R,\, S')$$</p>
+          <p class="math-note">
+            Cada vez que observamos una transición real, guardamos qué recompensa $R$ y qué estado
+            siguiente $S'$ produjo el par $(S, A)$. En un entorno determinista esto basta: la próxima
+            vez que «imaginemos» $(S, A)$, el modelo devolverá exactamente ese $(R, S')$. Para entornos
+            estocásticos habría que guardar estadísticas o contar frecuencias, pero la idea es la misma.
+          </p>
+        </div>
+
+        <p>
+          Con las dos piezas listas, el algoritmo completo cabe en una lista. Fíjate en el bucle interior
+          de planificación: es donde Dyna-Q gasta cómputo <em>extra</em> a cambio de <em>ahorrar datos
+          reales</em>.
+        </p>
+        <ol>
+          <li>Inicializa $Q(s, a) = 0$ para todo $s, a$, y un modelo vacío.</li>
+          <li>Para cada episodio, partiendo del estado inicial $S$, repite hasta llegar a la meta:
+            <ul>
+              <li>Elige $A$ con una política <strong>$\varepsilon$-greedy</strong> sobre $Q$.</li>
+              <li>Ejecuta $A$ en el entorno <strong>real</strong>; observa $R$ y $S'$.</li>
+              <li><strong>Aprendizaje directo:</strong> $Q(S, A) \leftarrow Q(S, A) + \alpha\,[R + \gamma \max_a Q(S', a) - Q(S, A)]$.</li>
+              <li><strong>Aprende el modelo:</strong> $\text{Modelo}(S, A) \leftarrow (R, S')$.</li>
+              <li><strong>Planifica $n$ veces</strong> (experiencia imaginada):
+                <ul>
+                  <li>Muestrea un par $(\bar S, \bar A)$ ya visitado.</li>
+                  <li>Recupera $(\bar R, \bar S') = \text{Modelo}(\bar S, \bar A)$.</li>
+                  <li>$Q(\bar S, \bar A) \leftarrow Q(\bar S, \bar A) + \alpha\,[\bar R + \gamma \max_a Q(\bar S', a) - Q(\bar S, \bar A)]$.</li>
+                </ul>
+              </li>
+              <li>Avanza: $S \leftarrow S'$.</li>
+            </ul>
+          </li>
+        </ol>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La idea en una frase</div>
+          <p>
+            Con $n = 0$, Dyna-Q <strong>es</strong> Q-learning: nada de planificación. Cada $n$ que
+            añadimos son $n$ actualizaciones extra por paso real, gratis en cuanto a interacción con el
+            mundo. Cuando esos repasos imaginados propagan una recompensa recién descubierta por toda la
+            tabla, el agente aprende un buen camino en <strong>un puñado de episodios</strong> en vez de
+            decenas. Cambiamos <strong>datos reales</strong> (caros) por <strong>cómputo</strong> (barato).
+          </p>
+        </div>
+
+        <h2 id="ejemplo">Dyna-Q en un laberinto (código)</h2>
+        <p>
+          Vamos a verlo con el laberinto clásico de Sutton &amp; Barto: una rejilla de 6×9 con siete
+          paredes. La salida <strong>S</strong> está a la izquierda y la meta <strong>G</strong> arriba a
+          la derecha; el camino óptimo tiene 14 pasos. Todas las transiciones dan recompensa 0 salvo
+          llegar a la meta, que da $+1$. Entrenaremos <strong>tres agentes idénticos</strong> salvo por el
+          número de pasos de planificación: $n = 0$ (Q-learning puro), $n = 5$ y $n = 50$. Mediremos
+          cuántos <strong>pasos reales</strong> necesita cada uno por episodio y lo promediaremos sobre
+          varias semillas para que la curva salga limpia.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">dyna_q.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+Dyna-Q en un laberinto: planificar "en la cabeza" para gastar menos datos.
+
+Implementa a mano, con solo numpy, el clasico "Dyna maze" de Sutton &amp; Barto
+(rejilla de 6x9 con paredes) y entrena tres agentes que comparten EXACTAMENTE
+el mismo bucle de Q-learning real, pero difieren en cuantos pasos de
+planificacion imaginada n hacen tras cada paso real:
+
+    n = 0   -&gt; Q-learning puro (sin modelo, sin planificacion)
+    n = 5   -&gt; Dyna-Q con 5 pasos de planificacion por paso real
+    n = 50  -&gt; Dyna-Q con 50 pasos de planificacion por paso real
+
+Cada agente aprende un modelo tabular del entorno (que recompensa y a que
+estado lleva cada par estado-accion visitado) y, entre paso y paso real,
+repite n transiciones muestreadas de ese modelo para propagar el valor mucho
+mas rapido. El resultado: Dyna-Q necesita muchisimos menos EPISODIOS REALES
+para resolver el laberinto.
+
+Al terminar imprime, para cada n, los pasos del primer episodio y la media de
+pasos de los ultimos episodios, y muestra una grafica con los pasos por
+episodio (promediados sobre varias semillas). Se ve que n=50 cae al camino
+casi optimo en apenas unos episodios, mientras que n=0 tarda decenas.
+
+Como ejecutarlo:
+    pip install -r requirements.txt
+    python code/18-model-based/dyna_q.py
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+class DynaMaze:
+    """Laberinto de Sutton &amp; Barto: rejilla de 6 filas x 9 columnas.
+
+    La salida (S) esta en (2, 0) y la meta (G) en (0, 8). Hay siete paredes
+    que bloquean el paso. Chocar contra una pared o contra el borde te deja
+    donde estabas. Todas las transiciones dan recompensa 0 salvo llegar a la
+    meta, que da +1 y termina el episodio. El camino optimo tiene 14 pasos.
+
+    Acciones: 0=arriba, 1=derecha, 2=abajo, 3=izquierda.
+    """
+
+    def __init__(self):
+        self.filas = 6
+        self.columnas = 9
+        self.n_estados = self.filas * self.columnas
+        self.n_acciones = 4
+        self.inicio = (2, 0)
+        self.meta = (0, 8)
+        self.paredes = {(1, 2), (2, 2), (3, 2), (4, 5), (0, 7), (1, 7), (2, 7)}
+        self.pos = self.inicio
+
+    def id_estado(self, fila, col):
+        return fila * self.columnas + col
+
+    def reset(self):
+        self.pos = self.inicio
+        return self.id_estado(*self.pos)
+
+    def step(self, accion):
+        """Aplica una accion y devuelve (estado_siguiente, recompensa, fin)."""
+        fila, col = self.pos
+        nf, nc = fila, col
+        if accion == 0:      # arriba
+            nf = fila - 1
+        elif accion == 1:    # derecha
+            nc = col + 1
+        elif accion == 2:    # abajo
+            nf = fila + 1
+        elif accion == 3:    # izquierda
+            nc = col - 1
+
+        # Si nos salimos del tablero o chocamos con una pared, no nos movemos.
+        fuera = nf &lt; 0 or nf &gt;= self.filas or nc &lt; 0 or nc &gt;= self.columnas
+        if fuera or (nf, nc) in self.paredes:
+            nf, nc = fila, col
+
+        self.pos = (nf, nc)
+        if self.pos == self.meta:
+            return self.id_estado(nf, nc), 1.0, True
+        return self.id_estado(nf, nc), 0.0, False
+
+
+def epsilon_greedy(Q, estado, epsilon, rng):
+    """Elige una accion epsilon-greedy con desempate aleatorio."""
+    if rng.random() &lt; epsilon:
+        return int(rng.integers(Q.shape[1]))
+    valores = Q[estado]
+    optimas = np.flatnonzero(valores == valores.max())
+    return int(rng.choice(optimas))
+
+
+def dyna_q(env, n_planificacion, n_episodios, alpha=0.1, gamma=0.95,
+           epsilon=0.1, max_pasos=5000, semilla=0):
+    """Entrena Dyna-Q y devuelve los pasos usados en cada episodio.
+
+    Con n_planificacion=0 esto es exactamente Q-learning tabular. Con n&gt;0,
+    tras cada transicion real se aprende el modelo y se hacen n actualizaciones
+    de Q sobre transiciones imaginadas (muestreadas de pares ya visitados).
+    """
+    rng = np.random.default_rng(semilla)
+    Q = np.zeros((env.n_estados, env.n_acciones))
+
+    # Modelo aprendido: (estado, accion) -&gt; (recompensa, estado_siguiente).
+    modelo = {}
+    visitados = []            # lista de pares (s, a) ya observados (sin repetir)
+
+    pasos_por_episodio = np.zeros(n_episodios, dtype=int)
+
+    for ep in range(n_episodios):
+        s = env.reset()
+        pasos = 0
+        for _ in range(max_pasos):
+            a = epsilon_greedy(Q, s, epsilon, rng)
+            s2, r, fin = env.step(a)
+
+            # --- 1) Aprendizaje directo (Q-learning con la experiencia real) ---
+            # Q[meta] se queda en 0 (estado terminal), asi que el bootstrap
+            # r + gamma * max Q[s2] vale r al llegar a la meta.
+            Q[s, a] += alpha * (r + gamma * Q[s2].max() - Q[s, a])
+
+            # --- 2) Aprendizaje del modelo (entorno determinista) ---
+            if (s, a) not in modelo:
+                visitados.append((s, a))
+            modelo[(s, a)] = (r, s2)
+
+            # --- 3) Planificacion: n repasos imaginados del modelo ---
+            if n_planificacion &gt; 0 and visitados:
+                idxs = rng.integers(0, len(visitados), size=n_planificacion)
+                for j in idxs:
+                    sp, ap = visitados[j]
+                    rp, sp2 = modelo[(sp, ap)]
+                    Q[sp, ap] += alpha * (rp + gamma * Q[sp2].max() - Q[sp, ap])
+
+            s = s2
+            pasos += 1
+            if fin:
+                break
+        pasos_por_episodio[ep] = pasos
+
+    return pasos_por_episodio
+
+
+def experimento(env, lista_n, n_episodios=50, n_semillas=15):
+    """Promedia los pasos por episodio de cada n sobre varias semillas."""
+    maestro = np.random.default_rng(0)
+    semillas = maestro.integers(0, 2**31 - 1, size=n_semillas)
+
+    curvas = {}
+    for n in lista_n:
+        acum = np.zeros(n_episodios)
+        for semilla in semillas:
+            # Todas las configuraciones comparten las mismas semillas: la
+            # comparacion es justa (misma "suerte", distinto n).
+            acum += dyna_q(env, n_planificacion=n, n_episodios=n_episodios,
+                           semilla=int(semilla))
+        curvas[n] = acum / n_semillas
+    return curvas
+
+
+def dibujar(curvas, optimo=14):
+    plt.figure(figsize=(9, 5.2))
+    colores = {0: "#dc2626", 5: "#0ea5e9", 50: "#4f46e5"}
+    episodios = np.arange(1, len(next(iter(curvas.values()))) + 1)
+
+    for n, curva in curvas.items():
+        color = colores.get(n, None)
+        etiqueta = "Q-learning (n = 0)" if n == 0 else f"Dyna-Q (n = {n})"
+        # El primer episodio es enorme para todos (exploracion a ciegas);
+        # se ve mejor la diferencia a partir del episodio 2.
+        plt.plot(episodios[1:], curva[1:], color=color, lw=2, label=etiqueta)
+
+    plt.axhline(optimo, color="#059669", ls="--", lw=1.2,
+                label=f"optimo ({optimo} pasos)")
+    plt.xlabel("Episodio")
+    plt.ylabel("Pasos por episodio (promedio)")
+    plt.title("Dyna-Q: mas planificacion, menos episodios reales")
+    plt.ylim(0, 800)
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    env = DynaMaze()
+    lista_n = [0, 5, 50]
+    curvas = experimento(env, lista_n, n_episodios=50, n_semillas=15)
+
+    print("Pasos por episodio (promedio sobre 15 semillas):")
+    print(f"{'n':&gt;4} | {'episodio 1':&gt;11} | {'episodio 2':&gt;11} | "
+          f"{'ultimos 10 (media)':&gt;18}")
+    print("-" * 54)
+    for n in lista_n:
+        c = curvas[n]
+        print(f"{n:&gt;4} | {c[0]:&gt;11.0f} | {c[1]:&gt;11.0f} | {c[-10:].mean():&gt;18.1f}")
+
+    dibujar(curvas)
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong> (la primera vez tarda unos segundos en descargar Python y
+          numpy/matplotlib). La curva cuenta la historia de un vistazo: el <strong>primer episodio</strong>
+          es larguísimo para los tres —el agente deambula a ciegas hasta tropezar con la meta, porque
+          todavía no hay ninguna recompensa aprendida—. Pero a partir del <strong>segundo</strong> las
+          diferencias son brutales. Con $n = 0$ la mejora es lenta, episodio a episodio; con $n = 50$, el
+          agente prácticamente <strong>ya sabe</strong> el camino: cae cerca de los 14 pasos óptimos en
+          apenas dos o tres episodios reales. Esa es la eficiencia de datos que buscábamos.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Prueba a añadir un valor intermedio a <code>lista_n</code>, por ejemplo <code>[0, 5, 20, 50]</code>,
+            y observa cómo la curva se «ordena» por cantidad de planificación. También puedes bajar
+            <code>n_semillas</code> a <code>5</code> para que corra más rápido (a costa de una curva más
+            temblorosa) o subir <code>epsilon</code> para ver cómo demasiada exploración ensucia incluso
+            al agente que más planifica. ¿Por qué el primer episodio no mejora <em>nunca</em> por mucho
+            que aumentes $n$? (Pista: sin haber visto aún la recompensa, el modelo no tiene nada útil que
+            repasar.)
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          Como todos los ejemplos del manual, este también corre fuera del navegador. Descarga el archivo
+          con «Descargar .py» (o cópialo) y ejecútalo así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) ejecuta el ejemplo</span>
+<span class="prompt">$</span> python code/18-model-based/dyna_q.py
+<span class="comment">Pasos por episodio (promedio sobre 15 semillas):
+   n |  episodio 1 |  episodio 2 | ultimos 10 (media)
+------------------------------------------------------
+   0 |         792 |         935 |               17.9
+   5 |         613 |         160 |               16.5
+  50 |         903 |          42 |               17.5</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Este ejemplo funciona en el navegador gracias a
+          <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a> porque solo usa numpy
+          y matplotlib. Los valores exactos pueden variar ligeramente con la versión de numpy, pero el
+          <em>comportamiento</em> —planificar más equivale a resolver el laberinto en muchos menos
+          episodios reales— es siempre el mismo.
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Cuando el modelo miente</div>
+          <p>
+            Planificar sobre un modelo <em>aprendido</em> es un arma de doble filo: si el modelo está
+            equivocado, el agente planificará hacia recompensas <strong>que no existen</strong>. Es
+            especialmente delicado cuando el entorno <strong>cambia</strong>: un camino que antes estaba
+            abierto puede bloquearse, pero el modelo seguirá «recordando» la versión antigua. La variante
+            <strong>Dyna-Q+</strong> mitiga esto añadiendo un pequeño <em>bono de exploración</em> a las
+            transiciones que hace tiempo que no se prueban —un incentivo a revisitar el mundo y comprobar
+            si sigue siendo como lo recordábamos—. Es una primera muestra de la exploración dirigida que
+            veremos en el <a href="19-exploracion-avanzada.html">capítulo 19</a>.
+          </p>
+        </div>
+
+        <h2 id="mcts">Planificar hacia delante: la búsqueda en árbol (MCTS)</h2>
+        <p>
+          En Dyna la planificación era «de fondo»: repasos difusos que mejoran $Q$ en todos los estados
+          por igual. Pero hay otra forma de usar un modelo, más quirúrgica: en el <strong>momento de
+          decidir</strong>, concentrar todo el cómputo en <em>este</em> estado, mirando hacia delante las
+          consecuencias de cada acción. Es la <strong>planificación en tiempo de decisión</strong>, y su
+          reina es la <strong>búsqueda en árbol de Monte Carlo</strong> (<em>Monte Carlo Tree Search</em>,
+          MCTS).
+        </p>
+        <p>
+          MCTS construye un árbol de posibilidades cuya raíz es el estado actual. Cada nodo es un estado;
+          cada arista, una acción. El árbol crece de forma <strong>asimétrica</strong>, dedicando más
+          esfuerzo a las líneas prometedoras. Cada iteración repite cuatro fases:
+        </p>
+        <ol>
+          <li><strong>Selección.</strong> Desde la raíz, baja por el árbol eligiendo acciones según una
+            regla que equilibra <em>explotar</em> (lo que parece bueno) y <em>explorar</em> (lo poco
+            probado), hasta llegar a un nodo aún no expandido del todo.</li>
+          <li><strong>Expansión.</strong> Añade uno (o varios) nodos hijos nuevos al árbol.</li>
+          <li><strong>Simulación.</strong> Desde el nodo nuevo, juega una partida rápida hasta el final
+            (un <em>rollout</em>, tradicionalmente con acciones al azar) y anota el resultado.</li>
+          <li><strong>Retropropagación.</strong> Propaga ese resultado hacia arriba, actualizando el
+            valor medio y el contador de visitas de todos los nodos del camino recorrido.</li>
+        </ol>
+        <p>
+          La regla de selección es la joya de la corona. Es la misma idea de <strong>UCB</strong> que
+          vimos en el <a href="02-bandido-multibrazo.html">bandido multibrazo</a>, pero aplicada a cada
+          nodo del árbol: tratamos las acciones de un nodo como los brazos de un bandido. Se conoce como
+          <strong>UCT</strong> (<em>Upper Confidence bounds applied to Trees</em>):
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Selección UCT: explotar vs. explorar en el árbol</div>
+          <p>$$a^\star = \arg\max_{a}\;\Big[\,\underbrace{Q(s, a)}_{\text{explotación}} + \underbrace{c\,\sqrt{\dfrac{\ln N(s)}{N(s, a)}}}_{\text{exploración}}\,\Big]$$</p>
+          <p class="math-note">
+            Donde $Q(s, a)$ es el valor medio estimado de tomar $a$ en $s$ (la media de los resultados
+            retropropagados a esa arista); $N(s)$ es el número de veces que hemos visitado el nodo $s$;
+            $N(s, a)$ las veces que desde $s$ hemos elegido $a$; y $c &gt; 0$ una constante que gradúa
+            cuánto pesa la exploración. El segundo término es grande para acciones <strong>poco
+            probadas</strong> (su $N(s, a)$ es pequeño) y encoge según las visitamos: así garantizamos
+            probar todo pero acabar concentrándonos en lo mejor. Tras miles de iteraciones, la acción
+            <strong>más visitada</strong> desde la raíz es la que jugamos de verdad.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            MCTS es como pensar <em>«¿y si…?»</em> muchísimas veces, pero de forma inteligente: no
+            explora todas las jugadas por igual, sino que gasta su presupuesto de imaginación en las
+            líneas que van pareciendo buenas, sin abandonar del todo las dudosas. Fue el motor que llevó
+            a los programas de <strong>Go</strong> del nivel amateur al profesional… antes incluso de que
+            entraran las redes neuronales.
+          </p>
+        </div>
+
+        <h2 id="alphazero">AlphaZero: MCTS guiado por una red</h2>
+        <p>
+          El talón de Aquiles del MCTS clásico es la fase de simulación: los <em>rollouts</em> aleatorios
+          son una forma muy pobre de estimar quién va ganando. <strong>AlphaZero</strong> (DeepMind, 2017)
+          los sustituye por una <strong>red neuronal</strong> $f_\theta$ que, dado un estado $s$, predice
+          dos cosas de golpe: un vector de <strong>probabilidades a priori</strong> sobre las acciones,
+          $\mathbf{p}$, y una <strong>estimación del valor</strong> $v$ (quién va ganando). Con eso, ni
+          hace falta jugar la partida hasta el final: la red «intuye» el desenlace.
+        </p>
+        <p>
+          Esa intuición se inyecta en la fase de selección, que pasa de UCT a su versión con priores,
+          <strong>PUCT</strong>:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Selección PUCT (AlphaZero)</div>
+          <p>$$a^\star = \arg\max_{a}\;\Big[\,Q(s, a) + c_{\text{puct}}\;P(s, a)\,\dfrac{\sqrt{N(s)}}{1 + N(s, a)}\,\Big]$$</p>
+          <p class="math-note">
+            La diferencia con UCT es el factor $P(s, a)$: la <strong>probabilidad a priori</strong> que la
+            red asigna a la acción $a$ en $s$. Ahora la exploración no es ciega: se dirige antes a las
+            acciones que la red considera prometedoras. $N(s)$ y $N(s, a)$ son de nuevo los contadores de
+            visitas, y $c_{\text{puct}}$ regula la exploración. La red se entrena por
+            <strong>auto-juego</strong> (<em>self-play</em>): el propio MCTS produce una política mejorada
+            (las visitas de la raíz) y un resultado de partida, que se usan como <em>objetivos</em> para
+            $\mathbf{p}$ y $v$. Red y búsqueda se mejoran mutuamente en un bucle. Así, partiendo de cero y
+            sin conocimiento humano, AlphaZero superó a los mejores programas de Go, ajedrez y shogi.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Un requisito fuerte</div>
+          <p>
+            AlphaZero necesita un <strong>simulador perfecto</strong>: conoce las reglas del juego, así
+            que sabe con exactitud a qué estado lleva cada movimiento. Eso está muy bien en el ajedrez o
+            el Go, donde las reglas son conocidas y exactas… pero <strong>no</strong> en el mundo real,
+            en un videojuego cuyo motor no conocemos o en un robot. ¿Cómo planificar hacia delante si no
+            tienes las reglas? Esa es justo la pregunta que responde MuZero.
+          </p>
+        </div>
+
+        <h2 id="muzero">MuZero: aprender el modelo y planificar en latente</h2>
+        <p>
+          <strong>MuZero</strong> (DeepMind, 2019) da el paso definitivo: en lugar de <em>recibir</em> las
+          reglas, las <strong>aprende</strong>. Pero con un giro genial. No intenta aprender un modelo que
+          prediga los <em>píxeles</em> del siguiente fotograma —eso sería costosísimo e innecesario—, sino
+          un modelo que solo prediga lo que hace falta para <strong>planificar bien</strong>: recompensa,
+          valor y política. Es un modelo <strong>«equivalente en valor»</strong>: no reconstruye el mundo,
+          lo <em>entiende lo justo</em> para tomar buenas decisiones.
+        </p>
+        <p>
+          Para lograrlo, MuZero razona en un <strong>espacio latente</strong> abstracto, con tres redes
+          que trabajan en equipo:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Las tres funciones de MuZero</div>
+          <p>$$
+            \begin{aligned}
+            \text{Representación:} \quad & s^0 = h_\theta(o_1, \dots, o_t) \\[0.4em]
+            \text{Dinámica:} \quad & (s^{k}, r^{k}) = g_\theta(s^{k-1}, a^{k}) \\[0.4em]
+            \text{Predicción:} \quad & (\mathbf{p}^{k}, v^{k}) = f_\theta(s^{k})
+            \end{aligned}
+          $$</p>
+          <p class="math-note">
+            La función de <strong>representación</strong> $h_\theta$ codifica las observaciones reales
+            $o_1, \dots, o_t$ (por ejemplo, los últimos fotogramas) en un <strong>estado latente</strong>
+            inicial $s^0$. La función de <strong>dinámica</strong> $g_\theta$ es el modelo aprendido: dado
+            un estado latente $s^{k-1}$ y una acción imaginada $a^k$, predice el <strong>siguiente estado
+            latente</strong> $s^k$ y la <strong>recompensa</strong> $r^k$ de ese paso —todo dentro de la
+            «cabeza» de la red, sin tocar el entorno—. La función de <strong>predicción</strong> $f_\theta$
+            lee un estado latente y devuelve la <strong>política</strong> $\mathbf{p}^k$ y el
+            <strong>valor</strong> $v^k$. El índice $k$ es la profundidad de la imaginación: $k = 0$ es el
+            presente real; $k = 1, 2, \dots$ son pasos <em>hipotéticos</em> hacia el futuro.
+          </p>
+        </div>
+
+        <p>
+          Con estas tres funciones, MuZero corre <strong>exactamente el mismo MCTS con PUCT de
+          AlphaZero</strong>, pero desenrollando el árbol en el espacio latente: cada vez que la búsqueda
+          quiere «probar» una acción, en vez de consultar las reglas del juego llama a $g_\theta$ para
+          imaginar el siguiente estado latente y su recompensa, y a $f_\theta$ para valorarlo. Nunca
+          necesita el simulador real.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Lo que hace especial a MuZero</div>
+          <p>
+            Las tres redes se entrenan <strong>de punta a punta</strong> con un único objetivo: que las
+            predicciones a lo largo de un despliegue imaginado coincidan con la realidad observada. En
+            concreto, para cada paso $k$ se compara la <strong>recompensa</strong> predicha $r^k$ con la
+            real, el <strong>valor</strong> $v^k$ con un retorno bootstrap (estilo TD de $n$ pasos), y la
+            <strong>política</strong> $\mathbf{p}^k$ con la que produjo el propio MCTS. Nada obliga a que
+            $s^k$ se parezca al estado real del entorno: los latentes son libres de significar
+            <em>lo que le convenga a la red</em>, siempre que predigan bien recompensa, valor y política.
+            Ese es el corazón de un modelo <strong>equivalente en valor</strong>, y por eso MuZero
+            planifica en dominios sin reglas conocidas —desde Atari hasta la compresión de vídeo— con la
+            misma maquinaria que dominó el Go.
+          </p>
+        </div>
+
+        <h2 id="panorama">Panorama: ¿cuándo usar RL basado en modelo?</h2>
+        <p>
+          Basar el aprendizaje en un modelo no es gratis ni siempre conviene. La disyuntiva de fondo es
+          <strong>datos contra cómputo y sesgo</strong>: un modelo te deja exprimir cada dato real, pero
+          planificar cuesta cómputo y, si el modelo se equivoca, arrastra ese error a las decisiones.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Aspecto</th><th>Sin modelo (<em>model-free</em>)</th><th>Con modelo (<em>model-based</em>)</th></tr></thead>
+            <tbody>
+              <tr><td>Eficiencia de datos</td><td>Baja (necesita mucha interacción)</td><td>Alta (planifica sobre pocos datos)</td></tr>
+              <tr><td>Cómputo por decisión</td><td>Bajo</td><td>Alto (planificar cuesta)</td></tr>
+              <tr><td>Riesgo principal</td><td>Lentitud, ineficiencia</td><td>Un modelo erróneo desvía la política</td></tr>
+              <tr><td>Necesita las reglas</td><td>No</td><td>Dyna/MuZero: no · AlphaZero: sí</td></tr>
+              <tr><td>Ejemplos</td><td>Q-learning, DQN, PPO, SAC</td><td>Dyna-Q, AlphaZero, MuZero</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          La regla práctica: si la interacción con el entorno es <strong>cara o peligrosa</strong> (un
+          robot real, un ensayo clínico, un sistema industrial), la eficiencia de datos del enfoque basado
+          en modelo compensa de sobra el cómputo extra. Si los datos son baratos y abundantes (un
+          simulador rápido), a menudo gana la sencillez de un buen método sin modelo.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>Un <strong>modelo</strong> responde a «¿qué $(s', r)$ produce $(s, a)$?» y permite generar
+              experiencia <strong>simulada</strong> sin tocar el entorno.</li>
+            <li><strong>Aprender</strong> usa experiencia real; <strong>planificar</strong> usa experiencia
+              del modelo. Comparten la misma regla de actualización.</li>
+            <li><strong>Dyna-Q</strong> entrelaza ambas: por cada paso real hace $n$ actualizaciones
+              imaginadas, cambiando <strong>datos</strong> por <strong>cómputo</strong> y resolviendo el
+              laberinto en muchos menos episodios.</li>
+            <li><strong>MCTS</strong> planifica hacia delante en el momento de decidir, guiado por
+              <strong>UCT</strong> (explotar vs. explorar en cada nodo).</li>
+            <li><strong>AlphaZero</strong> sustituye los rollouts por una red (política + valor) y usa
+              <strong>PUCT</strong>, pero necesita las reglas del juego.</li>
+            <li><strong>MuZero</strong> <em>aprende</em> el modelo (funciones de representación, dinámica y
+              predicción) y planifica en un espacio <strong>latente</strong> equivalente en valor, sin
+              conocer las reglas.</li>
+          </ul>
+        </div>
+
+        <p>
+          Un hilo ha recorrido todo el capítulo: para planificar bien hay que <strong>explorar</strong>
+          bien: UCT y PUCT no son más que reglas de exploración, y Dyna-Q+ añadía un bono por revisitar lo
+          olvidado. En el <a href="19-exploracion-avanzada.html">capítulo 19</a> ponemos la exploración en
+          el centro, con agentes movidos por <strong>curiosidad</strong> y motivación intrínseca (ICM, RND)
+          capaces de aventurarse en entornos donde la recompensa es escasísima.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>

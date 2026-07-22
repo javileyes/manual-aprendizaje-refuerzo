@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>21. Panorama, buenas prácticas y hacia dónde ir · Manual de RL</title>
+  <meta name="description" content="Cierre del manual: por qué el RL es frágil y ruidoso, cómo evaluar sin engañarte (varias semillas, media ± desviación), cuándo usar RL y hacia dónde va el campo." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="21">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 4 · Capítulo 21</span>
+        <h1>Panorama, buenas prácticas y hacia dónde ir</h1>
+        <p class="lead">
+          Has recorrido veinte capítulos: del bucle agente–entorno a los bandidos, de Bellman a
+          Q-Learning, de DQN a PPO y SAC, y hasta el <a href="20-rlhf.html">RLHF</a> que hay detrás
+          de los grandes modelos de lenguaje. Toca cerrar con lo que ningún paper te cuenta con
+          claridad: el RL es <strong>poderoso pero frágil y ruidoso</strong>. Este capítulo va de
+          cómo <strong>evaluar sin engañarte</strong>, cuándo (y cuándo no) usar RL, y hacia dónde
+          se está moviendo el campo.
+        </p>
+
+        <h2 id="fragil">El RL funciona… y a la vez es delicado</h2>
+        <p>
+          Los algoritmos que has programado son de verdad los que mueven robots, ganan al Go y afinan
+          modelos de lenguaje. Pero, a diferencia del aprendizaje supervisado, en RL una misma receta
+          puede darte un agente brillante o uno inútil <em>cambiando solo la semilla del generador de
+          números aleatorios</em>. Nada más. La causa es que el RL acumula ruido por todos lados:
+          exploración aleatoria, transiciones estocásticas del entorno, inicialización de la red,
+          orden de los datos… y todo eso se realimenta, porque las decisiones de hoy determinan qué
+          datos verás mañana.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            En aprendizaje supervisado, entrenar dos veces el mismo modelo con los mismos datos da
+            resultados casi idénticos. En RL, dos ejecuciones con semillas distintas pueden trazar
+            <strong>curvas de aprendizaje completamente diferentes</strong>: una despega en 50
+            episodios y otra se atasca 200. No es un bug tuyo; es la naturaleza del problema. Por eso
+            la pregunta correcta nunca es «¿funcionó?», sino «¿funciona <em>en promedio</em>, y con
+            cuánta variabilidad?».
+          </p>
+        </div>
+
+        <h2 id="regla-de-oro">La regla de oro: nunca saques conclusiones de una sola ejecución</h2>
+        <p>
+          Si te quedas con una sola idea de este capítulo, que sea esta. Una única curva de
+          aprendizaje no dice casi nada: podrías haber tenido una semilla afortunada (y creerte que tu
+          método es genial) o una desafortunada (y descartar una buena idea). La práctica correcta es
+          sencilla de enunciar:
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El error número uno en RL empírico</div>
+          <p>
+            Comparar dos algoritmos <strong>con una sola ejecución cada uno</strong> y declarar un
+            ganador. Con la varianza típica del RL, esa «victoria» puede ser puro azar. Se han
+            publicado (y luego refutado) muchas mejoras que eran, en realidad, la diferencia entre una
+            buena semilla y una mala. Ejecuta <strong>varias semillas</strong> (5 como mínimo, 10–30
+            si puedes) y reporta <strong>media ± dispersión</strong>.
+          </p>
+        </div>
+
+        <h2 id="matematicas">Un poco de matemáticas: la varianza entre semillas</h2>
+        <p>
+          Formalicemos por qué una banda de incertidumbre no es un adorno, sino información
+          imprescindible. Fija un algoritmo y una configuración. Cuando lo ejecutas con la semilla
+          $i$, obtienes una medida de rendimiento $J_i$ —por ejemplo, el retorno medio en los últimos
+          episodios, o la tasa de éxito de la política final—. Como la semilla es aleatoria, $J_i$ es
+          una <strong>variable aleatoria</strong>: tiene una media «verdadera» $\mu$ (el rendimiento
+          esperado del método) y una desviación típica $\sigma$ (cuánto baila de una ejecución a otra).
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El estimador del rendimiento medio</div>
+          <p>
+            Ejecutamos $N$ semillas independientes y estimamos la media verdadera $\mu$ con la
+            <strong>media muestral</strong>:
+          </p>
+          <p>$$\bar J = \frac{1}{N}\sum_{i=1}^{N} J_i, \qquad s^2 = \frac{1}{N-1}\sum_{i=1}^{N}\big(J_i - \bar J\big)^2$$</p>
+          <p class="math-note">
+            $J_i$ es el rendimiento de la ejecución con la semilla $i$. $N$ es el número de semillas.
+            $\bar J$ es nuestra estimación del rendimiento medio. $s$ es la <strong>desviación típica
+            muestral</strong>: mide cuánto se dispersan las ejecuciones individuales alrededor de
+            $\bar J$. Es la que describe «lo diferentes que son las semillas entre sí».
+          </p>
+        </div>
+
+        <p>
+          Ahora bien, $\bar J$ es <em>también</em> una estimación con su propio error: si repitieras
+          el experimento entero con otras $N$ semillas, te saldría un $\bar J$ ligeramente distinto.
+          Cuánto de distinto lo mide el <strong>error estándar de la media</strong>, que encoge con
+          la raíz del número de semillas:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Error estándar e intervalo de confianza</div>
+          <p>$$\operatorname{SE} = \frac{s}{\sqrt{N}}, \qquad \text{IC}_{95\%} \approx \bar J \pm 1.96\,\frac{s}{\sqrt{N}}$$</p>
+          <p class="math-note">
+            $\operatorname{SE}$ (del inglés <em>standard error</em>) es la incertidumbre de $\bar J$
+            como estimador de $\mu$. El intervalo de confianza al 95&nbsp;% es el rango en el que
+            esperamos que caiga la media verdadera (el factor $1.96$ viene de la distribución normal;
+            con pocas semillas se usa la $t$ de Student, algo más ancha). Nota la diferencia clave:
+            $s$ <strong>no</strong> baja al añadir semillas (es una propiedad del método), pero
+            $\operatorname{SE}$ <strong>sí</strong> baja como $1/\sqrt{N}$: con más semillas conoces la
+            media con más precisión, aunque las ejecuciones sigan siendo igual de dispersas.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 ¿Banda de $s$ o banda de $\operatorname{SE}$?</div>
+          <p>Las dos son legítimas, pero cuentan cosas distintas y hay que <strong>decir cuál usas</strong>:</p>
+          <ul>
+            <li><strong>Banda de $\pm s$</strong> (desviación típica): «así de diferentes son las
+              ejecuciones individuales». Es la que revela la fragilidad del método.</li>
+            <li><strong>Banda de $\pm\operatorname{SE}$ o IC del 95&nbsp;%</strong>: «así de segura es
+              mi estimación de la media». Es la adecuada para <em>comparar</em> dos algoritmos: si sus
+              intervalos no se solapan, la diferencia es difícil de atribuir al azar.</li>
+          </ul>
+          <p>
+            Una curva de aprendizaje <strong>sin banda</strong> es como un titular sin fuente: puede
+            ser cierto o puede ser ruido, y no tienes forma de saberlo.
+          </p>
+        </div>
+
+        <h2 id="ejemplo">El experimento: 20 semillas en un gridworld</h2>
+        <p>
+          Vamos a <em>ver</em> el problema con nuestros propios ojos. El siguiente script entrena el
+          mismo <a href="09-q-learning.html">Q-Learning</a> en el mismo gridworld estocástico de
+          $5\times 5$ (cada paso cuesta $-1$; con probabilidad $0.1$ el agente «resbala» y ejecuta una
+          acción al azar), pero repitiéndolo con <strong>20 semillas distintas</strong>. Dibuja dos
+          paneles:
+        </p>
+        <ul>
+          <li><strong>Izquierda</strong>: las 20 curvas individuales (tenues) y <em>una</em> de ellas
+            resaltada en rojo. Es la que un incauto podría haber ejecutado una única vez.</li>
+          <li><strong>Derecha</strong>: la <strong>media</strong> de las 20 con una banda de $\pm$ una
+            desviación típica. El resumen honesto.</li>
+        </ul>
+        <p>
+          Fíjate al ejecutarlo en cómo la curva roja sube a trompicones y da bandazos que la media
+          suaviza por completo: si solo hubieras visto <em>esa</em> ejecución, tu impresión de «cómo
+          aprende el algoritmo» sería engañosa.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">reproducibilidad_semillas.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+Reproducibilidad en RL: por que NUNCA debes fiarte de una sola semilla.
+=======================================================================
+
+Capitulo 21 del Manual de RL. Este script entrena el MISMO agente de
+Q-Learning en el MISMO gridworld estocastico, pero con 20 semillas
+aleatorias distintas, y dibuja dos paneles:
+
+  * Izquierda: las 20 curvas de aprendizaje individuales (tenues) y UNA de
+    ellas resaltada. Fijate en lo distintas que son entre si: si solo
+    hubieras ejecutado la semilla resaltada, sacarias conclusiones
+    equivocadas sobre "como de rapido/bien" aprende el algoritmo.
+  * Derecha: la MEDIA de las 20 curvas con una banda de +/- una desviacion
+    tipica. Ese es el resumen honesto: una tendencia central y su
+    incertidumbre.
+
+Moraleja practica del RL empirico: reporta media +/- dispersion sobre
+varias semillas; nunca saques conclusiones de una unica ejecucion.
+
+Como ejecutarlo en tu terminal:
+    pip install -r requirements.txt
+    python code/21-panorama/reproducibilidad_semillas.py
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+# ---------------------------------------------------------------------------
+# 1) El entorno: un gridworld estocastico de 5x5
+# ---------------------------------------------------------------------------
+GRID = 5
+N_ESTADOS = GRID * GRID
+N_ACCIONES = 4                       # 0=arriba, 1=derecha, 2=abajo, 3=izquierda
+MOV = {0: (-1, 0), 1: (0, 1), 2: (1, 0), 3: (0, -1)}
+INICIO = 0                           # esquina superior izquierda (0, 0)
+META = N_ESTADOS - 1                 # esquina inferior derecha (4, 4)
+P_RESBALON = 0.1                     # prob. de "resbalar" y ejecutar una accion al azar
+
+
+def paso(estado, accion, rng):
+    """Dinamica del entorno. Devuelve (nuevo_estado, recompensa, terminado).
+
+    Es ESTOCASTICO: con probabilidad P_RESBALON el agente resbala y ejecuta
+    una accion aleatoria en vez de la elegida. Esa aleatoriedad, junto con la
+    exploracion epsilon-greedy, es la que hace que dos semillas distintas
+    produzcan curvas de aprendizaje distintas.
+    """
+    if rng.random() &lt; P_RESBALON:
+        accion = int(rng.integers(N_ACCIONES))
+    fila, col = divmod(estado, GRID)
+    dfila, dcol = MOV[accion]
+    fila = min(max(fila + dfila, 0), GRID - 1)
+    col = min(max(col + dcol, 0), GRID - 1)
+    nuevo = fila * GRID + col
+    if nuevo == META:
+        return nuevo, 0.0, True          # llegar a la meta termina el episodio
+    return nuevo, -1.0, False            # cada paso cuesta -1 (queremos llegar rapido)
+
+
+def epsilon_greedy(Q, estado, epsilon, rng):
+    """Elige accion epsilon-greedy, con desempate aleatorio entre las mejores."""
+    if rng.random() &lt; epsilon:
+        return int(rng.integers(N_ACCIONES))
+    q = Q[estado]
+    return int(rng.choice(np.flatnonzero(q == q.max())))
+
+
+# ---------------------------------------------------------------------------
+# 2) Q-Learning tabular: una ejecucion completa con una semilla dada
+# ---------------------------------------------------------------------------
+def entrena_una_semilla(semilla, n_episodios=200, alpha=0.5, gamma=0.95,
+                        epsilon=0.1, max_pasos=100):
+    """Entrena Q-Learning y devuelve el retorno de cada episodio (un vector)."""
+    rng = np.random.default_rng(semilla)
+    Q = np.zeros((N_ESTADOS, N_ACCIONES))
+    retornos = np.zeros(n_episodios)
+    for ep in range(n_episodios):
+        estado, total = INICIO, 0.0
+        for _ in range(max_pasos):
+            accion = epsilon_greedy(Q, estado, epsilon, rng)
+            s2, r, fin = paso(estado, accion, rng)
+            # Objetivo off-policy: usa la MEJOR accion del estado siguiente.
+            objetivo = r + gamma * Q[s2].max() * (0.0 if fin else 1.0)
+            Q[estado, accion] += alpha * (objetivo - Q[estado, accion])
+            estado, total = s2, total + r
+            if fin:
+                break
+        retornos[ep] = total
+    return retornos
+
+
+def media_movil(x, w=15):
+    """Suaviza una serie con una media movil de ventana w (para ver la tendencia)."""
+    c = np.cumsum(np.insert(x, 0, 0.0))
+    return (c[w:] - c[:-w]) / w
+
+
+# ---------------------------------------------------------------------------
+# 3) Entrenamos con MUCHAS semillas y resumimos con media +/- desviacion
+# ---------------------------------------------------------------------------
+def experimento(n_semillas=20, **kw):
+    """Ejecuta el entrenamiento con n_semillas semillas distintas (0, 1, ...).
+
+    Devuelve una matriz (n_semillas x n_episodios) con el retorno por episodio.
+    """
+    curvas = [entrena_una_semilla(semilla=s, **kw) for s in range(n_semillas)]
+    return np.array(curvas)
+
+
+def main():
+    n_semillas = 20
+    curvas = experimento(n_semillas=n_semillas)          # (n_semillas, n_episodios)
+
+    # Suavizamos cada curva para ver la tendencia sin el ruido episodio a episodio.
+    suaves = np.array([media_movil(c) for c in curvas])
+    ejex = np.arange(suaves.shape[1])
+    media = suaves.mean(axis=0)
+    desv = suaves.std(axis=0, ddof=1)   # desviacion tipica MUESTRAL (divide por N-1)
+
+    # Una semilla "cualquiera" (la que un incauto podria haber ejecutado una vez).
+    elegida = int(np.random.default_rng(0).integers(n_semillas))
+
+    # --- Resumen numerico por pantalla ---
+    finales = curvas[:, -50:].mean(axis=1)   # retorno medio de los ultimos 50 episodios
+    print(f"Q-Learning en gridworld estocastico 5x5 | {n_semillas} semillas")
+    print("-" * 60)
+    print("Retorno final (media de los ultimos 50 episodios) entre semillas:")
+    print(f"  media                : {finales.mean():7.2f}")
+    print(f"  desviacion tipica    : {finales.std(ddof=1):7.2f}")
+    print(f"  mejor semilla        : {finales.max():7.2f}")
+    print(f"  peor  semilla        : {finales.min():7.2f}")
+    print("-" * 60)
+    print(f"Entre la mejor y la peor semilla hay "
+          f"{finales.max() - finales.min():.1f} puntos de retorno de diferencia.")
+    print("Una sola ejecucion puede caer en cualquier punto de ese rango: por")
+    print("eso se reporta la MEDIA +/- dispersion, no una unica semilla.")
+
+    # --- Grafica de dos paneles ---
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.3), sharey=True)
+
+    # (a) Las 20 curvas individuales + una resaltada.
+    for c in suaves:
+        ax1.plot(ejex, c, color="#94a3b8", lw=0.8, alpha=0.5)
+    ax1.plot(ejex, suaves[elegida], color="#dc2626", lw=2.0,
+             label=f"una sola semilla (#{elegida})")
+    ax1.set_title(f"Las {n_semillas} ejecuciones individuales")
+    ax1.set_xlabel("episodio")
+    ax1.set_ylabel("retorno (media movil)")
+    ax1.legend(loc="lower right")
+    ax1.grid(alpha=0.2)
+
+    # (b) Media +/- una desviacion tipica.
+    ax2.fill_between(ejex, media - desv, media + desv,
+                     color="#4f46e5", alpha=0.22, label="media ± 1 desv. tipica")
+    ax2.plot(ejex, media, color="#4f46e5", lw=2.2, label="media de las semillas")
+    ax2.set_title("El resumen honesto: media y banda")
+    ax2.set_xlabel("episodio")
+    ax2.legend(loc="lower right")
+    ax2.grid(alpha=0.2)
+
+    fig.suptitle("Por que una sola semilla engana en RL", fontsize=12, y=1.02)
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
+</code></pre>
+        </div>
+
+        <p>
+          Pulsa <strong>▶ Ejecutar</strong> (la primera vez tarda unos segundos en descargar Python).
+          En el panel izquierdo verás una maraña de curvas: casi todas convergen a un rendimiento
+          parecido, pero <em>cómo</em> llegan hasta allí varía muchísimo, y la resaltada en rojo es
+          especialmente errática. En el derecho, la banda es ancha al principio —cuando las semillas
+          divergen más— y se estrecha al final, cuando casi todas han aprendido. Esa forma es
+          exactamente la información que una sola curva te oculta.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Sube <code>P_RESBALON</code> a $0.3$: el entorno se vuelve más ruidoso y la banda se
+            ensancha. Baja <code>n_semillas</code> a $3$ y observa lo poco fiable que se vuelve la
+            media. Cambia la banda de $\pm$ desviación típica a un intervalo de confianza usando
+            <code>desv / np.sqrt(n_semillas) * 1.96</code>: verás que es mucho más estrecha, porque
+            mide otra cosa (la incertidumbre de la media, no la dispersión de las ejecuciones).
+          </p>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          El mismo archivo funciona fuera del navegador. Descárgalo con «Descargar .py» (o cópialo) y
+          ejecútalo así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) ejecuta el ejemplo</span>
+<span class="prompt">$</span> python code/21-panorama/reproducibilidad_semillas.py
+<span class="comment">Q-Learning en gridworld estocastico 5x5 | 20 semillas
+------------------------------------------------------------
+Retorno final (media de los ultimos 50 episodios) entre semillas:
+  media                :   ~-9
+  desviacion tipica    :   ~0.4
+  ...</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Los ejemplos «en el navegador» usan <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>
+          (Python compilado a WebAssembly) y solo necesitan conexión la primera vez. Este capítulo es
+          íntegramente de <code>numpy</code>, así que corre entero en tu pestaña.
+        </p>
+
+        <h2 id="cuando-usar">¿Cuándo (y cuándo no) usar RL?</h2>
+        <p>
+          El RL es una herramienta espectacular para una familia concreta de problemas, y una mala
+          elección para muchos otros. Antes de montar todo el aparato de entrenamiento, pregúntate si
+          tu problema encaja de verdad.
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Encaja bien con RL</th><th>Probablemente NO necesitas RL</th></tr></thead>
+            <tbody>
+              <tr><td>Decisiones <strong>secuenciales</strong> donde una acción afecta a las siguientes.</td><td>Predicción de una sola etiqueta o número (usa aprendizaje supervisado).</td></tr>
+              <tr><td>Hay una <strong>señal de recompensa</strong> clara y medible.</td><td>No sabes definir qué es «bueno» de forma cuantitativa.</td></tr>
+              <tr><td>Puedes <strong>simular</strong> o interactuar barato (millones de pasos).</td><td>Cada interacción real es cara, lenta o peligrosa y no hay simulador.</td></tr>
+              <tr><td>El comportamiento óptimo es difícil de programar a mano.</td><td>Una heurística o un controlador clásico ya resuelven el problema.</td></tr>
+              <tr><td>Toleras entrenar mucho y con ruido antes de desplegar.</td><td>Necesitas garantías fuertes de seguridad desde el primer momento.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El problema de la recompensa</div>
+          <p>
+            Gran parte del sufrimiento en RL aplicado viene del <strong>diseño de la recompensa</strong>.
+            Un agente optimiza <em>exactamente</em> lo que le pides, no lo que querías pedir: si premias
+            «recoger objetos», puede aprender a dejarlos y recogerlos en bucle. A esto se le llama
+            <em>reward hacking</em>. Antes de complicar el algoritmo, dedica tiempo a que la recompensa
+            capte de verdad tu objetivo; casi siempre rinde más que un método más sofisticado.
+          </p>
+        </div>
+
+        <h2 id="panorama">El panorama del campo: hacia dónde ir</h2>
+        <p>
+          Este manual cubre los cimientos, pero el RL es un campo vivísimo. Estas son las fronteras
+          más activas hoy; cada una es una puerta por la que puedes seguir.
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Frontera</th><th>La idea en una frase</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Offline RL</strong> (RL por lotes)</td><td>Aprender la mejor política posible a partir de un conjunto <em>fijo</em> de datos ya registrados, sin interactuar con el entorno. Clave cuando explorar es caro o peligroso (medicina, conducción).</td></tr>
+              <tr><td><strong>RL multi-agente</strong></td><td>Varios agentes que aprenden a la vez, cooperando o compitiendo. El entorno deja de ser estacionario porque los demás también cambian.</td></tr>
+              <tr><td><strong>RL jerárquico</strong></td><td>Descomponer una tarea larga en <em>subobjetivos</em> (opciones, habilidades): un nivel alto decide «qué» y uno bajo ejecuta «cómo».</td></tr>
+              <tr><td><strong>RL basado en modelo</strong></td><td>Aprender un modelo del mundo y planificar «imaginando» transiciones. Enlaza con el <a href="18-model-based.html">capítulo 18</a> (Dyna-Q, MuZero) y con la eficiencia en datos.</td></tr>
+              <tr><td><strong>RL para razonamiento en LLM</strong></td><td>Más allá del <a href="20-rlhf.html">RLHF</a>: usar recompensas de <em>corrección</em> (por ejemplo, si una demostración matemática es válida) para que los modelos aprendan a razonar paso a paso.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 El hilo que las une</div>
+          <p>
+            Casi todas estas fronteras atacan el mismo talón de Aquiles: el RL clásico necesita
+            <strong>demasiada interacción</strong> y es <strong>demasiado inestable</strong>. Offline
+            RL evita interactuar; el basado en modelo exprime cada dato; el jerárquico reduce el
+            horizonte; el multi-agente afronta que el mundo tiene otros que deciden. Si entiendes bien
+            los fundamentos de este manual, ya tienes el vocabulario para leer cualquiera de ellas.
+          </p>
+        </div>
+
+        <h2 id="recursos">Recursos para seguir aprendiendo</h2>
+        <p>
+          No hace falta que te creas nada de lo que has leído aquí: comprueba, amplía y experimenta.
+          Estos son los recursos que de verdad merece la pena tener a mano.
+        </p>
+        <ul>
+          <li><strong>Sutton &amp; Barto — <em>Reinforcement Learning: An Introduction</em></strong>
+            (2.ª edición). La biblia del RL clásico, gratuita y legal en
+            <a href="http://incompleteideas.net/book/the-book-2nd.html" target="_blank" rel="noopener">incompleteideas.net</a>.
+            Si un concepto tabular de este manual te sabe a poco, aquí está desarrollado con todo el rigor.</li>
+          <li><strong>Spinning Up in Deep RL (OpenAI)</strong>:
+            <a href="https://spinningup.openai.com" target="_blank" rel="noopener">spinningup.openai.com</a>.
+            El mejor puente entre teoría y práctica del RL profundo, con explicaciones e implementaciones
+            de referencia de VPG, PPO, DDPG, TD3 y SAC.</li>
+          <li><strong>CleanRL</strong>:
+            <a href="https://github.com/vwxyzjn/cleanrl" target="_blank" rel="noopener">github.com/vwxyzjn/cleanrl</a>.
+            Implementaciones de un solo archivo por algoritmo, sin capas de abstracción. Ideales para
+            leer de arriba abajo y entender cada línea, justo el espíritu de este manual.</li>
+          <li><strong>Stable-Baselines3</strong>:
+            <a href="https://stable-baselines3.readthedocs.io" target="_blank" rel="noopener">stable-baselines3.readthedocs.io</a>.
+            Cuando quieras <em>usar</em> RL en serio en lugar de reimplementarlo: algoritmos probados,
+            fiables y bien documentados en PyTorch.</li>
+          <li><strong>Gymnasium</strong>:
+            <a href="https://gymnasium.farama.org" target="_blank" rel="noopener">gymnasium.farama.org</a>.
+            El estándar de facto para entornos de RL (el sucesor de OpenAI Gym). La interfaz
+            <code>reset()</code>/<code>step()</code> que has visto en el manual es la suya.</li>
+        </ul>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>El RL es potente pero <strong>frágil y ruidoso</strong>: la semilla sola puede cambiar el resultado.</li>
+            <li><strong>Nunca</strong> saques conclusiones de una ejecución: usa varias semillas y reporta $\bar J \pm$ dispersión.</li>
+            <li>Distingue la <strong>desviación típica</strong> $s$ (cuánto varían las ejecuciones) del <strong>error estándar</strong> $\operatorname{SE}=s/\sqrt{N}$ (cuánto confías en la media).</li>
+            <li>Una curva de aprendizaje <strong>sin banda de incertidumbre</strong> no es evidencia de nada.</li>
+            <li>Usa RL para decisiones <strong>secuenciales</strong> con recompensa clara y simulación barata; si no, quizá no lo necesites. Y cuida el <strong>diseño de la recompensa</strong>.</li>
+            <li>El campo avanza hacia RL <strong>offline, multi-agente, jerárquico, basado en modelo</strong> y para el <strong>razonamiento de los LLM</strong>.</li>
+          </ul>
+        </div>
+
+        <h2 id="cierre">Y hasta aquí el viaje</h2>
+        <p>
+          Empezaste en el <a href="01-que-es-rl.html">capítulo 1</a> con un robot en un pasillo y una
+          idea sencilla: aprender de las consecuencias. Has terminado entendiendo cómo esa misma idea,
+          escalada con redes neuronales y buenas prácticas, mueve robots, juega al Go y alinea modelos
+          de lenguaje. No es poca cosa.
+        </p>
+        <p>
+          El mejor siguiente paso no es leer más, sino <strong>volver a ejecutar</strong>. Abre de
+          nuevo cualquier ejemplo del manual, cambia una recompensa, sube una tasa de aprendizaje,
+          añade una semilla, rompe algo y arréglalo. La intuición del RL se construye con las manos, en
+          el bucle de probar y observar —igual que aprende un agente—. Ahora te toca a ti cerrar tu
+          propio bucle. Suerte, y a experimentar.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>
