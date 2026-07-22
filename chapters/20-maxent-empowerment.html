@@ -115,6 +115,32 @@
           </p>
         </div>
 
+        <figure class="figure">
+          <svg viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="El máximo suave interpola entre la media y el máximo de los valores según la temperatura alfa">
+            <defs>
+              <linearGradient id="sm-grad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="#10b981" />
+                <stop offset="1" stop-color="#4f46e5" />
+              </linearGradient>
+              <marker id="arrsm" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" style="fill:var(--text-faint)" />
+              </marker>
+            </defs>
+            <rect x="110" y="82" width="420" height="30" rx="15" fill="url(#sm-grad)" />
+            <text x="110" y="66" text-anchor="start" font-family="sans-serif" font-size="14" font-weight="700" style="fill:#10b981">media de los Q(s,a)</text>
+            <text x="530" y="66" text-anchor="end" font-family="sans-serif" font-size="14" font-weight="700" style="fill:#6366f1">máximo de los Q(s,a)</text>
+            <text x="110" y="132" text-anchor="start" font-family="sans-serif" font-size="12.5" style="fill:var(--text-faint)">α → ∞ (muy indeciso)</text>
+            <text x="530" y="132" text-anchor="end" font-family="sans-serif" font-size="12.5" style="fill:var(--text-faint)">α → 0 (greedy de siempre)</text>
+            <path d="M410,80 l-9,-15 l18,0 z" fill="#f59e0b" />
+            <text x="410" y="52" text-anchor="middle" font-family="sans-serif" font-size="12.5" font-weight="700" style="fill:var(--text-soft)">V_soft(α)</text>
+            <line x1="150" y1="166" x2="490" y2="166" style="stroke:var(--text-faint)" stroke-width="2" marker-end="url(#arrsm)" />
+            <text x="316" y="187" text-anchor="middle" font-family="sans-serif" font-size="12.5" style="fill:var(--text-soft)">al bajar α, V_soft se desliza de la media al máximo</text>
+          </svg>
+          <figcaption>El «máximo suave» $V_{\text{soft}}(s)=\alpha\log\sum_a e^{Q(s,a)/\alpha}$ vive entre la
+          <strong>media</strong> de los valores (cuando $\alpha\to\infty$: la política ya no distingue y todo pesa igual)
+          y su <strong>máximo</strong> (cuando $\alpha\to 0$: se queda con el mejor). La temperatura elige el punto intermedio.</figcaption>
+        </figure>
+
         <div class="callout warn">
           <div class="callout-title">⚠️ La entropía no es gratis: es un compromiso</div>
           <p>
@@ -181,6 +207,100 @@
           <a href="19-exploracion-avanzada.html">capítulo 19</a>): un agente que busca estados de alto
           empowerment tiende a evitar callejones sin salida, a no «morir», y a mantenerse en zonas del mundo
           donde sus acciones importan — todo ello <em>sin</em> una recompensa externa que se lo diga.
+        </p>
+
+        <h3 id="cual-usar">¿Cuál es más útil: entropía de acción o empowerment?</h3>
+        <p>
+          Si tuvieras que quedarte con <strong>una sola</strong> de las dos ideas, ¿cuál? La respuesta
+          práctica es clara: <strong>en la mayoría de los casos, la entropía de acción</strong>. Y no
+          porque sea «mejor idea» —el empowerment es conceptualmente más profundo—, sino porque gana por
+          <strong>relación coste/beneficio</strong>. Antes de justificarlo, fíjate en que son
+          <strong>dos ejes independientes</strong>:
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="0 0 560 430" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cuadrante que compara entropía de acción frente a empowerment con cuatro arquetipos">
+            <defs>
+              <marker id="arrq" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" style="fill:var(--text-faint)" />
+              </marker>
+            </defs>
+            <!-- celdas -->
+            <rect x="90"  y="40"  width="215" height="160" fill="#3b82f6" opacity="0.12" />
+            <rect x="305" y="40"  width="215" height="160" fill="#10b981" opacity="0.16" />
+            <rect x="90"  y="200" width="215" height="160" fill="#94a3b8" opacity="0.10" />
+            <rect x="305" y="200" width="215" height="160" fill="#f59e0b" opacity="0.14" />
+            <!-- divisorias -->
+            <line x1="305" y1="40" x2="305" y2="360" style="stroke:var(--border-strong)" stroke-width="1.5" stroke-dasharray="4 4" />
+            <line x1="90" y1="200" x2="520" y2="200" style="stroke:var(--border-strong)" stroke-width="1.5" stroke-dasharray="4 4" />
+            <!-- ejes -->
+            <line x1="90" y1="360" x2="524" y2="360" style="stroke:var(--text-faint)" stroke-width="2" marker-end="url(#arrq)" />
+            <line x1="90" y1="360" x2="90" y2="36" style="stroke:var(--text-faint)" stroke-width="2" marker-end="url(#arrq)" />
+            <!-- etiquetas de ejes -->
+            <text x="307" y="398" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" style="fill:var(--text-soft)">Entropía de acción →</text>
+            <text text-anchor="middle" transform="translate(34,200) rotate(-90)" font-family="sans-serif" font-size="14" font-weight="700" style="fill:var(--text-soft)">Empowerment →</text>
+            <text x="98" y="378" text-anchor="start" font-family="sans-serif" font-size="11" style="fill:var(--text-faint)">baja</text>
+            <text x="516" y="378" text-anchor="end" font-family="sans-serif" font-size="11" style="fill:var(--text-faint)">alta</text>
+            <text x="84" y="357" text-anchor="end" font-family="sans-serif" font-size="11" style="fill:var(--text-faint)">bajo</text>
+            <text x="84" y="52" text-anchor="end" font-family="sans-serif" font-size="11" style="fill:var(--text-faint)">alto</text>
+            <!-- arriba-izquierda -->
+            <text x="197" y="112" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" style="fill:var(--text)">🚦 Quieto en un cruce</text>
+            <text x="197" y="132" text-anchor="middle" font-family="sans-serif" font-size="11" style="fill:var(--text-faint)">determinista, muchas salidas</text>
+            <!-- arriba-derecha -->
+            <text x="412" y="112" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" style="fill:var(--text)">✅ Explorar donde importa</text>
+            <text x="412" y="132" text-anchor="middle" font-family="sans-serif" font-size="11" style="fill:var(--text-faint)">diverso Y con opciones</text>
+            <!-- abajo-izquierda -->
+            <text x="197" y="272" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" style="fill:var(--text)">🧱 Rígido en un rincón</text>
+            <text x="197" y="292" text-anchor="middle" font-family="sans-serif" font-size="11" style="fill:var(--text-faint)">ni explora ni tiene futuro</text>
+            <!-- abajo-derecha -->
+            <text x="412" y="272" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" style="fill:var(--text)">🎮 Mando contra la pared</text>
+            <text x="412" y="292" text-anchor="middle" font-family="sans-serif" font-size="11" style="fill:var(--text-faint)">mucho azar, cero opciones</text>
+          </svg>
+          <figcaption>Entropía de acción (lo aleatoria que es tu forma de actuar) y empowerment (cuántos futuros
+          controlas) son <strong>independientes</strong>. Lo que casi siempre quieres es la esquina de arriba a la derecha.</figcaption>
+        </figure>
+
+        <p>
+          Ese cuadrante deja clara la diferencia: puedes tener muchísima aleatoriedad y ninguna posibilidad
+          real (el mando contra la pared), o una política determinista rodeada de opciones (quieto en un cruce).
+          Ahora, ¿por qué gana la entropía de acción en la práctica? Por pura economía:
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Criterio</th><th>Entropía de acción</th><th>Empowerment</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Coste de implementar</strong></td><td>Trivial: un término $+\alpha\,\mathcal{H}(\pi)$ en la pérdida</td><td>Alto: estimar la información mutua $I(A;S')$ en alta dimensión (aproximaciones variacionales/contrastivas), frágil y caro</td></tr>
+              <tr><td><strong>Madurez y estabilidad</strong></td><td>De serie en SAC, PPO, A2C; muy probado</td><td>Aún de investigación; casi nunca en producción</td></tr>
+              <tr><td><strong>Encaje con la tarea</strong></td><td>Se suma a <em>cualquier</em> RL con recompensa</td><td>Objetivo intrínseco que <em>puede no</em> alinearse con lo que quieres</td></tr>
+              <tr><td><strong>Ajuste (tuning)</strong></td><td>Un coeficiente (SAC lo autoajusta)</td><td>Difícil; muchas piezas que se rompen</td></tr>
+              <tr><td><strong>Brilla cuando…</strong></td><td>Casi siempre (hay una recompensa que te guía)</td><td>No hay recompensa / exploración muy dura / agentes abiertos</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          En «la mayoría de los casos» tienes una <strong>recompensa</strong> y quieres una política robusta y
+          bien explorada sin dramas. Ahí la entropía de acción da el grueso del beneficio por una fracción del
+          esfuerzo. El empowerment, en cambio, es <strong>caro de estimar</strong> y su gran virtud —funcionar
+          <em>sin</em> recompensa— es justo lo que rara vez necesitas cuando ya tienes una tarea definida.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 El veredicto, en una frase</div>
+          <p>
+            <strong>Entropía de acción</strong>: utilidad amplia, barata y fiable → el «cinturón de seguridad»
+            por defecto, déjalo casi siempre encendido. <strong>Empowerment</strong>: idea más profunda y elegante,
+            pero cara y de nicho → resérvala para cuando <em>no</em> tienes una recompensa que te guíe (exploración
+            pura, motivación intrínseca, agentes abiertos).
+          </p>
+        </div>
+
+        <p>
+          El matiz de fondo es que <strong>no son el mismo tipo de herramienta</strong>: la entropía de acción es
+          un <strong>regularizador del <em>cómo</em> actúas</strong> (algo que sumas a cualquier objetivo), mientras
+          que el empowerment es un <strong>objetivo intrínseco sobre <em>dónde</em> quieres estar</strong>. Por eso,
+          si te obligan a elegir uno solo, el regularizador universal es la apuesta segura.
         </p>
 
         <h3 id="estados">Un primo cercano: la entropía de estados</h3>
