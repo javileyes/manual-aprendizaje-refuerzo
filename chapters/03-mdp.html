@@ -213,6 +213,38 @@
           </figcaption>
         </figure>
 
+        <h3 id="recompensa-aleatoria">La recompensa también puede ser aleatoria</h3>
+        <p>
+          Marginalizar sobre $r$ nos dio el lado de la <em>transición</em>, $p(s' \mid s, a)$. Si en
+          cambio <strong>condicionamos</strong> en el estado al que vamos, aparece la otra mitad: la
+          distribución de la <strong>recompensa dada la transición</strong>, $p(r \mid s, a, s')$. Y al
+          juntar ambas, la regla de la cadena factoriza la dinámica de una forma muy reveladora:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La dinámica se factoriza: primero la transición, luego la recompensa</div>
+          <p>$$\underbrace{p(s', r \mid s, a)}_{\text{conjunta}} = \underbrace{p(s' \mid s, a)}_{\text{a qué } s' \text{ vas}} \cdot \underbrace{p(r \mid s, a, s')}_{\text{qué recompensa, dado } s'}$$</p>
+          <p class="math-note">
+            Léelo de izquierda a derecha: primero el entorno decide la <strong>transición</strong>
+            $s \to s'$; después emite una <strong>recompensa</strong> sacada de $p(r \mid s, a, s')$.
+            Esto deja claras dos cosas: (1) la recompensa <strong>puede ser aleatoria incluso fijada la
+            transición</strong> —para el mismo $(s, a, s')$ puede salir distinta cada vez—; y (2) la
+            recompensa suele <strong>depender de a qué $s'$ llegas</strong>. Por eso la dinámica es una
+            <em>conjunta</em> sobre el par $(s', r)$, no dos cosas independientes.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición: pescar</div>
+          <p>Imagina la acción «lanzar la caña». Ocurren los tres efectos a la vez:</p>
+          <ul>
+            <li><strong>Transición estocástica:</strong> pescas algo (estado «pez») con probabilidad $0{,}4$, o no (estado «nada») con $0{,}6$.</li>
+            <li><strong>Recompensa que depende de la transición:</strong> si «nada», $r = 0$; si «pez», $r$ es positiva.</li>
+            <li><strong>Azar dentro de la transición:</strong> el peso del pez varía (a veces $+3$, a veces $+9$).</li>
+          </ul>
+          <p>Todo eso vive dentro de un único $p(s', r \mid s, a)$.</p>
+        </div>
+
         <h3>La recompensa esperada $r(s, a)$</h3>
         <p>
           Muchas veces no nos interesa el detalle de <em>qué</em> recompensa exacta cae, sino su
@@ -231,6 +263,29 @@
             Leemos: recorremos cada recompensa posible $r$, la multiplicamos por la probabilidad
             total de recibirla (sumando sobre todos los $s'$ a los que podríamos ir) y sumamos. En
             nuestro GridWorld esto será sencillo: casi siempre $-1$, salvo al pisar la meta.
+          </p>
+        </div>
+
+        <p>
+          Entre la conjunta y $r(s, a)$ hay un nivel intermedio muy usado: la recompensa esperada de
+          una <strong>transición concreta</strong>, $r(s, a, s') = \mathbb{E}[R_{t+1} \mid s, a, s']$,
+          que promedia solo el azar de la recompensa pero <strong>conserva la dependencia de $s'$</strong>.
+          Los tres —la conjunta, $r(s, a, s')$ y $r(s, a)$— dicen lo mismo con distinto grado de
+          promediado; verás las tres notaciones en la literatura.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Por qué en la práctica basta con la recompensa esperada</div>
+          <p>
+            Para las funciones de valor (<a href="04-retornos-y-valor.html">capítulo 4</a>) y casi todos
+            los algoritmos, en las ecuaciones de Bellman solo entra la recompensa <strong>esperada</strong>
+            ($r(s, a)$ o $r(s, a, s')$), porque $V$ y $Q$ ya son esperanzas del retorno. Así que el azar
+            <em>propio</em> de la recompensa <strong>no cambia la política óptima</strong>: solo añade
+            <strong>varianza</strong> a las muestras (importa para lo bien que estiman Monte Carlo o TD
+            —capítulos <a href="06-monte-carlo.html">6</a> y <a href="07-td-aprendizaje.html">7</a>—, no
+            para la definición del óptimo). Por eso los problemas de juguete —como nuestro GridWorld— usan
+            una recompensa <strong>determinista que depende de $s'$</strong>: un caso particular
+            perfectamente válido de este marco general.
           </p>
         </div>
 
