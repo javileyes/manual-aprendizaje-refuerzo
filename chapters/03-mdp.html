@@ -348,6 +348,92 @@
           </p>
         </div>
 
+        <h2 id="familia">La familia de Markov: cadena, MRP y MDP</h2>
+        <p>
+          Antes de programar nuestro primer MDP, vale la pena verlo como el último peldaño de una
+          pequeña <strong>familia</strong> de modelos, donde cada uno añade un ingrediente al anterior.
+          Ya tienes todas las piezas —estados, dinámica $P$, recompensa, descuento $\gamma$ y política
+          $\pi$—; solo falta ordenarlas.
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Modelo</th><th>Tupla</th><th>Qué añade</th><th>Pregunta que responde</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Cadena de Markov</strong><br>(proceso de Markov)</td><td>$\langle \mathcal{S}, P \rangle$</td><td>Nada más: estados y transiciones</td><td>¿cómo evoluciona el sistema?</td></tr>
+              <tr><td><strong>Proceso de recompensa</strong><br>de Markov (MRP)</td><td>$\langle \mathcal{S}, P, R, \gamma \rangle$</td><td>Recompensa → <strong>valor</strong></td><td>¿cuánto vale estar aquí? (<em>predicción</em>)</td></tr>
+              <tr><td><strong>Proceso de decisión</strong><br>de Markov (MDP)</td><td>$\langle \mathcal{S}, \mathcal{A}, P, R, \gamma \rangle$</td><td>Acciones → <strong>decisión</strong></td><td>¿qué conviene hacer? (<em>control</em>)</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          En la <strong>cadena de Markov</strong> el sistema solo deambula según $P$: ni premios ni
+          elecciones. El <strong>MRP</strong> añade recompensa y, con ella, la pregunta central de la
+          <em>predicción</em>: el <strong>valor</strong> de un estado, o sea, cuánta recompensa esperas
+          acumular si te sueltan ahí y dejas correr el proceso, $\mathbb{E}[G_t \mid S_t = s]$. Ojo: en
+          un MRP <strong>nadie decide</strong>; la recompensa no dirige el comportamiento, sirve para
+          <em>medir</em>. El <strong>MDP</strong> es el que por fin añade <strong>acciones</strong>:
+          ahora la dinámica y la recompensa dependen de lo que hagas, y aparece el problema de
+          <em>control</em> que ocupa el resto del manual.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 El puente: fijar una política convierte un MDP en un MRP</div>
+          <p>
+            Aquí está la conexión que lo une todo. Si en un MDP <strong>fijas una política</strong>
+            $\pi$, la acción deja de ser una elección (en cada estado actúas según $\pi$) y
+            «desaparece» de la descripción. Lo que queda es un <strong>MRP</strong>,
+            $\langle \mathcal{S}, P_\pi, R_\pi, \gamma \rangle$, cuya dinámica y recompensa son las del
+            MDP promediadas por la política:
+          </p>
+          <p>$$P_\pi(s' \mid s) = \sum_a \pi(a \mid s)\,p(s' \mid s, a), \qquad R_\pi(s) = \sum_a \pi(a \mid s)\,r(s, a).$$</p>
+          <p>
+            Por eso <strong>evaluar una política es, literalmente, resolver el MRP que induce</strong>.
+            Todo el bloque de <em>predicción</em> del manual —calcular el valor $V^\pi$ con las
+            ecuaciones de Bellman (<a href="04-retornos-y-valor.html">capítulo 4</a>), con Monte Carlo
+            (<a href="06-monte-carlo.html">capítulo 6</a>) o con TD
+            (<a href="07-td-aprendizaje.html">capítulo 7</a>)— es trabajar con MRPs. De hecho, la
+            trayectoria bajo política aleatoria que muestrearás justo debajo ya es un paseo por un MRP.
+          </p>
+        </div>
+
+        <figure class="figure">
+          <svg viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Fijar una política convierte un MDP en un MRP">
+            <defs>
+              <marker id="arrfam" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" style="fill:var(--text-faint)" />
+              </marker>
+            </defs>
+            <rect x="40" y="56" width="210" height="96" rx="14" fill="#4f46e5" />
+            <text x="145" y="91" text-anchor="middle" font-family="sans-serif" font-size="21" font-weight="800" fill="#ffffff">MDP</text>
+            <text x="145" y="115" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#e0e7ff">⟨S, A, P, R, γ⟩</text>
+            <text x="145" y="138" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#c7d2fe">tú eliges la acción</text>
+            <line x1="258" y1="104" x2="388" y2="104" style="stroke:var(--text-faint)" stroke-width="2" marker-end="url(#arrfam)" />
+            <text x="322" y="86" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" style="fill:var(--text-soft)">fijas π</text>
+            <text x="322" y="128" text-anchor="middle" font-family="sans-serif" font-size="11" style="fill:var(--text-faint)">la acción se «apaga»</text>
+            <rect x="390" y="56" width="210" height="96" rx="14" fill="#0ea5e9" />
+            <text x="495" y="91" text-anchor="middle" font-family="sans-serif" font-size="21" font-weight="800" fill="#ffffff">MRP</text>
+            <text x="495" y="115" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#e0f2fe">⟨S, P<tspan baseline-shift="sub" font-size="10">π</tspan>, R<tspan baseline-shift="sub" font-size="10">π</tspan>, γ⟩</text>
+            <text x="495" y="138" text-anchor="middle" font-family="sans-serif" font-size="11.5" fill="#bae6fd">evoluciona solo</text>
+          </svg>
+          <figcaption>Fijar una política $\pi$ «apaga» las acciones de un MDP y lo deja convertido en un
+          MRP: un sistema que evoluciona solo y cuyo valor $V^\pi$ podemos calcular. Evaluar una política
+          = resolver ese MRP.</figcaption>
+        </figure>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Un matiz: el MRP no es «la solución» del MDP</div>
+          <p>
+            La <strong>solución</strong> de un MDP es su <strong>política óptima</strong> $\pi^\star$
+            (la mejor forma de decidir). El MRP es más bien la <strong>herramienta de evaluación</strong>:
+            te dice cuánto vale <em>una</em> política concreta. Resolver el MDP consiste en
+            <strong>alternar</strong> evaluar (un MRP) y mejorar la política —la <em>iteración de
+            política</em> del <a href="05-programacion-dinamica.html">capítulo 5</a>—. Dicho de otro modo:
+            sin saber <em>evaluar</em> (MRP), no hay forma de <em>mejorar</em> (MDP).
+          </p>
+        </div>
+
         <h2 id="ejemplo">Un MDP en Python: GridWorld</h2>
         <p>
           Vamos a construir un MDP <strong>explícito</strong> y a «vivir» dentro de él. Nuestro
