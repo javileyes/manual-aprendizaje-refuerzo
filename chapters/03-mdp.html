@@ -110,6 +110,30 @@
           </p>
         </div>
 
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Un mundo que «cambia» suele ser un mundo fijo con estado oculto</div>
+          <p>
+            Y lo mismo vale para el <em>tiempo</em>. Un entorno parece <strong>no estacionario</strong>
+            (sus reglas cambian con el tiempo) muchas veces solo porque al estado le falta la variable
+            que provoca el cambio. Si la <strong>metes en el estado</strong>, el mundo vuelve a ser
+            <strong>fijo</strong> —y markoviano— condicionado a ese estado ampliado.
+          </p>
+          <ul>
+            <li>El mercado alterna <strong>régimen</strong> alcista/bajista: si observas el régimen y lo añades al estado, la dinámica deja de «cambiar».</li>
+            <li>Un robot cuyos motores se <strong>desgastan</strong>: incluye el desgaste y vuelve a ser estacionario.</li>
+            <li>Las estaciones, la fase de un rival, la hora del día… casi siempre son <em>estado oculto</em>, no azar del tiempo.</li>
+          </ul>
+          <p>
+            Por eso la propiedad de Markov (¿el estado resume el <em>pasado</em>?) y la estacionariedad
+            (¿el mundo cambia con el <em>tiempo</em>?) son en el fondo la <strong>misma pregunta</strong>:
+            ¿es el estado un resumen <em>suficiente</em>? Cuando el «driver» del cambio es de verdad
+            <strong>inobservable</strong>, no puedes meterlo en el estado (entras en un
+            <strong>POMDP</strong>, un MDP <em>parcialmente observable</em>) y toca el plan B:
+            <em>olvidar</em> lo viejo con un paso constante $\alpha$ y explorar siempre un poco —el truco
+            no estacionario del <a href="02-bandido-multibrazo.html">capítulo 2</a>—.
+          </p>
+        </div>
+
         <h2 id="mdp-formal">El MDP, formalmente</h2>
         <p>
           Un <strong>Proceso de Decisión de Markov</strong> es la formalización de un entorno con
