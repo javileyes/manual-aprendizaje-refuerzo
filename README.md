@@ -1,5 +1,11 @@
 # 🎯 Manual de Aprendizaje por Refuerzo
 
+### 📖 [**Léelo en vivo aquí → javileyes.github.io/manual-aprendizaje-refuerzo**](https://javileyes.github.io/manual-aprendizaje-refuerzo/)
+
+> Ábrelo en el navegador y **ejecuta el código Python sin instalar nada** (pulsa ▶ Ejecutar en cualquier ejemplo).
+
+---
+
 Un manual web **interactivo** que explica el Aprendizaje por Refuerzo (RL) **de la
 intuición a las matemáticas**, con ejemplos en Python que puedes **ejecutar en el
 propio navegador** (gracias a [Pyodide](https://pyodide.org)) o descargar y correr
@@ -10,7 +16,7 @@ desde los bandidos multibrazo hasta PPO y el RLHF que hay detrás de los grandes
 modelos de lenguaje— apoyándote siempre en explicaciones intuitivas y ejemplos.
 
 - **22 capítulos** en 5 partes, del bucle agente-entorno a RLHF.
-- **27 scripts de Python**, todos ejecutados y verificados.
+- **28 scripts de Python**, todos ejecutados y verificados.
 - Los algoritmos profundos van en **doble versión**: una *desde cero* en NumPy
   (ejecutable en el navegador) y otra idiomática con **PyTorch + Gymnasium**.
 
