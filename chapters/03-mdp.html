@@ -158,6 +158,22 @@
           </p>
         </div>
 
+        <div class="callout intuition">
+          <div class="callout-title">🧠 ¿Por qué una probabilidad y no una fórmula fija?</div>
+          <p>
+            Porque es la forma <strong>general</strong>: ante el mismo estado y la misma acción, el
+            mundo puede responder con <strong>varios resultados</strong> distintos (una acción
+            arriesgada a veces sale bien y a veces mal). Una probabilidad los abarca todos a la vez.
+          </p>
+          <p>
+            ¿Y un entorno <strong>determinista</strong>, donde $(s, a)$ siempre lleva al mismo sitio?
+            No es una excepción: es el <strong>caso particular</strong> en el que toda la masa de
+            probabilidad cae en un único $(s', r)$ —es decir, $p(s', r \mid s, a) = 1$ para ese
+            resultado y $0$ para el resto—. Escribir la dinámica con probabilidades desde el principio
+            nos ahorra tener dos teorías: una sola cubre lo determinista y lo estocástico.
+          </p>
+        </div>
+
         <p>
           A partir de $p$ se derivan otras cantidades útiles. La <strong>probabilidad de
           transición de estado</strong> se obtiene sumando (marginalizando) sobre todas las
