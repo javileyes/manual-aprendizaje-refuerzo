@@ -539,6 +539,10 @@ body {
 .content tbody tr.anotable > :first-child > .nota-add span { display: none; }
 .content tbody tr.con-nota { background: var(--key-bg); }
 .content tbody tr.con-nota > :first-child { box-shadow: inset 3px 0 0 -1px var(--key-br); }
+/* El globo de una fila va FIJO a la ventana: es lo único que escapa del recorte
+   de .table-wrap. Sus coordenadas las pone colocaGloboFijo() al pasar el ratón,
+   que además lo repliega si se saliera por la derecha o por abajo. */
+.content tbody tr.anotable .nota-globo { position: fixed; left: 0; top: 0; }
 
 /* En el modal, el «extracto» de una fórmula es su LaTeX */
 .nota-dlg .nt-extracto.nt-tex {

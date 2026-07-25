@@ -139,9 +139,9 @@ en un globo, sin abrir nada; haciendo clic se edita o se elimina.
 | Filas de tabla | 211 |
 | **Total anotable** | **2.730** |
 
-> ℹ️ Las filas de tabla son la única excepción al globo: la tabla vive en un contenedor con
-> desplazamiento horizontal que **recorta** todo lo que se salga, así que el globo asomaría
-> cortado. En ellas el 📝 abre directamente la nota.
+> ℹ️ En las filas de tabla el globo se coloca **fijo a la ventana**, porque la tabla vive en
+> un contenedor con desplazamiento horizontal que recortaría cualquier otra cosa; si no cabe
+> a la derecha del 📝 o se saldría por abajo, se repliega solo hacia dentro.
 
 Todo se guarda en el navegador y sobrevive a recargar y a cambiar de capítulo. Desde el
 botón **💾 Mis cambios** de la barra lateral puedes:

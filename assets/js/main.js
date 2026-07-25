@@ -363,9 +363,7 @@
     // Globo con el texto de la nota, para leerla sin abrir el modal.
     // Va con la clase nota-ui para que textoParrafo() lo ignore: si no, su
     // texto se colaría en la huella que identifica al párrafo.
-    // En las filas no hay globo: .table-wrap recorta, así que asomaría cortado.
-    // El 📝 abre directamente la nota, que es donde se lee entera.
-    if (nota && p.dataset.notaTipo !== "fila") {
+    if (nota) {
       const g = document.createElement("span");
       g.className = "nota-ui nota-globo";
       g.setAttribute("role", "tooltip");
@@ -377,8 +375,38 @@
       pie.textContent = "Clic para editarla";
       g.append(cuerpo, pie);
       caja.appendChild(g);
+      // Las filas de tabla viven dentro de .table-wrap, que tiene overflow-x:auto
+      // y RECORTA todo lo que se salga. position:fixed es lo único que escapa de
+      // ahí, pero un elemento fijo no sigue a su padre: hay que colocarlo a mano.
+      if (p.dataset.notaTipo === "fila") colocaGloboFijo(b, g);
     }
     p.classList.toggle("con-nota", !!nota);
+  }
+
+  /* Sitúa el globo de una fila junto a su 📝, en coordenadas de ventana, y lo
+     replega hacia dentro si se saliera por la derecha o por abajo. */
+  function colocaGloboFijo(b, g) {
+    const M = 8;
+    const coloca = () => {
+      const r = b.getBoundingClientRect();
+      const gr = g.getBoundingClientRect();     // mide aunque esté oculto
+      let x = r.right + M;
+      let y = r.top - 6;
+      if (x + gr.width > window.innerWidth - M) x = Math.max(M, r.left - gr.width - M);
+      if (y + gr.height > window.innerHeight - M) y = Math.max(M, window.innerHeight - gr.height - M);
+      g.style.left = Math.round(x) + "px";
+      g.style.top = Math.round(y) + "px";
+    };
+    // Solo escuchamos el scroll mientras el globo está a la vista: son 211 filas
+    // en el manual y no vamos a dejar 211 oyentes de scroll permanentes.
+    const entra = () => { coloca(); window.addEventListener("scroll", coloca, { passive: true }); };
+    const sale = () => window.removeEventListener("scroll", coloca);
+    b.addEventListener("mouseenter", entra);
+    b.addEventListener("focus", entra);
+    b.addEventListener("mouseleave", sale);
+    b.addEventListener("blur", sale);
+    g.addEventListener("mouseenter", coloca);
+    g._coloca = coloca;                          // para poder probarlo
   }
 
   let dlgNota = null;
