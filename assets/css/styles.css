@@ -380,7 +380,10 @@ body {
 }
 .nota-add:hover { border-color: var(--accent); background: var(--accent-soft); }
 @media (hover: hover) {
-  .content p.anotable:hover > .nota-add,
+  /* .anotable, no p.anotable: esto vale para párrafos, fórmulas, títulos de
+     sección y puntos de lista. Los recuadros llevan su propia regla más abajo,
+     porque su botón cuelga del título y no del recuadro. */
+  .content .anotable:hover > .nota-add,
   .nota-add:focus-visible { opacity: 1; visibility: visible; }
 }
 /* Sin ratón (táctil) no hay hover: se deja visible pero muy tenue. */
