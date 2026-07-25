@@ -124,19 +124,24 @@ y pulsa ▶ Ejecutar: corre tu versión. Cada bloque tiene un **↺ Original** q
 solo ese ejemplo.
 
 **Casi cualquier cosa se puede anotar**: párrafos, fórmulas, títulos de sección, puntos de
-lista y recuadros completos (🧠 ➗ 🔑 ⚠️ 🧪). Al pasar el ratón por encima aparece un
-**✎ crear nota**; los que ya tienen una llevan un **📝** —en el margen izquierdo, o dentro
-del título si es un recuadro—. Pasando el cursor por ese 📝 se lee la nota en un globo, sin
-abrir nada; haciendo clic se edita o se elimina.
+lista, recuadros completos (🧠 ➗ 🔑 ⚠️ 🧪) y filas de tabla. Al pasar el ratón por encima
+aparece un **✎ crear nota**; lo que ya tiene una lleva un **📝** —en el margen izquierdo, o
+dentro del bloque si es un recuadro o una fila—. Pasando el cursor por ese 📝 se lee la nota
+en un globo, sin abrir nada; haciendo clic se edita o se elimina.
 
 | Qué | Cuántos |
 |---|---|
 | Párrafos | 1.200 |
-| Fórmulas | 223 |
-| Títulos de sección | 287 |
-| Puntos de lista | 396 |
 | Recuadros | 413 |
-| **Total anotable** | **2.519** |
+| Puntos de lista | 396 |
+| Títulos de sección | 287 |
+| Fórmulas | 223 |
+| Filas de tabla | 211 |
+| **Total anotable** | **2.730** |
+
+> ℹ️ Las filas de tabla son la única excepción al globo: la tabla vive en un contenedor con
+> desplazamiento horizontal que **recorta** todo lo que se salga, así que el globo asomaría
+> cortado. En ellas el 📝 abre directamente la nota.
 
 Todo se guarda en el navegador y sobrevive a recargar y a cambiar de capítulo. Desde el
 botón **💾 Mis cambios** de la barra lateral puedes:

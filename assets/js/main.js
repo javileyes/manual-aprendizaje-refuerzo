@@ -298,14 +298,23 @@
 
   /* Qué se puede anotar: párrafos, fórmulas, títulos de sección, puntos de lista
      y recuadros completos (🧠 ➗ 🔑 ⚠️ 🧪) desde su título. */
+  /* Texto de una FILA de tabla, celda a celda. No uso textoParrafo() directamente
+     sobre el <tr> porque pegaría las celdas sin separación («QuéCuántos»); y no
+     cambio textoParrafo() para que las separe porque 17 recuadros del manual
+     llevan una tabla dentro, y eso les cambiaría la clave a todos. */
+  const textoFila = (tr) => [...tr.children].map((c) => textoParrafo(c))
+    .filter(Boolean).join(" · ").replace(/\s+/g, " ").trim();
+
   function elementosAnotables() {
     const c = document.querySelector(".content");
     if (!c) return [];
     const out = [];
-    c.querySelectorAll("p, h2, h3, li, .callout").forEach((el) => {
+    c.querySelectorAll("p, h2, h3, li, .callout, tbody tr").forEach((el) => {
       if (el.closest(".code-example, .terminal, .chapter-toc, .chapter-nav")) return;
       if (el.classList.contains("pyodide-banner")) return;
-      if (el.classList.contains("callout")) {
+      if (el.nodeName === "TR") {
+        if (el.children.length && textoFila(el).length >= 20) out.push(el);
+      } else if (el.classList.contains("callout")) {
         if (el.querySelector(":scope > .callout-title")) out.push(el);
       } else if (el.nodeName === "P") {
         if (textoParrafo(el).length >= 40 || el.dataset.tex) out.push(el);
@@ -321,8 +330,14 @@
   /* Dónde se cuelga el icono. En un recuadro va dentro de su título (alineado a
      la derecha): fuera no cabría sin montarse sobre el borde de color, y en
      móvil se saldría de la página. En lo demás, en el margen izquierdo. */
-  const contenedorMarca = (el) =>
-    el.classList.contains("callout") ? el.querySelector(":scope > .callout-title") : el;
+  const contenedorMarca = (el) => {
+    if (el.classList.contains("callout")) return el.querySelector(":scope > .callout-title");
+    // En una fila de tabla, dentro de su primera celda: .table-wrap tiene
+    // overflow-x:auto, así que cualquier cosa colocada fuera de la fila queda
+    // RECORTADA y, si sobresale por la izquierda, además es inalcanzable.
+    if (el.nodeName === "TR") return el.querySelector(":scope > td, :scope > th");
+    return el;
+  };
 
   function pintaMarcaNota(p) {
     const caja = contenedorMarca(p) || p;
@@ -337,7 +352,7 @@
     // Y que diga QUÉ se anota: el 📝 es enfocable y su nombre se lee dentro del
     // encabezado o del punto de lista al que pertenece.
     const QUE = { texto: "este párrafo", formula: "esta fórmula", titulo: "esta sección",
-                  lista: "este punto", recuadro: "este recuadro" };
+                  lista: "este punto", recuadro: "este recuadro", fila: "esta fila" };
     const que = QUE[p.dataset.notaTipo] || "este párrafo";
     b.setAttribute("aria-label", nota ? "Ver, editar o eliminar tu nota sobre " + que
                                       : "Crear una nota sobre " + que);
@@ -348,7 +363,9 @@
     // Globo con el texto de la nota, para leerla sin abrir el modal.
     // Va con la clase nota-ui para que textoParrafo() lo ignore: si no, su
     // texto se colaría en la huella que identifica al párrafo.
-    if (nota) {
+    // En las filas no hay globo: .table-wrap recorta, así que asomaría cortado.
+    // El 📝 abre directamente la nota, que es donde se lee entera.
+    if (nota && p.dataset.notaTipo !== "fila") {
       const g = document.createElement("span");
       g.className = "nota-ui nota-globo";
       g.setAttribute("role", "tooltip");
@@ -477,7 +494,7 @@
     // se quedarían sin sección.
     const seccionDe = new Map();
     let actual = "";
-    document.querySelectorAll(".content h2[id], .content h3[id], .content p, .content li, .content .callout")
+    document.querySelectorAll(".content h2[id], .content h3[id], .content p, .content li, .content .callout, .content tbody tr")
       .forEach((el) => {
         if (/^H[23]$/.test(el.nodeName)) { actual = el.id; seccionDe.set(el, el.id); }
         else seccionDe.set(el, actual);
@@ -494,11 +511,15 @@
     };
 
     ps.forEach((el) => {
-      const t = textoParrafo(el);
+      const t = el.nodeName === "TR" ? textoFila(el) : textoParrafo(el);
       const sec = seccionDe.get(el) || "";
       let tipo, clave, extracto;
 
-      if (el.classList.contains("callout")) {
+      if (el.nodeName === "TR") {
+        tipo = "fila";
+        clave = "r/" + unica(huella(t));
+        extracto = corta(t, 110);
+      } else if (el.classList.contains("callout")) {
         // Recuadro completo. Muchos comparten título («🧠 Intuición»), así que la
         // clave mira también su contenido. NO mira el apartado: medido sobre los
         // 23 capítulos, título + contenido ya distingue los 413 sin una sola

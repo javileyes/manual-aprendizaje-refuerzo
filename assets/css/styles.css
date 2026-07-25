@@ -402,7 +402,10 @@ body {
   /* .anotable, no p.anotable: esto vale para párrafos, fórmulas, títulos de
      sección y puntos de lista. Los recuadros llevan su propia regla más abajo,
      porque su botón cuelga del título y no del recuadro. */
-  .content .anotable:hover > .nota-add { opacity: 1; visibility: visible; }
+  .content .anotable:hover > .nota-add,
+  /* En una fila de tabla el botón cuelga de la primera CELDA, no de la fila, así
+     que el «>» de arriba no lo alcanza. */
+  .content tbody tr.anotable:hover > * > .nota-add { opacity: 1; visibility: visible; }
   /* En una lista anidada el ratón está sobre el punto Y sobre el que lo
      contiene, y el botón de ambos es hijo directo: sin esto salen DOS
      pastillas a la vez (38 casos). Gana la de dentro, que es la señalada. */
@@ -517,6 +520,25 @@ body {
   text-transform: none; letter-spacing: normal; font-weight: 400;
 }
 .callout.con-nota { box-shadow: var(--shadow-md); }
+
+/* --- Filas de tabla ---
+   .table-wrap tiene overflow-x:auto, así que RECORTA todo lo que se salga: el
+   icono no puede ir en el margen como en los demás sitios. Va dentro de la
+   primera celda, en un canalillo que se le reserva a la izquierda. */
+.content tbody tr.anotable > :first-child { position: relative; padding-left: 34px; }
+.content tbody tr.anotable > :first-child > .nota-marca,
+.content tbody tr.anotable > :first-child > .nota-add {
+  position: absolute; left: 6px; top: 50%; margin-top: -10px;
+  width: 20px; height: 20px; padding: 0; font-size: 11px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+/* Sin etiqueta: en 20px no cabe «crear nota» (el texto sigue en aria-label). */
+.content tbody tr.anotable > :first-child > .nota-add {
+  border-radius: 50%; background: var(--bg-elev); border: 1px solid var(--border-strong);
+}
+.content tbody tr.anotable > :first-child > .nota-add span { display: none; }
+.content tbody tr.con-nota { background: var(--key-bg); }
+.content tbody tr.con-nota > :first-child { box-shadow: inset 3px 0 0 -1px var(--key-br); }
 
 /* En el modal, el «extracto» de una fórmula es su LaTeX */
 .nota-dlg .nt-extracto.nt-tex {
