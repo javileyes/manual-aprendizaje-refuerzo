@@ -39,7 +39,8 @@
     { n: 19, part: 4, slug: "19-exploracion-avanzada",    title: "Exploración avanzada",                  desc: "Curiosidad y motivación intrínseca (RND, ICM)." },
     { n: 20, part: 4, slug: "20-maxent-empowerment",     title: "Máxima entropía y empowerment",         desc: "Explorar y mantener opciones abiertas como parte del objetivo." },
     { n: 21, part: 4, slug: "21-rlhf",                    title: "RLHF: el RL detrás de los LLM",         desc: "Alinear modelos con preferencias humanas." },
-    { n: 22, part: 4, slug: "22-panorama",               title: "Panorama y buenas prácticas",           desc: "Evaluar bien, no engañarte, y hacia dónde va todo." },
+    { n: 22, part: 4, slug: "22-rl-offline",              title: "RL offline: aprender de datos ya registrados", desc: "Sin entorno con el que probar: por qué se rompe y cómo se arregla." },
+    { n: 23, part: 4, slug: "23-panorama",               title: "Panorama y buenas prácticas",           desc: "Evaluar bien, no engañarte, y hacia dónde va todo." },
   ];
 
   window.RL_CH = CH;
@@ -89,6 +90,56 @@
     holder.innerHTML = html;
   }
 
+  /* Índice interno del capítulo ("En este capítulo").
+     Se genera solo, a partir de los <h2 id> del contenido, así que ningún capítulo
+     necesita mantenerlo a mano. Se salta las páginas cortas y la portada. */
+  function buildChapterTOC() {
+    const content = document.querySelector(".content");
+    if (!content || !document.body.dataset.chapter || document.body.dataset.chapter === "0") return;
+
+    const hs = [...content.querySelectorAll("h2[id]")];
+    if (hs.length < 4) return; // con pocas secciones el índice estorba más que ayuda
+
+    const nav = document.createElement("nav");
+    nav.className = "chapter-toc";
+    nav.setAttribute("aria-label", "Índice del capítulo");
+    nav.innerHTML =
+      `<div class="ct-title">En este capítulo</div><ol class="ct-list">` +
+      hs.map((h) => {
+        // El texto del título puede llevar $LaTeX$; para el índice lo dejamos tal cual
+        // (MathJax lo renderiza también aquí) pero quitamos etiquetas sueltas.
+        const t = h.innerHTML.replace(/<a\b[^>]*>|<\/a>/g, "");
+        return `<li><a href="#${h.id}">${t}</a></li>`;
+      }).join("") +
+      `</ol>`;
+
+    const lead = content.querySelector(".lead");
+    (lead || content.querySelector("h1")).insertAdjacentElement("afterend", nav);
+
+    // Marca la sección que se está leyendo.
+    const links = new Map(hs.map((h) => [h.id, nav.querySelector(`a[href="#${CSS.escape(h.id)}"]`)]));
+    let activa = null;
+    const marcar = (id) => {
+      if (id === activa) return;
+      if (activa && links.get(activa)) links.get(activa).classList.remove("active");
+      activa = id;
+      if (links.get(id)) links.get(id).classList.add("active");
+    };
+    if ("IntersectionObserver" in window) {
+      const vistos = new Set();
+      const obs = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((e) => (e.isIntersecting ? vistos.add(e.target.id) : vistos.delete(e.target.id)));
+          // la primera sección visible en orden de documento manda
+          const actual = hs.find((h) => vistos.has(h.id));
+          if (actual) marcar(actual.id);
+        },
+        { rootMargin: "-80px 0px -70% 0px" }
+      );
+      hs.forEach((h) => obs.observe(h));
+    }
+  }
+
   function buildIndexTOC() {
     const holder = document.getElementById("index-toc");
     if (!holder) return;
@@ -109,6 +160,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     buildSidebar();
     buildChapterNav();
+    buildChapterTOC();
     buildIndexTOC();
   });
 })();

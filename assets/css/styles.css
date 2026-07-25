@@ -229,6 +229,49 @@ body {
   margin: 0 0 1.5em;
 }
 
+/* ---------- Índice interno del capítulo ---------- */
+.chapter-toc {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px 18px;
+  margin: 0 0 2.2em;
+  box-shadow: var(--shadow-sm);
+}
+.chapter-toc .ct-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--text-faint); margin-bottom: 10px;
+}
+.chapter-toc .ct-list {
+  list-style: none; margin: 0; padding: 0;
+  columns: 2; column-gap: 28px;
+  counter-reset: ct;
+}
+.chapter-toc .ct-list li {
+  break-inside: avoid; margin: 0 0 2px;
+  counter-increment: ct;
+}
+.chapter-toc .ct-list a {
+  display: block; padding: 4px 8px 4px 26px; position: relative;
+  font-size: 14.5px; line-height: 1.35;
+  color: var(--text-soft); text-decoration: none;
+  border-radius: var(--radius-sm); border-bottom: none;
+  transition: background .12s, color .12s;
+}
+.chapter-toc .ct-list a::before {
+  content: counter(ct); position: absolute; left: 8px;
+  font-size: 11.5px; font-weight: 600; color: var(--text-faint);
+  font-variant-numeric: tabular-nums; top: 6px;
+}
+.chapter-toc .ct-list a:hover { background: var(--bg-sunken); color: var(--text); }
+.chapter-toc .ct-list a.active { background: var(--accent-soft); color: var(--accent-text); font-weight: 650; }
+.chapter-toc .ct-list a.active::before { color: var(--accent-text); }
+.chapter-toc mjx-container { font-size: inherit !important; }
+
+@media (max-width: 620px) {
+  .chapter-toc .ct-list { columns: 1; }
+}
+
 /* ---------- Bloques didácticos (callouts) ---------- */
 .callout {
   border-left: 4px solid var(--accent);

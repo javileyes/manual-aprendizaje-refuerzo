@@ -15,7 +15,7 @@ El objetivo: que termines entendiendo *de verdad* las matemáticas y los algorit
 desde los bandidos multibrazo hasta PPO y el RLHF que hay detrás de los grandes
 modelos de lenguaje— apoyándote siempre en explicaciones intuitivas y ejemplos.
 
-- **22 capítulos** en 5 partes, del bucle agente-entorno a RLHF.
+- **23 capítulos** en 5 partes, del bucle agente-entorno a RLHF y al RL offline.
 - **29 scripts de Python**, todos ejecutados y verificados: cada cifra y cada salida
   de terminal que aparece en el manual sale de una ejecución real, nunca escrita a mano.
 - Los algoritmos profundos van en **doble versión**: una *desde cero* en NumPy
@@ -136,7 +136,7 @@ AprendizajeRefuerzo/
 │       ├── nav.js             # Índice: barra lateral y navegación (fuente única)
 │       ├── main.js            # Tema, resaltado de sintaxis, copiar/descargar
 │       └── pyodide-runner.js  # Ejecuta Python en el navegador
-├── chapters/                  # Un archivo HTML por capítulo (01…21)
+├── chapters/                  # Un archivo HTML por capítulo (01…23)
 └── code/                      # Los mismos ejemplos como scripts .py por capítulo
 ```
 
@@ -148,7 +148,7 @@ AprendizajeRefuerzo/
 **Parte 1 · Tabular** — 5) Programación dinámica · 6) Monte Carlo · 7) TD(0) · 8) SARSA · 9) Q-Learning · 10) TD(λ)
 **Parte 2 · Deep RL** — 11) Aproximación de funciones · 12) DQN · 13) Mejoras de DQN
 **Parte 3 · Política** — 14) REINFORCE · 15) Actor-Crítico · 16) PPO · 17) Control continuo
-**Parte 4 · Fronteras** — 18) Model-based · 19) Exploración avanzada · 20) Máxima entropía y empowerment · 21) RLHF · 22) Panorama
+**Parte 4 · Fronteras** — 18) Model-based · 19) Exploración avanzada · 20) Máxima entropía y empowerment · 21) RLHF · 22) RL offline · 23) Panorama
 
 Empieza por [`chapters/01-que-es-rl.html`](chapters/01-que-es-rl.html).
 

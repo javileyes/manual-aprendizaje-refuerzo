@@ -20,7 +20,7 @@ varias semillas; nunca saques conclusiones de una unica ejecucion.
 
 Como ejecutarlo en tu terminal:
     pip install -r requirements.txt
-    python code/22-panorama/reproducibilidad_semillas.py
+    python code/23-panorama/reproducibilidad_semillas.py
 """
 
 import numpy as np

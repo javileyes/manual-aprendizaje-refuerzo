@@ -15,7 +15,7 @@
   </script>
   <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 </head>
-<body data-chapter="22">
+<body data-chapter="23">
   <div class="progress-bar"></div>
   <div class="topbar">
     <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
@@ -29,7 +29,7 @@
     <div class="content-wrap">
       <main class="content">
 
-        <span class="chapter-eyebrow">Parte 4 · Capítulo 22</span>
+        <span class="chapter-eyebrow">Parte 4 · Capítulo 23</span>
         <h1>Panorama, buenas prácticas y hacia dónde ir</h1>
         <p class="lead">
           Has recorrido veintiún capítulos: del bucle agente–entorno a los bandidos, de Bellman a
@@ -199,7 +199,7 @@ varias semillas; nunca saques conclusiones de una unica ejecucion.
 
 Como ejecutarlo en tu terminal:
     pip install -r requirements.txt
-    python code/22-panorama/reproducibilidad_semillas.py
+    python code/23-panorama/reproducibilidad_semillas.py
 """
 
 import numpy as np
@@ -424,7 +424,7 @@ if __name__ == "__main__":
 <span class="prompt">$</span> pip install -r requirements.txt
 
 <span class="comment"># 3) ejecuta el ejemplo</span>
-<span class="prompt">$</span> python code/22-panorama/reproducibilidad_semillas.py
+<span class="prompt">$</span> python code/23-panorama/reproducibilidad_semillas.py
 <span class="comment">Q-Learning en gridworld estocastico 5x5 | 20 semillas
 ------------------------------------------------------------
 Retorno final (media de los ultimos 50 episodios) entre semillas:
@@ -578,7 +578,7 @@ velocidad es toda tuya: por eso se reporta MEDIA +/- dispersion.</span></pre>
           <table>
             <thead><tr><th>Frontera</th><th>La idea en una frase</th></tr></thead>
             <tbody>
-              <tr><td><strong>Offline RL</strong> (RL por lotes)</td><td>Aprender la mejor política posible a partir de un conjunto <em>fijo</em> de datos ya registrados, sin interactuar con el entorno. Clave cuando explorar es caro o peligroso (medicina, conducción). <a href="#offline-rl">Lo desarrollamos justo debajo</a>.</td></tr>
+              <tr><td><strong>Offline RL</strong> (RL por lotes)</td><td>Aprender la mejor política posible a partir de un conjunto <em>fijo</em> de datos ya registrados, sin interactuar con el entorno. Clave cuando explorar es caro o peligroso (medicina, conducción). <a href="22-rl-offline.html">Tiene capítulo propio, el 22</a>.</td></tr>
               <tr><td><strong>RL multi-agente</strong></td><td>Varios agentes que aprenden a la vez, cooperando o compitiendo. El entorno deja de ser estacionario porque los demás también cambian.</td></tr>
               <tr><td><strong>RL jerárquico</strong></td><td>Descomponer una tarea larga en <em>subobjetivos</em> (opciones, habilidades): un nivel alto decide «qué» y uno bajo ejecuta «cómo».</td></tr>
               <tr><td><strong>RL basado en modelo</strong></td><td>Aprender un modelo del mundo y planificar «imaginando» transiciones. Enlaza con el <a href="18-model-based.html">capítulo 18</a> (Dyna-Q, MuZero) y con la eficiencia en datos.</td></tr>
@@ -587,72 +587,23 @@ velocidad es toda tuya: por eso se reporta MEDIA +/- dispersion.</span></pre>
           </table>
         </div>
 
-        <h3 id="offline-rl">Offline RL, de cerca: lo que pasa cuando le quitas el entorno al agente</h3>
+        <h3 id="offline-rl">Offline RL: el mejor examen final de este manual</h3>
         <p>
-          De las cinco fronteras, esta merece unos párrafos aparte, y no por ser la más de moda, sino
-          porque no introduce ninguna maquinaria nueva: es lo que sale cuando juntas cuatro cosas que ya
-          tienes. Es, además, el mejor examen final que puedes hacerte del manual.
+          De las cinco fronteras, esta se ha ganado un capítulo entero, y no por ser la más de moda,
+          sino porque no introduce ninguna maquinaria nueva: es lo que sale cuando juntas cuatro cosas
+          que ya tienes. Te dan un conjunto $\mathcal{D}$ de transiciones $(s, a, r, s')$ registradas por
+          otro —un piloto humano, un controlador antiguo, el histórico de un hospital— y ni un solo paso
+          más de interacción. Ese $\mathcal{D}$ es, literalmente, un
+          <a href="12-dqn.html#replay">búfer de repetición</a> que nunca vuelve a llenarse.
         </p>
         <p>
-          El montaje es este: te dan un conjunto $\mathcal{D}$ de transiciones $(s, a, r, s')$ registradas
-          por otro —un piloto humano, un controlador antiguo, el histórico de un hospital— y ni un solo
-          paso más de interacción. Fíjate en que $\mathcal{D}$ es, literalmente, un
-          <a href="12-dqn.html#replay">búfer de repetición</a> del capítulo 12 que nunca vuelve a
-          recibir nada. Así que la tentación es evidente: muestrea minilotes, aplica Q-Learning y a
-          correr. Y funciona rematadamente mal.
-        </p>
-        <p>
-          El culpable es viejo conocido: el $\max_{a'} Q(s', a')$ del
-          <a href="09-q-learning.html#sesgo-max">capítulo 9</a>. Allí viste que el máximo sobre valores
-          ruidosos está <strong>sesgado al alza</strong>: basta con que una acción tenga suerte en la
-          estimación para que el máximo la elija. Con entorno, ese optimismo se corrige solo, porque el
-          agente acaba probando la acción y la realidad le desmiente. Sin entorno no le desmiente nadie
-          nunca. Y como el <a href="07-td-aprendizaje.html#error-td">bootstrapping</a> del capítulo 7
-          reinyecta ese valor inflado en el objetivo de los estados vecinos, el error no se queda quieto
-          donde nació: se propaga hacia atrás y se amplifica hasta que la $Q$ diverge por completo.
-        </p>
-
-        <div class="callout warn">
-          <div class="callout-title">⚠️ El bucle que se realimenta</div>
-          <p>
-            El máximo elige una acción que el conjunto de datos casi no contiene → su $Q$ está inflada
-            porque nada la ha refutado → el bootstrapping copia ese valor inflado al estado anterior →
-            la política aprendida pasa a preferir precisamente esa acción → y como jamás se ejecuta,
-            nada la corrige. A esto se le llama <strong>desplazamiento distribucional</strong>: la
-            política que aprendes pregunta por acciones sobre las que tus datos no dicen nada.
-          </p>
-          <p>
-            La frase que resume el capítulo entero del RL offline es esta:
-            <strong>con entorno, la realidad te desmiente en cuanto pruebas la acción; sin entorno, no
-            te desmiente nadie nunca.</strong>
-          </p>
-        </div>
-
-        <p>Las soluciones que funcionan hoy se agrupan en dos familias, y las dos te van a sonar:</p>
-        <ul>
-          <li><strong>Quédate cerca de los datos</strong> (BCQ, TD3+BC). Se restringe la política a
-            acciones que el conjunto respalda; TD3+BC lo hace de la forma más tosca y más eficaz
-            posible: añadirle al objetivo del actor un término de <em>clonación de conducta</em> que le
-            castiga por alejarse de lo que hizo el que generó los datos. Si esto te suena, es porque es
-            <strong>la misma idea</strong> que el freno KL contra $\pi_\text{ref}$ del
-            <a href="21-rlhf.html#objetivo-kl">capítulo 21</a> —allí una divergencia entre
-            distribuciones, aquí un simple error cuadrático contra la acción registrada, pero el mismo
-            papel—: en los dos casos hay una política de referencia de la que no puedes alejarte, porque
-            fuera de su zona tu estimación del valor no vale nada.</li>
-          <li><strong>Sé deliberadamente pesimista</strong> (CQL). En lugar de prohibir acciones, se
-            empuja <em>hacia abajo</em> el valor de las que no aparecen en los datos. La lógica es
-            limpia: si el problema era un optimismo que nadie corrige, la cura es un sesgo pesimista
-            metido a mano.</li>
-        </ul>
-
-        <p>
-          Queda un problema abierto y bastante incómodo: <strong>cómo evaluar</strong>. Sin entorno no
-          puedes medir tu política nueva; la única medida honesta es desplegarla, que es justo lo que
-          querías evitar. Existen estimadores <em>off-policy</em> basados en muestreo por importancia,
-          pero arrastran la varianza que ya viste en el
-          <a href="06-monte-carlo.html">capítulo 6</a>: los pesos se multiplican paso a paso y se
-          disparan. Por eso, en RL offline, el ciclo de «pruebo una idea y veo si mejora» es lento, caro
-          y a menudo poco concluyente.
+          Y ahí el <a href="09-q-learning.html">Q-Learning</a> se rompe de una forma preciosa: su $\max$
+          se toma sobre acciones que <em>nadie ejecutó jamás</em>, y como no hay entorno que lo desmienta,
+          el <a href="07-td-aprendizaje.html">bootstrapping</a> recicla ese optimismo inventado hasta
+          envenenar la tabla entera. La cura resulta ser la misma penalización contra una referencia que
+          viste en el <a href="21-rlhf.html">RLHF</a>. Todo eso —con un ejemplo que puedes ejecutar y en
+          el que verás a un agente creerse un valor altísimo mientras fracasa— está en el
+          <a href="22-rl-offline.html">capítulo 22</a>.
         </p>
 
         <div class="callout intuition">
