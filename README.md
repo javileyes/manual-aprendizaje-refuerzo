@@ -4,9 +4,9 @@
 
 > Ábrelo en el navegador y **ejecuta el código Python sin instalar nada** (pulsa ▶ Ejecutar en cualquier ejemplo).
 > El código además es **editable**: cambia lo que quieras y vuelve a ejecutarlo para hacer los
-> «🧪 Experimenta» de cada capítulo ahí mismo. Tus cambios se guardan en el navegador, puedes
-> exportarlos **todos a un `.json`** desde «💾 Mis cambios» y volver a importarlos, y un botón
-> **↺ Original** restaura el código del manual.
+> «🧪 Experimenta» de cada capítulo ahí mismo. Y puedes **anotar cualquier párrafo**. Tus cambios
+> y tus notas se guardan en el navegador y se exportan **juntos a un `.json`** desde
+> «💾 Mis cambios», para llevártelos a otro sitio o guardar varias tandas de pruebas.
 
 ---
 
@@ -117,24 +117,32 @@ Para ejecutarlos **sin ventana** (por ejemplo, en un servidor), usa el backend `
 MPLBACKEND=Agg python code/12-dqn/dqn_torch.py
 ```
 
-### 4. Tus propios cambios: «💾 Mis cambios»
+### 4. Tu copia del manual: código editado y notas
 
-Todos los bloques de código del manual son **editables en la propia página**. Lo que
-edites se guarda en el navegador y sobrevive a recargar y a cambiar de capítulo.
+**El código es editable en la propia página.** Cambia lo que quieras en cualquier bloque
+y pulsa ▶ Ejecutar: corre tu versión. Cada bloque tiene un **↺ Original** que restaura
+solo ese ejemplo.
 
-Desde el botón **💾 Mis cambios** de la barra lateral puedes:
+**Cualquier párrafo se puede anotar.** Al pasar el ratón por encima aparece un
+**✎ crear nota**; los párrafos que ya tienen una llevan un **📝** en el margen izquierdo
+que abre la nota para leerla, editarla o eliminarla.
 
-- **⬇ Exportar `.json`** — baja *todas* tus versiones (de todos los capítulos) a un
-  único fichero `manual-rl-mis-cambios.json`.
-- **⬆ Importar `.json`** — recupéralas en otro navegador u otro ordenador. Guarda varios
+Todo se guarda en el navegador y sobrevive a recargar y a cambiar de capítulo. Desde el
+botón **💾 Mis cambios** de la barra lateral puedes:
+
+- **⬇ Exportar `.json`** — baja a un único fichero `manual-rl-mis-cambios.json` *todo*
+  lo tuyo: el código editado de todos los capítulos **y todas las notas**.
+- **⬆ Importar `.json`** — recupéralo en otro navegador u otro ordenador. Guarda varios
   ficheros si quieres tener distintas tandas de pruebas.
-- **↺ Restaurar todo** — devuelve el manual entero a su código original.
+- **↺ Restaurar código** y **🗑 Borrar notas**, por separado, para no llevarte una cosa
+  por delante al querer descartar la otra.
 
-Cada bloque tiene además su propio **↺ Original**, que restaura solo ese ejemplo.
-
-> ℹ️ El fichero guarda cada ejemplo por su **nombre** (`ppo_desde_cero.py`), no por el número
-> del capítulo, y anota una huella del original. Si el manual cambia un ejemplo después de que
-> tú guardaras tu versión, al abrirlo te avisa de que lo tuyo se escribió sobre otra base.
+> ℹ️ **Cómo se identifica cada cosa.** Los ejemplos, por su **nombre de fichero**
+> (`ppo_desde_cero.py`), no por el número del capítulo: así un renumerado no deja
+> huérfanos tus cambios. Las notas, por una **huella del texto del párrafo**, no por su
+> posición: así insertar un párrafo no descoloca las notas de los demás. En ambos casos se
+> guarda también una huella del original, y si el manual cambia después ese ejemplo o ese
+> párrafo, se te avisa en vez de aplicar tu versión sobre otra base o perderla en silencio.
 
 ### Dos familias de ejemplos
 

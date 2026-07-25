@@ -228,6 +228,182 @@
     ex.insertAdjacentElement("afterend", o);
   }
 
+  /* ---------- Notas del lector ----------
+     Cualquier párrafo se puede anotar: al pasar el ratón aparece «✎ crear nota»,
+     y los párrafos que ya tienen una llevan un icono en el margen izquierdo.
+     Se guardan igual que las ediciones de código y viajan en el mismo .json.
+
+     LA CLAVE DE CADA PÁRRAFO es una huella de su TEXTO, no su posición: así,
+     insertar o quitar un párrafo en el capítulo no descoloca las notas de los
+     demás. Y el texto se extrae de forma estable frente a MathJax —el 74 % de
+     los párrafos llevan fórmulas, que antes de renderizar son «$G_t$» y después
+     un <mjx-container>—: toda fórmula cuenta como el mismo símbolo en los dos
+     casos, así que la clave no depende de si la librería ya había cargado. */
+  const ALMACEN_NOTAS = "rl-notas";
+
+  function leeNotas() {
+    try {
+      const v = JSON.parse(localStorage.getItem(ALMACEN_NOTAS));
+      return v && typeof v === "object" ? v : {};
+    } catch (_) { return {}; }
+  }
+  function escribeNotas(obj) {
+    try { localStorage.setItem(ALMACEN_NOTAS, JSON.stringify(obj)); return true; }
+    catch (_) { return false; }
+  }
+
+  function textoParrafo(p) {
+    let out = "";
+    (function walk(n) {
+      n.childNodes.forEach((c) => {
+        if (c.nodeType === 3) { out += c.nodeValue; return; }
+        if (c.nodeType !== 1) return;
+        if (/^MJX-/.test(c.nodeName)) { out += "§"; return; }   // fórmula ya renderizada
+        if (c.classList && c.classList.contains("nota-ui")) return; // nuestra propia interfaz
+        walk(c);
+      });
+    })(p);
+    return out
+      .replace(/\$\$[\s\S]*?\$\$/g, "§")
+      .replace(/\\\[[\s\S]*?\\\]/g, "§")
+      .replace(/\\\([\s\S]*?\\\)/g, "§")
+      .replace(/\$[^$]*\$/g, "§")                              // fórmula aún sin renderizar
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  const paginaActual = () => location.pathname.split("/").pop() || "index.html";
+
+  function parrafosAnotables() {
+    const c = document.querySelector(".content");
+    if (!c) return [];
+    return [...c.querySelectorAll("p")].filter((p) =>
+      !p.closest(".code-example, .terminal, .chapter-toc, .chapter-nav") &&
+      !p.classList.contains("pyodide-banner") &&
+      textoParrafo(p).length >= 40);
+  }
+
+  function pintaMarcaNota(p) {
+    p.querySelectorAll(":scope > .nota-ui").forEach((e) => e.remove());
+    const nota = leeNotas()[p.dataset.notaId];
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "nota-ui " + (nota ? "nota-marca" : "nota-add");
+    b.innerHTML = nota ? "📝" : "✎ <span>crear nota</span>";
+    b.title = nota ? "Ver, editar o eliminar tu nota" : "Crear una nota en este párrafo";
+    b.setAttribute("aria-label", b.title);
+    b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); abreNota(p); });
+    p.appendChild(b);
+    p.classList.toggle("con-nota", !!nota);
+  }
+
+  let dlgNota = null;
+  function abreNota(p) {
+    if (!dlgNota) return;
+    const id = p.dataset.notaId;
+    const nota = leeNotas()[id];
+    dlgNota.querySelector(".nt-extracto").textContent = "«" + (p.dataset.notaExtracto || "") + "»";
+    const ta = dlgNota.querySelector(".nt-texto");
+    ta.value = nota ? nota.texto : "";
+    dlgNota.querySelector("h3").textContent = nota ? "Tu nota" : "Nueva nota";
+    dlgNota.querySelector(".nt-eliminar").disabled = !nota;
+    dlgNota.dataset.para = id;
+    dlgNota._parrafo = p;
+    if (typeof dlgNota.showModal === "function") dlgNota.showModal();
+    else dlgNota.setAttribute("open", "");
+    ta.focus();
+  }
+
+  function montaDialogoNotas() {
+    if (dlgNota) return;
+    dlgNota = document.createElement("dialog");
+    dlgNota.className = "nota-dlg";
+    dlgNota.innerHTML = `
+      <h3>Nueva nota</h3>
+      <blockquote class="nt-extracto"></blockquote>
+      <textarea class="nt-texto" rows="7" placeholder="Escribe aquí tu nota sobre este párrafo…"></textarea>
+      <p class="nt-pie">Tus notas se guardan en este navegador y se exportan junto con los cambios
+        de código desde «💾 Mis cambios».</p>
+      <div class="nt-acciones">
+        <button type="button" class="nt-guardar">Guardar</button>
+        <button type="button" class="nt-cancelar">Cancelar</button>
+        <button type="button" class="nt-eliminar">Eliminar</button>
+      </div>`;
+    document.body.appendChild(dlgNota);
+
+    const cierra = () => {
+      if (typeof dlgNota.close === "function") dlgNota.close();
+      else dlgNota.removeAttribute("open");
+    };
+
+    dlgNota.querySelector(".nt-cancelar").addEventListener("click", cierra);
+    dlgNota.addEventListener("click", (e) => { if (e.target === dlgNota) cierra(); });
+
+    dlgNota.querySelector(".nt-guardar").addEventListener("click", () => {
+      const p = dlgNota._parrafo;
+      if (!p || !dlgNota.dataset.para) return cierra();   // no sabemos a qué párrafo va
+      const txt = dlgNota.querySelector(".nt-texto").value.trim();
+      const notas = leeNotas();
+      const id = dlgNota.dataset.para;
+      if (!txt) delete notas[id];               // guardar en blanco = borrar
+      else {
+        const previa = notas[id];
+        notas[id] = {
+          texto: txt,
+          pagina: paginaActual(),
+          capitulo: document.body.dataset.chapter || "",
+          titulo: (document.title.split("·")[0] || "").trim(),
+          seccion: p.dataset.notaSeccion || "",
+          extracto: p.dataset.notaExtracto || "",
+          creada: (previa && previa.creada) || new Date().toISOString(),
+          modificada: new Date().toISOString(),
+        };
+      }
+      escribeNotas(notas);
+      pintaMarcaNota(p);
+      refrescaBotonCambios();
+      cierra();
+    });
+
+    dlgNota.querySelector(".nt-eliminar").addEventListener("click", () => {
+      const p = dlgNota._parrafo;
+      if (!p || !dlgNota.dataset.para) return cierra();
+      const notas = leeNotas();
+      delete notas[dlgNota.dataset.para];
+      escribeNotas(notas);
+      pintaMarcaNota(p);
+      refrescaBotonCambios();
+      cierra();
+    });
+  }
+
+  function preparaNotas() {
+    const ps = parrafosAnotables();
+    if (!ps.length) return;
+    const pag = paginaActual();
+    // Primero TODAS las claves y luego los iconos: si insertáramos la interfaz
+    // antes de calcular, se colaría en el texto del que sale la huella.
+    // ¿Bajo qué apartado cae cada párrafo? Recorremos el capítulo en orden de
+    // documento, no por hermanos: si no, los párrafos de dentro de un callout
+    // se quedarían sin sección.
+    const seccionDe = new Map();
+    let actual = "";
+    document.querySelectorAll(".content h2[id], .content h3[id], .content p").forEach((el) => {
+      if (/^H[23]$/.test(el.nodeName)) actual = el.id;
+      else seccionDe.set(el, actual);
+    });
+
+    ps.forEach((p) => {
+      const t = textoParrafo(p);
+      p.dataset.notaId = pag + "::" + huella(t);
+      p.dataset.notaExtracto = t.length > 110 ? t.slice(0, 110).trim() + "…" : t;
+      p.dataset.notaSeccion = seccionDe.get(p) || "";
+      p.classList.add("anotable");
+    });
+    montaDialogoNotas();
+    ps.forEach(pintaMarcaNota);
+  }
+
   function marcarModificado(ex) {
     const code = ex.querySelector("pre.code-source code");
     const btn = ex.querySelector(".btn-restore");
@@ -350,7 +526,7 @@
   function refrescaBotonCambios() {
     const btn = document.querySelector(".btn-cambios");
     if (!btn) return;
-    const n = Object.keys(leeEdiciones()).length;
+    const n = Object.keys(leeEdiciones()).length + Object.keys(leeNotas()).length;
     btn.querySelector(".cc-num").textContent = n ? ` (${n})` : "";
     btn.classList.toggle("hay-cambios", n > 0);
   }
@@ -372,8 +548,10 @@
 
   function exportaCambios() {
     const ediciones = leeEdiciones();
-    if (!Object.keys(ediciones).length) return;
-    const datos = { formato: FORMATO, version: 1, guardado: new Date().toISOString(), ediciones };
+    const notas = leeNotas();
+    if (!Object.keys(ediciones).length && !Object.keys(notas).length) return;
+    // version 2 = añade las notas. Los .json de la version 1 se siguen importando.
+    const datos = { formato: FORMATO, version: 2, guardado: new Date().toISOString(), ediciones, notas };
     const blob = new Blob([JSON.stringify(datos, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -387,25 +565,40 @@
       let d;
       try { d = JSON.parse(lector.result); }
       catch (_) { return avisar("Ese archivo no es un JSON válido.", true); }
-      if (!d || d.formato !== FORMATO || !d.ediciones || typeof d.ediciones !== "object") {
+      const hayEd = d && d.ediciones && typeof d.ediciones === "object";
+      const hayNo = d && d.notas && typeof d.notas === "object";
+      if (!d || d.formato !== FORMATO || (!hayEd && !hayNo)) {
         return avisar("Ese archivo no parece un fichero de cambios del manual.", true);
       }
       const st = leeEdiciones();
       let n = 0, desfasados = 0;
-      Object.keys(d.ediciones).forEach((id) => {
+      if (hayEd) Object.keys(d.ediciones).forEach((id) => {
         const e = d.ediciones[id];
         if (!e || typeof e.codigo !== "string") return;
         st[id] = e; n++;
         const aqui = document.querySelector(`pre.code-source code[data-id="${CSS.escape(id)}"]`);
         if (aqui && e.huella && e.huella !== huella(aqui.dataset.original)) desfasados++;
       });
-      if (!n) return avisar("El archivo no contenía ningún cambio.", true);
-      if (!escribeEdiciones(st)) return avisar("No he podido guardarlos en este navegador.", true);
+      const nt = leeNotas();
+      let m = 0;
+      if (hayNo) Object.keys(d.notas).forEach((id) => {
+        const e = d.notas[id];
+        if (!e || typeof e.texto !== "string") return;
+        nt[id] = e; m++;
+      });
+      if (!n && !m) return avisar("El archivo no contenía ningún cambio ni ninguna nota.", true);
+      if ((n && !escribeEdiciones(st)) || (m && !escribeNotas(nt))) {
+        return avisar("No he podido guardarlos en este navegador.", true);
+      }
       aplicaEdicionesEnPagina();
+      parrafosAnotables().forEach((p) => { if (p.dataset.notaId) pintaMarcaNota(p); });
       refrescaBotonCambios();
-      avisar(`Importados ${n} ejemplo${n === 1 ? "" : "s"}.` +
-        (desfasados ? " Ojo: alguno se guardó sobre una versión anterior del manual." : "") +
-        " Los de otros capítulos se aplicarán al abrirlos.", false);
+      const partes = [];
+      if (n) partes.push(`${n} ejemplo${n === 1 ? "" : "s"} de código`);
+      if (m) partes.push(`${m} nota${m === 1 ? "" : "s"}`);
+      avisar(`Importado: ${partes.join(" y ")}.` +
+        (desfasados ? " Ojo: algún ejemplo se guardó sobre una versión anterior del manual." : "") +
+        " Lo de otros capítulos se aplicará al abrirlos.", false);
     };
     lector.onerror = () => avisar("No he podido leer el archivo.", true);
     lector.readAsText(file);
@@ -438,38 +631,62 @@
     };
 
     function pinta() {
+      const porCapitulo = (o) => (a, b) =>
+        (parseInt(o[a].capitulo, 10) || 0) - (parseInt(o[b].capitulo, 10) || 0);
+      const donde = (e) => e.pagina
+        ? `<a href="${hrefPagina(e.pagina)}${e.seccion ? "#" + e.seccion : ""}">` +
+          `${e.capitulo ? "Cap. " + e.capitulo + " · " : ""}${escapeHtml(e.titulo || e.pagina)}</a>`
+        : escapeHtml(e.titulo || "");
+
       const st = leeEdiciones();
-      const ids = Object.keys(st).sort((a, b) =>
-        (parseInt(st[a].capitulo, 10) || 0) - (parseInt(st[b].capitulo, 10) || 0));
-      const lista = ids.length
-        ? `<ul class="cc-lista">` + ids.map((id) => {
-            const e = st[id];
-            const donde = e.pagina
-              ? `<a href="${hrefPagina(e.pagina)}">${e.capitulo ? "Cap. " + e.capitulo + " · " : ""}${e.titulo || e.pagina}</a>`
-              : (e.titulo || "");
-            return `<li><code>${escapeHtml(id)}</code><span>${donde}</span></li>`;
-          }).join("") + `</ul>`
+      const ids = Object.keys(st).sort(porCapitulo(st));
+      const notas = leeNotas();
+      const nids = Object.keys(notas).sort(porCapitulo(notas));
+
+      // Notas cuyo párrafo ya no existe en su página (el texto ha cambiado).
+      const aquiIds = new Set(parrafosAnotables().map((p) => p.dataset.notaId));
+      const huerfana = (id) => notas[id].pagina === paginaActual() && !aquiIds.has(id);
+
+      const bloqueCodigo = ids.length
+        ? `<ul class="cc-lista">` + ids.map((id) =>
+            `<li><code>${escapeHtml(id)}</code><span>${donde(st[id])}</span></li>`).join("") + `</ul>`
         : `<p class="cc-vacio">Todavía no has cambiado ningún ejemplo. Edita cualquier bloque de
              código del manual y aparecerá aquí.</p>`;
 
+      const bloqueNotas = nids.length
+        ? `<ul class="cc-lista cc-notas">` + nids.map((id) => {
+            const n = notas[id];
+            const texto = n.texto.length > 90 ? n.texto.slice(0, 90) + "…" : n.texto;
+            return `<li><span class="nt-cita">${escapeHtml(texto)}` +
+              (huerfana(id) ? ` <em class="nt-huerfana">(el párrafo ha cambiado)</em>` : "") +
+              `</span><span>${donde(n)}</span></li>`;
+          }).join("") + `</ul>`
+        : `<p class="cc-vacio">Todavía no has escrito ninguna nota. Pasa el ratón por cualquier
+             párrafo del manual y pulsa «✎ crear nota».</p>`;
+
       dlg.innerHTML = `
         <form method="dialog" class="cc-cerrar"><button aria-label="Cerrar">✕</button></form>
-        <h3>Mis cambios en el código</h3>
+        <h3>Mis cambios y mis notas</h3>
         <p class="cc-intro">
-          Lo que editas en cualquier bloque de código se guarda en este navegador y se conserva al
-          recargar y al cambiar de capítulo. Aquí puedes bajarlo todo a un fichero
-          <code>.json</code> y volver a cargarlo cuando quieras —en otro ordenador, o para tener
-          varias tandas de pruebas guardadas—.
+          Lo que editas en los bloques de código y las notas que escribes en los párrafos se guardan
+          en este navegador y se conservan al recargar y al cambiar de capítulo. Aquí puedes bajarlo
+          todo a un único fichero <code>.json</code> y volver a cargarlo cuando quieras —en otro
+          ordenador, o para tener varias tandas de pruebas guardadas—.
         </p>
         <div class="cc-cuenta">${ids.length
-          ? `<strong>${ids.length}</strong> ejemplo${ids.length === 1 ? "" : "s"} con cambios tuyos`
-          : "Sin cambios guardados"}</div>
-        ${lista}
+          ? `<strong>${ids.length}</strong> ejemplo${ids.length === 1 ? "" : "s"} de código con cambios tuyos`
+          : "Sin cambios en el código"}</div>
+        ${bloqueCodigo}
+        <div class="cc-cuenta">${nids.length
+          ? `<strong>${nids.length}</strong> nota${nids.length === 1 ? "" : "s"}`
+          : "Sin notas"}</div>
+        ${bloqueNotas}
         <p class="cc-aviso" hidden></p>
         <div class="cc-acciones">
-          <button type="button" class="cc-exportar" ${ids.length ? "" : "disabled"}>⬇ Exportar .json</button>
+          <button type="button" class="cc-exportar" ${ids.length || nids.length ? "" : "disabled"}>⬇ Exportar .json</button>
           <button type="button" class="cc-importar">⬆ Importar .json</button>
-          <button type="button" class="cc-reset" ${ids.length ? "" : "disabled"}>↺ Restaurar todo</button>
+          <button type="button" class="cc-reset" ${ids.length ? "" : "disabled"}>↺ Restaurar código</button>
+          <button type="button" class="cc-borra-notas" ${nids.length ? "" : "disabled"}>🗑 Borrar notas</button>
         </div>
         <input type="file" accept="application/json,.json" class="cc-fichero" hidden />`;
 
@@ -480,12 +697,20 @@
         e.target.value = "";
       });
       dlg.querySelector(".cc-reset").addEventListener("click", () => {
-        if (!window.confirm("Se descartarán TODOS tus cambios en el código de todo el manual. " +
-                            "Si quieres conservarlos, expórtalos antes. ¿Seguimos?")) return;
+        if (!window.confirm("Se descartarán TODOS tus cambios en el código de todo el manual " +
+                            "(tus notas no se tocan). Si quieres conservarlos, expórtalos antes. ¿Seguimos?")) return;
         escribeEdiciones({});
         aplicaEdicionesEnPagina();
         refrescaBotonCambios();
-        aviso("Listo: todo el manual vuelve a su código original.", false);
+        aviso("Listo: el código vuelve a ser el del manual.", false);
+      });
+      dlg.querySelector(".cc-borra-notas").addEventListener("click", () => {
+        if (!window.confirm("Se borrarán TODAS tus notas de todo el manual (el código no se toca). " +
+                            "Esto no se puede deshacer: expórtalas antes si quieres conservarlas. ¿Seguimos?")) return;
+        escribeNotas({});
+        parrafosAnotables().forEach((p) => { if (p.dataset.notaId) pintaMarcaNota(p); });
+        refrescaBotonCambios();
+        aviso("Notas borradas.", false);
       });
     }
 
@@ -542,6 +767,7 @@
     arranca("navegación", highlightActiveNav);
     arranca("bloques de código", prepareCodeBlocks);
     arranca("botones de código", setupCodeButtons);
+    arranca("notas", preparaNotas);
     arranca("panel de cambios", montaPanelCambios);
   });
 
