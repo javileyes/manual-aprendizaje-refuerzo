@@ -83,6 +83,12 @@
 
 * { box-sizing: border-box; }
 
+/* El atributo hidden manda, siempre. La regla del navegador es «[hidden]{display:none}»,
+   de especificidad (0,1,0), y cualquier regla nuestra con clase + etiqueta la gana sin
+   querer: pasaba con «.code-actions button{display:inline-flex}», que hacía visible el
+   botón «↺ Original» aunque el JS lo marcara como hidden. */
+[hidden] { display: none !important; }
+
 html { scroll-behavior: smooth; scroll-padding-top: 80px; }
 
 body {
@@ -185,7 +191,12 @@ body {
   transition: border-color .15s, background .15s;
 }
 .btn-cambios:hover { border-color: var(--accent); }
-.btn-cambios.hay-cambios { border-color: var(--warn-br); color: var(--warn); font-weight: 650; }
+/* --warn como color de TEXTO da 2,8:1 en tema claro. La señal la dan el borde
+   y el fondo; el texto va en --text (15:1 en ambos temas). */
+.btn-cambios.hay-cambios {
+  border-color: var(--warn-br); background: var(--warn-bg);
+  color: var(--text); font-weight: 650;
+}
 .btn-cambios .cc-num { font-variant-numeric: tabular-nums; }
 
 /* Diálogo de «Mis cambios» */
@@ -214,13 +225,17 @@ body {
   padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 14px;
 }
 .cambios-dlg .cc-lista li:last-child { border-bottom: none; }
-.cambios-dlg .cc-lista span { color: var(--text-faint); font-size: 13px; text-align: right; flex-shrink: 0; }
+.cambios-dlg .cc-lista span {
+  color: var(--text-faint); font-size: 13px; text-align: right;
+  min-width: 0; overflow-wrap: anywhere;
+}
+.cambios-dlg .cc-lista li > code { min-width: 0; overflow-wrap: anywhere; }
 .cambios-dlg .cc-lista a { color: var(--accent-text); text-decoration: none; }
 .cambios-dlg .cc-lista a:hover { text-decoration: underline; }
 .cambios-dlg .cc-vacio { color: var(--text-faint); font-size: 14px; margin: 0 0 14px; }
 .cambios-dlg .cc-aviso { font-size: 13.5px; border-radius: var(--radius-sm); padding: 9px 12px; margin: 0 0 12px; }
-.cambios-dlg .cc-aviso.bien { background: var(--intuition-bg); color: var(--ok); border: 1px solid var(--intuition-br); }
-.cambios-dlg .cc-aviso.malo { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-br); }
+.cambios-dlg .cc-aviso.bien { background: var(--intuition-bg); color: var(--text); border: 1px solid var(--intuition-br); }
+.cambios-dlg .cc-aviso.malo { background: var(--warn-bg); color: var(--text); border: 1px solid var(--warn-br); }
 .cambios-dlg .cc-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
 .cambios-dlg .cc-acciones button {
   font-family: var(--font-sans); font-size: 13.5px; font-weight: 600; cursor: pointer;
@@ -372,6 +387,10 @@ body {
   position: absolute; top: -15px; left: -8px; z-index: 5;
   display: inline-flex; align-items: center; gap: 5px;
   font-family: var(--font-sans); font-size: 11.5px; font-weight: 650;
+  /* Sin line-height heredaría el 1.7 del body y mediría 27px de alto: con
+     top:-15px se le metería medio botón dentro y taparía la primera línea
+     del texto (permanentemente en táctil, donde se queda visible). */
+  line-height: 1.25;
   background: var(--bg-elev); color: var(--accent-text);
   border: 1px solid var(--border-strong); border-radius: 999px;
   padding: 3px 10px; cursor: pointer; white-space: nowrap;
@@ -383,8 +402,11 @@ body {
   /* .anotable, no p.anotable: esto vale para párrafos, fórmulas, títulos de
      sección y puntos de lista. Los recuadros llevan su propia regla más abajo,
      porque su botón cuelga del título y no del recuadro. */
-  .content .anotable:hover > .nota-add,
-  .nota-add:focus-visible { opacity: 1; visibility: visible; }
+  .content .anotable:hover > .nota-add { opacity: 1; visibility: visible; }
+  /* En una lista anidada el ratón está sobre el punto Y sobre el que lo
+     contiene, y el botón de ambos es hijo directo: sin esto salen DOS
+     pastillas a la vez (38 casos). Gana la de dentro, que es la señalada. */
+  .content li.anotable:has(li.anotable:hover) > .nota-add { opacity: 0; visibility: hidden; }
 }
 /* Sin ratón (táctil) no hay hover: se deja visible pero muy tenue. */
 @media (hover: none) {
@@ -416,6 +438,9 @@ body {
   border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
   padding: 10px 14px 8px;
   font-size: 14px; line-height: 1.55; text-align: left;
+  /* El globo cuelga del elemento anotado: en un <h2>/<h3> heredaría su peso
+     750/700 y la nota se leería entera en negrita apretada. */
+  font-weight: 400; font-style: normal; letter-spacing: normal; text-transform: none;
   white-space: pre-wrap; overflow-wrap: break-word;
   opacity: 0; visibility: hidden; pointer-events: none;
   transition: opacity .12s;
@@ -438,6 +463,11 @@ body {
    4px de borde + 20px de relleno, así que el icono se desplaza para no
    montarse encima de ese borde. */
 .content .callout p.anotable-formula > .nota-marca { left: -50px; }
+/* Lo mismo para los párrafos de TEXTO de dentro de un recuadro: son 552 y con
+   el −34px genérico tapaban por completo el borde de color que identifica al
+   recuadro (🧠 ➗ ⚠️ 🔑). */
+.content .callout p.anotable-texto > .nota-marca { left: -50px; }
+.content .callout p.anotable-texto.con-nota { padding-left: 0; margin-left: 0; }
 .content p.anotable-formula.con-nota {
   box-shadow: none; padding-left: 0; margin-left: 0;
   background: var(--key-bg); border-radius: var(--radius-sm);
@@ -445,6 +475,7 @@ body {
 @media (max-width: 980px) {
   /* Sin sitio fuera: el icono se mete dentro del callout. */
   .content .callout p.anotable-formula > .nota-marca { left: -16px; }
+  .content .callout p.anotable-texto > .nota-marca { left: -16px; }
 }
 
 /* --- Títulos de sección, puntos de lista y recuadros --- */
@@ -473,9 +504,12 @@ body {
   position: static; opacity: 0; visibility: hidden;
   text-transform: none; letter-spacing: 0;
 }
+/* Sin etiqueta: oculto con visibility SIGUE ocupando su caja en la fila del
+   título (y con flex-shrink:0 no encoge), así que le robaría ~100px de forma
+   permanente a los 413 títulos de recuadro. El texto sigue en aria-label. */
+.callout > .callout-title > .nota-add span { display: none; }
 @media (hover: hover) {
-  .callout > .callout-title:hover > .nota-add,
-  .callout > .callout-title > .nota-add:focus-visible { opacity: 1; visibility: visible; }
+  .callout > .callout-title:hover > .nota-add { opacity: 1; visibility: visible; }
 }
 @media (hover: none) { .callout > .callout-title > .nota-add { opacity: .5; visibility: visible; } }
 .callout > .callout-title > .nota-globo {
@@ -495,6 +529,10 @@ body {
 @media (max-width: 980px) {
   .nota-marca { left: -22px; width: 20px; height: 20px; font-size: 11px; }
   .content p.con-nota { padding-left: 8px; margin-left: -8px; }
+  /* El párrafo anotado se corre 8px a la izquierda, así que hay que
+     descontárselos al icono: 22 − 8 − 22 = −8px, y lo que sobresale por la
+     izquierda se RECORTA (no genera scroll). Con −14 quedan 8px de aire. */
+  .content p.con-nota > .nota-marca { left: -14px; }
 }
 
 /* Modal de la nota */
@@ -532,11 +570,41 @@ body {
 
 /* Notas dentro del panel «Mis cambios» */
 .cambios-dlg .cc-notas li { align-items: flex-start; }
-.cambios-dlg .nt-cita { color: var(--text-soft); font-size: 13.5px; text-align: left; flex: 1; }
+/* Súbele la especificidad: «.cc-lista span» (0,2,1) le ganaba a «.nt-cita»
+   (0,2,0) y el texto de la nota salía alineado a la derecha y en gris tenue. */
+.cambios-dlg .cc-lista span.nt-cita {
+  flex: 1 1 auto; min-width: 0; text-align: left;
+  color: var(--text-soft); font-size: 13.5px;
+}
 .cambios-dlg .nt-huerfana { color: var(--warn); font-style: normal; font-size: 12px; }
 
-/* Al imprimir, fuera la interfaz de notas */
-@media print { .nota-ui { display: none !important; } }
+/* ---------- Impresión ----------
+   Los navegadores imprimen sin fondos pero SÍ los colores de texto. Sin esto,
+   el código sale casi blanco sobre papel blanco y, si el lector tiene el tema
+   oscuro puesto, el capítulo entero se imprime en gris clarísimo. */
+@media print {
+  :root, :root[data-theme="dark"] {
+    --bg: #fff; --bg-elev: #fff; --bg-sunken: #f1f2f5;
+    --text: #000; --text-soft: #222; --text-faint: #444;
+    --border: #bbb; --border-strong: #888; --accent-text: #23237a;
+    --code-bg: #f4f4f6; --code-text: #14161f;
+    --intuition-bg: #fff; --math-bg: #fff; --warn-bg: #fff; --key-bg: #fff;
+  }
+  .nota-ui { display: none !important; }
+  .topbar, .overlay, .progress-bar, .sidebar,
+  .code-actions, .pyodide-banner, dialog { display: none !important; }
+  .layout, .content-wrap { display: block; }
+  .content { max-width: none; margin: 0; padding: 0; }
+  pre.code-source, .terminal pre, .code-output pre,
+  .code-header .file-name, .code-output .output-label { color: #14161f !important; }
+  .code-output { background: #fff !important; }
+  .code-header { background: #f1f2f5; border-bottom: 1px solid #bbb; }
+  .code-example, .terminal { border: 1px solid #888; box-shadow: none; }
+  .tok-kw, .tok-str, .tok-num, .tok-com, .tok-fn, .tok-bi { color: inherit !important; }
+  .callout { box-shadow: none; border-left-color: #666; }
+  .content h2, .content h3 { break-after: avoid; }
+  .code-example, .terminal, .figure, .callout { break-inside: avoid; }
+}
 
 /* ---------- Matemáticas ---------- */
 mjx-container { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
@@ -568,13 +636,18 @@ tbody tr:hover { background: var(--bg-sunken); }
   display: flex; align-items: center; justify-content: space-between;
   gap: 10px; padding: 9px 14px; background: rgba(255,255,255,.04);
   border-bottom: 1px solid rgba(255,255,255,.08);
+  /* Que envuelva antes que recortar: .code-example tiene overflow:hidden, así
+     que lo que no cabe se pierde sin dejar barra de desplazamiento, y lo
+     primero en perderse son los botones. */
+  flex-wrap: wrap;
 }
 .code-header .file-name {
   font-family: var(--font-mono); font-size: 12.5px; color: #aab2d5;
   display: flex; align-items: center; gap: 7px;
+  flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere;
 }
 .code-header .file-name::before { content: "🐍"; font-size: 13px; }
-.code-actions { display: flex; gap: 6px; }
+.code-actions { display: flex; gap: 6px; flex-shrink: 0; margin-left: auto; }
 .code-actions button {
   font-family: var(--font-sans); font-size: 12.5px; font-weight: 600;
   border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06);
@@ -786,9 +859,14 @@ pre.code-source code[contenteditable]:focus {
   .topbar { display: flex; }
   .sidebar {
     position: fixed; top: 0; left: 0; z-index: 50; height: 100vh;
-    transform: translateX(-100%); transition: transform .25s ease; box-shadow: var(--shadow-lg);
+    transform: translateX(-100%); box-shadow: var(--shadow-lg);
+    /* visibility la saca del orden de tabulación mientras está cerrada: si no,
+       son 27 paradas con el anillo de foco dibujado fuera de la pantalla.
+       Retrasada al cerrar para no cortar la animación de salida. */
+    visibility: hidden;
+    transition: transform .25s ease, visibility 0s linear .25s;
   }
-  .sidebar.open { transform: translateX(0); }
+  .sidebar.open { transform: translateX(0); visibility: visible; transition: transform .25s ease; }
   .overlay.show { display: block; }
   .content { padding: 30px 22px 90px; }
   .hero { padding: 40px 22px; }
@@ -801,6 +879,9 @@ pre.code-source code[contenteditable]:focus {
   .chapter-nav { flex-direction: column; }
   .chapter-nav a, .chapter-nav a.next { max-width: 100%; text-align: left; }
   .code-actions .btn-copy, .code-actions .btn-download span { display: none; }
+  /* Todo el rótulo va DENTRO del <span>, así que al ocultarlo el botón se
+     quedaba vacío: el icono tiene que venir de fuera. */
+  .code-actions .btn-download::before { content: "⬇"; }
 }
 
 /* Accesibilidad: respeta reduce-motion */

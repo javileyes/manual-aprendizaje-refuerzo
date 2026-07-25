@@ -334,8 +334,14 @@
     b.innerHTML = nota ? "📝" : "✎ <span>crear nota</span>";
     // OJO: sin title nativo en la marca, o el navegador pintaría SU tooltip
     // encima del globo con el texto de la nota. El aria-label se queda.
-    b.setAttribute("aria-label", nota ? "Ver, editar o eliminar tu nota" : "Crear una nota en este párrafo");
-    if (!nota) b.title = "Crear una nota en este párrafo";
+    // Y que diga QUÉ se anota: el 📝 es enfocable y su nombre se lee dentro del
+    // encabezado o del punto de lista al que pertenece.
+    const QUE = { texto: "este párrafo", formula: "esta fórmula", titulo: "esta sección",
+                  lista: "este punto", recuadro: "este recuadro" };
+    const que = QUE[p.dataset.notaTipo] || "este párrafo";
+    b.setAttribute("aria-label", nota ? "Ver, editar o eliminar tu nota sobre " + que
+                                      : "Crear una nota sobre " + que);
+    if (!nota) b.title = "Crear una nota sobre " + que;
     b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); abreNota(p); });
     caja.appendChild(b);
 
@@ -388,8 +394,9 @@
     document.querySelectorAll(".nota-dlg").forEach((e) => e.remove());
     dlgNota = document.createElement("dialog");
     dlgNota.className = "nota-dlg";
+    dlgNota.setAttribute("aria-labelledby", "nt-titulo");
     dlgNota.innerHTML = `
-      <h3>Nueva nota</h3>
+      <h3 id="nt-titulo">Nueva nota</h3>
       <blockquote class="nt-extracto"></blockquote>
       <textarea class="nt-texto" rows="7" placeholder="Escribe aquí tu nota sobre este párrafo…"></textarea>
       <p class="nt-pie">Tus notas se guardan en este navegador y se exportan junto con los cambios
@@ -404,6 +411,15 @@
     const cierra = () => {
       if (typeof dlgNota.close === "function") dlgNota.close();
       else dlgNota.removeAttribute("open");
+    };
+
+    /* pintaMarcaNota() destruye el botón desde el que se abrió el diálogo, así
+       que <dialog> no tiene a dónde devolver el foco y se va al <body>: quien
+       lee con teclado se planta al principio de la página. */
+    const devuelveFoco = (p) => {
+      const caja = contenedorMarca(p) || p;
+      const b = caja.querySelector(":scope > .nota-marca, :scope > .nota-add");
+      if (b) b.focus();
     };
 
     dlgNota.querySelector(".nt-cancelar").addEventListener("click", cierra);
@@ -434,6 +450,7 @@
       pintaMarcaNota(p);
       refrescaBotonCambios();
       cierra();
+      devuelveFoco(p);
     });
 
     dlgNota.querySelector(".nt-eliminar").addEventListener("click", () => {
@@ -445,6 +462,7 @@
       pintaMarcaNota(p);
       refrescaBotonCambios();
       cierra();
+      devuelveFoco(p);
     });
   }
 
@@ -568,7 +586,8 @@
         const hint = document.createElement("span");
         hint.className = "editable-hint";
         hint.textContent = "editable";
-        hint.title = "Puedes cambiar el código y volver a ejecutarlo. No se guarda: al recargar vuelve el original.";
+        hint.title = "Puedes cambiar el código y volver a ejecutarlo. Con el teclado: Tab indenta, " +
+          "y Esc o Mayús+Tab sacan el foco del bloque.";
         nombre.appendChild(hint);
       }
 
@@ -608,8 +627,12 @@
       });
 
       code.addEventListener("keydown", (e) => {
-        // Tab indenta (en Python es esencial) en vez de saltar de foco.
+        // Salidas de emergencia. Sin ellas el bloque es una TRAMPA DE FOCO: como
+        // Tab indenta, quien llega aquí con el teclado no puede volver a salir.
+        if (e.key === "Escape") { e.preventDefault(); code.blur(); return; }
+        // Tab indenta (en Python es esencial) en vez de saltar de foco…
         if (e.key === "Tab") {
+          if (e.shiftKey) return;          // …pero Mayús+Tab sale del bloque.
           e.preventDefault();
           document.execCommand("insertText", false, "    ");
           return;
@@ -735,6 +758,7 @@
 
     const dlg = document.createElement("dialog");
     dlg.className = "cambios-dlg";
+    dlg.setAttribute("aria-label", "Mis cambios y mis notas");
     document.body.appendChild(dlg);
 
     const aviso = (txt, malo) => {
