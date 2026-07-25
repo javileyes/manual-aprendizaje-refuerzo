@@ -140,7 +140,7 @@ def simula_mundo(semilla, K=28, n_pares=220):
     Mundo = una recompensa oculta r*, unas preferencias sintéticas, el
     r_theta ajustado sobre ellas y el barrido de beta. Devolvemos un dict para
     poder repetirlo en muchas semillas y no sacar conclusiones de una sola
-    ejecución (la regla de oro del capítulo 22).
+    ejecución (la regla de oro del capítulo 23).
     """
     rng = np.random.default_rng(semilla)
 

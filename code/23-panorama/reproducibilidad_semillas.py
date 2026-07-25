@@ -2,7 +2,7 @@
 Reproducibilidad en RL: por que NUNCA debes fiarte de una sola semilla.
 =======================================================================
 
-Capitulo 22 del Manual de RL. Este script entrena el MISMO agente de
+Capitulo 23 del Manual de RL. Este script entrena el MISMO agente de
 Q-Learning en el MISMO gridworld estocastico, pero con 20 semillas
 aleatorias distintas, y dibuja dos paneles:
 

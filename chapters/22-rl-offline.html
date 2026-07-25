@@ -1,0 +1,1978 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>22. RL offline: aprender de datos ya registrados · Manual de RL</title>
+  <meta name="description" content="Aprender una política a partir de un conjunto de datos fijo, sin entorno con el que probar: por qué se rompe el Q-learning offline (error de extrapolación), y cómo lo arreglan BCQ, TD3+BC y CQL. Con un ejemplo en numpy que se cree -2 y cosecha -22." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'svg'] }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body data-chapter="22">
+  <div class="progress-bar"></div>
+  <div class="topbar">
+    <button class="menu-btn" data-menu-btn aria-label="Menú">☰</button>
+    <span class="brand-mini">🎯 Manual de RL</span>
+    <button class="theme-btn" data-theme-btn style="margin-left:auto" aria-label="Tema">🌙</button>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <div class="content-wrap">
+      <main class="content">
+
+        <span class="chapter-eyebrow">Parte 4 · Capítulo 22</span>
+        <h1>RL offline: aprender de datos ya registrados</h1>
+        <p class="lead">
+          Hasta ahora, cada vez que el agente tenía una duda, la resolvía del modo más barato del
+          mundo: probaba. Este capítulo le quita esa posibilidad. Te entregan un fichero con
+          transiciones que registró otro y te dicen: <em>saca de aquí la mejor política que puedas,
+          porque no vas a poder ejecutar ni un paso más</em>. Es la situación de la medicina, la
+          conducción y casi cualquier sistema que ya esté en producción. Y es también el mejor examen
+          final del manual: no hay maquinaria nueva, solo cuatro cosas que ya sabes chocando entre sí.
+        </p>
+
+        <h2 id="el-escenario">El escenario: un conjunto de datos fijo y ningún entorno</h2>
+        <p>
+          Todo el manual ha vivido dentro del bucle del <a href="01-que-es-rl.html">capítulo 1</a>:
+          el agente actúa, el entorno responde, el agente aprende, y vuelta a empezar. El
+          <strong>RL offline</strong> (también llamado <em>batch RL</em>) corta ese bucle por la mitad.
+          Te dan un conjunto de datos
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ Todo lo que hay</div>
+          <p>$$\mathcal{D} = \{(s_i, a_i, r_i, s'_i)\}_{i=1}^{N} \quad\text{generado por una política } \pi_\beta \text{ que ya no está}$$</p>
+          <p class="math-note">
+            $\mathcal{D}$ es el conjunto de datos, con $N$ transiciones. Cada una es exactamente la
+            misma tupla que llevas viendo desde el <a href="07-td-aprendizaje.html#error-td">capítulo 7</a>:
+            estado $s_i$, acción ejecutada $a_i$, recompensa recibida $r_i$ y estado siguiente $s'_i$
+            (más el indicador de fin de episodio que ya guardaba el
+            <a href="12-dqn.html#replay">búfer del capítulo 12</a>, y que el código de abajo arrastra
+            como <code>FIN</code>).
+            $\pi_\beta$ (se lee «pi beta») es la <strong>política de comportamiento</strong>: quien
+            estuviera al mando cuando se registraron esos datos. Puede ser un piloto humano, un
+            controlador de reglas escrito hace diez años, o incluso una mezcla de varios. No la
+            conoces, no la controlas, y sobre todo: <strong>no puedes pedirle un dato más</strong>.
+          </p>
+        </div>
+        <p>
+          Fíjate en lo que <em>no</em> hay en esa definición. No hay simulador. No hay «prueba esta
+          acción a ver qué pasa». No hay siquiera un conjunto de validación en el sentido habitual,
+          porque validar una política significa <em>ejecutarla</em>. El aprendizaje entero tiene que
+          salir de ese fichero, y el fichero está cerrado.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Un ajedrecista puede aprender de dos maneras. Una: jugar partidas y ver qué le sale bien.
+            Otra: estudiar diez mil partidas de otros sin mover una sola pieza propia. La segunda es
+            el RL offline, y tiene una trampa preciosa. Cuando estudias partidas ajenas y piensas
+            <em>«aquí yo habría jugado la dama a h5, y habría ganado»</em>, <strong>nadie te
+            contradice</strong>: esa jugada no está en ninguna partida, así que tu evaluación de ella
+            es una fantasía tuya que ningún rival va a refutar. Si además construyes el resto de tu
+            plan sobre esa fantasía, el error no se queda quieto: se propaga. Ese es, literalmente y
+            sin metáfora, el fallo central de este capítulo.
+          </p>
+        </div>
+
+        <h3 id="donde-importa-de-verdad">Dónde importa esto de verdad</h3>
+        <p>
+          El RL offline no es una curiosidad académica: es la <strong>única modalidad viable</strong>
+          en casi todos los dominios donde equivocarse cuesta dinero, tiempo o vidas. La regla es
+          sencilla: si explorar es caro, peligroso o directamente ilegal, no queda otra que aprender
+          de lo ya registrado.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Dominio</th><th>Qué contiene $\mathcal{D}$</th><th>Por qué no puedes explorar</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Medicina</strong></td><td>Años de historiales: dosis administradas y evolución del paciente</td><td>«Probemos una dosis al azar a ver qué pasa» no pasa ningún comité de ética</td></tr>
+              <tr><td><strong>Conducción autónoma</strong></td><td>Millones de kilómetros grabados con conductores humanos</td><td>Explorar en carretera es explorar contra otros coches</td></tr>
+              <tr><td><strong>Recomendadores</strong></td><td>El histórico de qué se mostró y qué se pulsó</td><td>Cada experimento en vivo se paga en usuarios molestos</td></tr>
+              <tr><td><strong>Robótica real</strong></td><td>Teleoperaciones y ejecuciones de un controlador anterior</td><td>El hardware se rompe, y no hay millones de episodios</td></tr>
+              <tr><td><strong>Procesos industriales</strong></td><td>Registros SCADA de la planta funcionando</td><td>Una exploración desafortunada para la línea de producción</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Un búfer que ya no se llena</div>
+          <p>
+            Hay una forma muy corta de entender qué es el RL offline: es
+            <strong>DQN con el <a href="12-dqn.html#replay">búfer de repetición</a> congelado</strong>.
+            En el <a href="12-dqn.html">capítulo 12</a> el búfer era un almacén al que la política
+            iba echando experiencias nuevas mientras entrenaba; de él se muestreaban minilotes para
+            romper la correlación temporal. Aquí el búfer <em>es</em> $\mathcal{D}$, viene lleno de
+            fábrica y <strong>nunca vuelve a llenarse</strong>. Ni una sola inserción más. Todo el
+            capítulo consiste en descubrir que ese detalle —que parecía de implementación— rompe el
+            algoritmo por dentro.
+          </p>
+        </div>
+
+        <figure class="figure">
+          <svg viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Comparación entre el bucle del RL online y el esquema abierto del RL offline">
+            <defs>
+              <marker id="fl22" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#4f46e5" />
+              </marker>
+              <marker id="fl22g" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#94a3b8" />
+              </marker>
+            </defs>
+            <text x="170" y="26" text-anchor="middle" fill="#4f46e5" font-size="14" font-family="sans-serif" font-weight="700">RL online (capítulos 1–21)</text>
+            <rect x="75" y="50" width="190" height="52" rx="12" fill="#4f46e5" />
+            <text x="170" y="82" text-anchor="middle" fill="#fff" font-size="14" font-family="sans-serif">Agente</text>
+            <rect x="75" y="165" width="190" height="52" rx="12" fill="#0ea5e9" />
+            <text x="170" y="197" text-anchor="middle" fill="#fff" font-size="14" font-family="sans-serif">Entorno</text>
+            <path d="M120,104 L120,163" fill="none" stroke="#4f46e5" stroke-width="2.4" marker-end="url(#fl22)" />
+            <path d="M220,163 L220,104" fill="none" stroke="#4f46e5" stroke-width="2.4" marker-end="url(#fl22)" />
+            <text x="104" y="138" text-anchor="end" fill="#64748b" font-size="11" font-family="sans-serif">acción</text>
+            <text x="236" y="138" fill="#64748b" font-size="11" font-family="sans-serif">r, s'</text>
+            <text x="170" y="240" text-anchor="middle" fill="#059669" font-size="11.5" font-family="sans-serif">si dudas, pruebas: la realidad te corrige</text>
+
+            <line x1="360" y1="18" x2="360" y2="232" stroke="#cbd5e0" stroke-width="1.5" stroke-dasharray="6 5" />
+
+            <text x="545" y="26" text-anchor="middle" fill="#d97706" font-size="14" font-family="sans-serif" font-weight="700">RL offline (este capítulo)</text>
+            <rect x="450" y="50" width="190" height="52" rx="12" fill="#4f46e5" />
+            <text x="545" y="82" text-anchor="middle" fill="#fff" font-size="14" font-family="sans-serif">Agente</text>
+            <rect x="450" y="165" width="190" height="52" rx="12" fill="#d97706" />
+            <text x="545" y="190" text-anchor="middle" fill="#fff" font-size="14" font-family="sans-serif">Conjunto fijo D</text>
+            <text x="545" y="208" text-anchor="middle" fill="#fde68a" font-size="11" font-family="sans-serif">lo registró π<tspan font-size="9" dy="3">β</tspan><tspan dy="-3">, y se fue</tspan></text>
+            <path d="M545,163 L545,104" fill="none" stroke="#d97706" stroke-width="2.4" marker-end="url(#fl22)" />
+            <text x="561" y="138" fill="#64748b" font-size="11" font-family="sans-serif">s, a, r, s'</text>
+            <path d="M660,88 C700,88 700,180 662,180" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#fl22g)" />
+            <line x1="655" y1="105" x2="700" y2="160" stroke="#dc2626" stroke-width="2.6" />
+            <text x="545" y="240" text-anchor="middle" fill="#dc2626" font-size="11.5" font-family="sans-serif">si dudas, nadie te corrige: la flecha de vuelta no existe</text>
+          </svg>
+          <figcaption>La única diferencia entre los dos esquemas es una flecha. Todo lo que viene a continuación —el fallo y sus dos curas— sale de haber borrado esa flecha.</figcaption>
+        </figure>
+
+        <h2 id="clonacion-de-conducta">Clonación de conducta: la línea base honesta</h2>
+        <p>
+          Antes de complicarse, lo obvio. Si tienes miles de pares «estado, acción que alguien tomó
+          ahí», puedes olvidarte de las recompensas y del descuento y tratar el problema como
+          <strong>aprendizaje supervisado puro</strong>: un clasificador que, dado $s$, predice qué
+          acción se ejecutó. Eso es la <strong>clonación de conducta</strong> (<em>behavior
+          cloning</em>, BC).
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Clonación de conducta</div>
+          <p>$$\max_{\theta} \; \sum_{(s_i, a_i) \in \mathcal{D}} \log \pi_\theta(a_i \mid s_i)$$</p>
+          <p class="math-note">
+            $\pi_\theta(a \mid s)$ es la política que estamos aprendiendo (con parámetros $\theta$, o
+            una tabla de frecuencias si el problema es tabular) y la suma recorre los pares del
+            conjunto de datos. Es <strong>máxima verosimilitud</strong>, ni más ni menos: exactamente
+            la misma pérdida de entropía cruzada con la que entrenarías un clasificador de imágenes.
+            Repara en lo que <em>no</em> aparece: no hay $r$, no hay $s'$, no hay $\gamma$, no hay
+            ecuación de Bellman. La clonación tira a la basura la mitad de cada transición.
+          </p>
+        </div>
+
+        <p>
+          Como no usa las recompensas, la clonación no puede saber si $\pi_\beta$ lo hacía bien o mal:
+          solo sabe imitarla. De ahí su techo, que es a la vez su virtud y su límite:
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El techo de la clonación</div>
+          <p>
+            <strong>La clonación de conducta nunca supera a quien generó los datos.</strong> Si
+            $\pi_\beta$ era mediocre, tu política será mediocre; si $\pi_\beta$ era buena, tu política
+            será algo peor (por el error de estimación y porque los errores se acumulan al salirte de
+            la distribución de estados que $\pi_\beta$ visitaba). En el mejor de los casos limpia el
+            ruido: si $\pi_\beta$ era el buen controlador más una exploración aleatoria, quedarse con
+            la acción <em>más frecuente</em> de cada estado recupera el controlador sin ruido. Ya está.
+            Ese es el máximo.
+          </p>
+        </div>
+
+        <p>
+          Y sin embargo —esto sorprende a todo el mundo la primera vez— la clonación de conducta es
+          <strong>durísima de batir</strong>. Es estable, no tiene bootstrapping, no tiene $\max$, no
+          diverge, no necesita ajustar $\gamma$ ni tasas de aprendizaje delicadas, y cuando
+          $\mathcal{D}$ viene de un experto humano competente su techo es altísimo. Buena parte de los
+          artículos de RL offline que se publicaron entre 2019 y 2021 fueron, en la práctica,
+          intentos de superarla. Así que la regla de oro del campo es:
+        </p>
+        <div class="callout key">
+          <div class="callout-title">🔑 Empieza siempre por clonar</div>
+          <p>
+            La clonación de conducta es la <strong>línea base obligatoria</strong> de cualquier
+            proyecto de RL offline. Es media hora de trabajo, y si tu algoritmo sofisticado no la
+            supera con holgura, el algoritmo sofisticado no vale para nada en ese problema. Verás en
+            el experimento que hay regímenes de datos donde <em>ningún</em> método la supera, y saber
+            reconocerlos te ahorra meses.
+          </p>
+        </div>
+
+        <h2 id="por-que-se-rompe-el-q-learning-offline">Por qué se rompe el Q-learning offline</h2>
+        <p>
+          Vale: la clonación no puede mejorar a $\pi_\beta$ porque ignora las recompensas. Pues
+          usémoslas. Tenemos tuplas $(s, a, r, s')$, que es exactamente lo que come el
+          <a href="09-q-learning.html">Q-learning</a>, y tenemos un búfer del que muestrear minilotes,
+          que es exactamente lo que hace <a href="12-dqn.html">DQN</a>. El algoritmo no hay ni que
+          cambiarlo: se pone el búfer, se lanzan los barridos y a esperar.
+        </p>
+        <p>
+          No funciona. Y no falla poco: falla de forma espectacular, con la política creyéndose valores
+          altísimos mientras se estrella. Para ver por qué, mira otra vez el objetivo de siempre.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El objetivo de Bellman, y el problema escondido dentro</div>
+          <p>$$y_i = r_i + \gamma \, \max_{a' \in \mathcal{A}} \, Q(s'_i, a')$$</p>
+          <p class="math-note">
+            $y_i$ es el objetivo hacia el que empujamos $Q(s_i, a_i)$; $r_i$ y $s'_i$ vienen del
+            conjunto de datos; $\gamma$ es el descuento. El $\max$ recorre <strong>todas</strong> las
+            acciones $a' \in \mathcal{A}$ disponibles en $s'_i$… y ahí está el problema. Los pares
+            $(s_i, a_i)$ del lado izquierdo son <em>datos</em>: alguien ejecutó esa acción y el
+            entorno respondió. Pero el $a'$ que gana el $\max$ del lado derecho puede ser
+            perfectamente una acción que <strong>nadie ejecutó jamás en ese estado</strong>. Su
+            $Q(s', a')$ no es una medición: es lo que la tabla o la red se <em>inventan</em>.
+          </p>
+        </div>
+
+        <p>
+          Es tentador encogerse de hombros: «bueno, será una estimación mala, ya se corregirá». Pues
+          no, y aquí está la clave del capítulo, en dos frases:
+        </p>
+        <ul>
+          <li><strong>Con entorno</strong>, esa fantasía se corrige sola. Si $Q$ sobrestima una acción,
+          la política se vuelve <em>greedy</em> hacia ella, la ejecuta, recibe la recompensa real…
+          y el objetivo TD la corta en seco. El optimismo hacia lo desconocido es incluso <em>útil</em>:
+          es exploración (los valores optimistas iniciales del
+          <a href="02-bandido-multibrazo.html">capítulo 2</a>).</li>
+          <li><strong>Sin entorno</strong>, esa fantasía <em>no se corrige nunca</em>. La política se
+          vuelve greedy hacia la acción sobrestimada, y no puede ejecutarla, porque no hay dónde. Ese
+          par $(s', a')$ jamás aparece en el lado izquierdo de ninguna actualización, así que ninguna
+          actualización lo desmiente. Se queda ahí, alto, para siempre.</li>
+        </ul>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Error de extrapolación</div>
+          <p>
+            A este fallo se le llama <strong>error de extrapolación</strong>, y a las acciones
+            culpables, <strong>acciones fuera de distribución</strong> (<em>out-of-distribution</em>,
+            OOD): acciones que el $\max$ consulta pero que $\pi_\beta$ no ejecutaba en ese estado.
+            Formalmente, el objetivo de Bellman evalúa $Q$ en puntos donde no hay datos, y el
+            resultado no lo decide la tarea: lo decide la <strong>inicialización</strong> (en una
+            tabla) o lo que la <strong>red extrapole</strong> fuera de su soporte (con aproximación de
+            funciones, <a href="11-aproximacion-funciones.html">capítulo 11</a>). Y sobre esa
+            invención se construye todo lo demás.
+          </p>
+        </div>
+
+        <p>
+          Conviene separar bien dos errores que se confunden todo el rato, porque de esa confusión
+          nace la reacción equivocada («ya se arreglará con más datos»). El <strong>error
+          estadístico</strong> es el de siempre: has visto el par $(s,a)$ solo $n(s,a)$ veces, así que
+          tu media muestral tiene un ruido del orden de $1/\sqrt{n(s,a)}$. Ese error <strong>se
+          encoge</strong> conforme crece $\mathcal{D}$, y es el que has estado combatiendo durante
+          veintiún capítulos. El <strong>error de extrapolación</strong> es de otra naturaleza: ahí
+          $n(s,a) = 0$, y $0$ no se encoge. Multiplicar el histórico por mil deja ese contador
+          exactamente igual, porque lo que falta no es <em>cantidad</em> de datos sino datos de
+          <em>otra clase</em>, y $\pi_\beta$ ya no está para generarlos. Por eso el fallo no es un
+          problema de muestra pequeña que la ley de los grandes números vaya a resolver: es un agujero
+          con forma fija en el soporte del conjunto de datos. El experimento lo comprueba con cien
+          veces más transiciones y el desastre sale idéntico hasta el segundo decimal.
+        </p>
+
+        <h3 id="tres-viejos-conocidos-conspirando">Tres viejos conocidos conspirando</h3>
+        <p>
+          Lo bonito del asunto es que no hay ni un ingrediente nuevo. El desastre es la suma de tres
+          cosas que ya has estudiado por separado, y que aquí se combinan de la peor manera posible.
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Ingrediente</th><th>Dónde lo viste</th><th>Qué aporta al desastre</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><strong>Sesgo de maximización</strong></td>
+                <td><a href="09-q-learning.html#sesgo-max">Cap. 9</a> y <a href="13-mejoras-dqn.html#sesgo">cap. 13</a></td>
+                <td>$\mathbb{E}[\max_a \hat{Q}] \ge \max_a \mathbb{E}[\hat{Q}]$: el $\max$ sobre estimaciones ruidosas <strong>elige el ruido</strong>. Aquí, además, elige entre valores que no son ruidosos sino inventados.</td>
+              </tr>
+              <tr>
+                <td><strong>Bootstrapping</strong></td>
+                <td><a href="07-td-aprendizaje.html#entre-mc-y-dp">Cap. 7</a></td>
+                <td>El objetivo de un estado se construye con la estimación del siguiente. El número inventado <strong>viaja hacia atrás</strong>, un paso por barrido, hasta contaminar estados que sí tenían datos buenos.</td>
+              </tr>
+              <tr>
+                <td><strong>Búfer congelado</strong></td>
+                <td><a href="12-dqn.html#replay">Cap. 12</a></td>
+                <td>Es lo que impide la corrección. Sin inserciones nuevas, ninguna actualización futura tocará jamás el par culpable.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Ponlos juntos: <strong>el $\max$ busca activamente el error más optimista, el bootstrapping
+          lo reparte por toda la función de valor, y el búfer congelado garantiza que nadie lo
+          desmienta.</strong> Es un bucle que se realimenta: cuanto más alto pone la tabla ese valor
+          inventado, más lo prefiere el $\max$, y más lo propaga el bootstrapping.
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cadena de cuatro casillas donde una acción nunca ejecutada envenena la función de valor hacia atrás">
+            <defs>
+              <marker id="fl22b" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#64748b" />
+              </marker>
+              <marker id="fl22r" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6 Z" fill="#dc2626" />
+              </marker>
+            </defs>
+            <text x="360" y="22" text-anchor="middle" fill="#334155" font-size="13" font-family="sans-serif" font-weight="700">Una sola celda sin datos envenena la cadena entera</text>
+
+            <rect x="40" y="52" width="90" height="50" rx="10" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.6" />
+            <text x="85" y="74" text-anchor="middle" fill="#312e81" font-size="13" font-family="sans-serif" font-weight="700">casilla 0</text>
+            <text x="85" y="92" text-anchor="middle" fill="#4338ca" font-size="10.5" font-family="sans-serif">V* = −4</text>
+            <rect x="190" y="52" width="90" height="50" rx="10" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.6" />
+            <text x="235" y="74" text-anchor="middle" fill="#312e81" font-size="13" font-family="sans-serif" font-weight="700">casilla 1</text>
+            <text x="235" y="92" text-anchor="middle" fill="#4338ca" font-size="10.5" font-family="sans-serif">V* = −3</text>
+            <rect x="340" y="52" width="90" height="50" rx="10" fill="#fee2e2" stroke="#dc2626" stroke-width="2" />
+            <text x="385" y="74" text-anchor="middle" fill="#7f1d1d" font-size="13" font-family="sans-serif" font-weight="700">casilla 2</text>
+            <text x="385" y="92" text-anchor="middle" fill="#b91c1c" font-size="10.5" font-family="sans-serif">V* = −2</text>
+            <rect x="490" y="52" width="90" height="50" rx="10" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.6" />
+            <text x="535" y="74" text-anchor="middle" fill="#312e81" font-size="13" font-family="sans-serif" font-weight="700">casilla 3</text>
+            <text x="535" y="92" text-anchor="middle" fill="#4338ca" font-size="10.5" font-family="sans-serif">V* = −1</text>
+            <rect x="632" y="52" width="66" height="50" rx="10" fill="#bfe3bf" stroke="#059669" stroke-width="1.6" />
+            <text x="665" y="83" text-anchor="middle" fill="#065f46" font-size="13" font-family="sans-serif" font-weight="700">META</text>
+
+            <path d="M130,77 L188,77" fill="none" stroke="#64748b" stroke-width="2" marker-end="url(#fl22b)" />
+            <path d="M280,77 L338,77" fill="none" stroke="#64748b" stroke-width="2" marker-end="url(#fl22b)" />
+            <path d="M430,77 L488,77" fill="none" stroke="#64748b" stroke-width="2" marker-end="url(#fl22b)" />
+            <path d="M580,77 L630,77" fill="none" stroke="#64748b" stroke-width="2" marker-end="url(#fl22b)" />
+            <text x="159" y="68" text-anchor="middle" fill="#475569" font-size="10" font-family="sans-serif">SEGUIR −1</text>
+            <text x="309" y="68" text-anchor="middle" fill="#475569" font-size="10" font-family="sans-serif">SEGUIR −1</text>
+            <text x="459" y="68" text-anchor="middle" fill="#475569" font-size="10" font-family="sans-serif">SEGUIR −1</text>
+            <text x="605" y="68" text-anchor="middle" fill="#475569" font-size="10" font-family="sans-serif">−1</text>
+
+            <rect x="300" y="215" width="170" height="42" rx="10" fill="#f6b6b6" stroke="#dc2626" stroke-width="1.4" />
+            <text x="385" y="241" text-anchor="middle" fill="#7f1d1d" font-size="12" font-family="sans-serif" font-weight="700">POZO   (ATAJAR = −20)</text>
+            <path d="M85,104 C85,180 290,190 320,214" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#fl22b)" />
+            <path d="M235,104 C235,170 320,185 345,213" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#fl22b)" />
+            <path d="M535,104 C535,180 480,200 450,214" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#fl22b)" />
+            <path d="M385,104 L385,146" fill="none" stroke="#dc2626" stroke-width="2.6" stroke-dasharray="7 5" />
+            <line x1="368" y1="118" x2="402" y2="140" stroke="#dc2626" stroke-width="2.6" />
+            <text x="385" y="168" text-anchor="middle" fill="#b91c1c" font-size="11" font-family="sans-serif" font-weight="700">π</text>
+            <text x="392" y="171" fill="#b91c1c" font-size="8.5" font-family="sans-serif">β</text>
+            <text x="470" y="168" text-anchor="middle" fill="#b91c1c" font-size="11" font-family="sans-serif">nunca atajó aquí:  n(2, ATAJAR) = 0</text>
+            <text x="385" y="188" text-anchor="middle" fill="#b91c1c" font-size="11" font-family="sans-serif">Q(2, ATAJAR) se queda en 0,00 … y 0,00 &gt; −2,00</text>
+
+            <path d="M330,127 L150,127" fill="none" stroke="#dc2626" stroke-width="2.2" marker-end="url(#fl22r)" />
+            <text x="240" y="120" text-anchor="middle" fill="#dc2626" font-size="11" font-family="sans-serif" font-weight="700">el bootstrapping arrastra el 0 hacia atrás</text>
+            <text x="85" y="145" text-anchor="middle" fill="#dc2626" font-size="10.5" font-family="sans-serif">cree −2</text>
+            <text x="235" y="145" text-anchor="middle" fill="#dc2626" font-size="10.5" font-family="sans-serif">cree −1</text>
+          </svg>
+          <figcaption>El experimento de la Parte 1, dibujado. La política de comportamiento atajaba de vez en cuando… salvo en la casilla 2, donde no atajó ni una sola vez. Esa única celda vacía basta para que el agente crea que desde la casilla 0 vale $-2$ cuando lo mejor posible es $-4$.</figcaption>
+        </figure>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Y no, Double DQN no te salva</div>
+          <p>
+            Si has leído el <a href="13-mejoras-dqn.html#double">capítulo 13</a>, la primera reacción
+            es evidente: <em>«esto es sesgo de maximización, le meto Double DQN y listo»</em>. No
+            funciona, y entender por qué es entender la diferencia entre los dos problemas. Double DQN
+            separa <strong>quién elige</strong> la acción de <strong>quién la evalúa</strong>, usando
+            dos estimadores con <em>ruidos independientes</em>: si una red sobrestima una acción por
+            azar, la otra probablemente no, y el error se cancela. Pero aquí el error <strong>no es
+            ruido independiente</strong>: es una ausencia sistemática de datos, la misma para las dos
+            redes. Ambas se inventan el valor de $(s', a')$ y ambas se lo inventan alto, porque
+            ninguna ha visto nunca ese par. Dos ignorantes que ignoran lo mismo no se corrigen entre
+            sí. Hace falta otra cosa: dejar de preguntar por lo que no se sabe, o
+            <strong>castigarlo activamente</strong>.
+          </p>
+        </div>
+
+        <h2 id="las-dos-familias-de-soluciones">Las dos familias de soluciones</h2>
+        <p>
+          Diagnosticado el problema, la cura casi se escribe sola. El $\max$ se agarra a acciones sin
+          respaldo en los datos, así que solo hay dos maneras de quitarle esa posibilidad: o le
+          <strong>prohíbes mirar</strong> ahí, o haces que lo que ve ahí sea
+          <strong>poco atractivo</strong>. Toda la literatura de RL offline cabe en esas dos ideas.
+        </p>
+
+        <h3 id="quedate-cerca-de-los-datos">(a) Quédate cerca de los datos: BCQ y TD3+BC</h3>
+        <p>
+          La primera familia impone una <strong>restricción de política</strong>: la política aprendida
+          $\pi$ no puede alejarse mucho de $\pi_\beta$. Si $\pi$ solo propone acciones que $\pi_\beta$
+          proponía con probabilidad razonable, el $\max$ solo consulta valores respaldados por datos, y
+          la extrapolación no tiene por dónde entrar.
+        </p>
+        <p>
+          <strong>BCQ</strong> (<em>Batch-Constrained Q-learning</em>, Fujimoto y otros, 2019) fue el
+          artículo que puso el problema sobre la mesa y el que acuñó lo de «error de extrapolación».
+          Su versión tabular es de una simplicidad desarmante:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El max, restringido al soporte de los datos</div>
+          <p>$$y_i = r_i + \gamma \max_{a' \,:\, (s'_i, a') \in \mathcal{D}} Q(s'_i, a')$$</p>
+          <p class="math-note">
+            Idéntico al objetivo de siempre salvo por lo que hay debajo del $\max$: en vez de recorrer
+            todas las acciones, recorre solo las que <strong>aparecen en el conjunto de datos</strong>
+            para ese estado (en el caso tabular, aquellas con $n(s'_i, a') > 0$). Si nunca has visto
+            ejecutar una acción ahí, esa acción no participa en la subasta. En la versión continua no
+            se puede enumerar, así que BCQ entrena un modelo generativo de $\pi_\beta$, muestrea de él
+            un puñado de acciones plausibles y toma el $\max$ solo entre esas.
+          </p>
+        </div>
+
+        <p>
+          <strong>TD3+BC</strong> (Fujimoto y Gu, 2021) es la versión que todo el mundo usa hoy porque
+          es casi un chiste de sencilla: coge el <a href="17-control-continuo.html#td3">TD3 del
+          capítulo 17</a> tal cual y súmale al objetivo del actor un término de clonación de conducta.
+          Dos líneas de código sobre un algoritmo que ya tenías.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ TD3+BC: el actor, con correa</div>
+          <p>$$\max_{\theta}\; \mathbb{E}_{(s,a)\sim\mathcal{D}} \Big[\, \lambda\, Q_{\phi_1}\big(s, \mu_\theta(s)\big) \;-\; \big\| \mu_\theta(s) - a \big\|^2 \,\Big]$$</p>
+          <p class="math-note">
+            Misma notación que en el <a href="17-control-continuo.html#td3">capítulo 17</a>:
+            $\mu_\theta$ es el actor determinista y $Q_{\phi_1}$ el primero de los dos críticos de
+            TD3. Compáralo con el objetivo del actor de allí, $\max_\theta \mathbb{E}_s[Q_\phi(s,
+            \mu_\theta(s))]$: el primer término es idéntico —«elige acciones que el crítico valore
+            mucho»— y todo lo que se ha añadido es el segundo, la clonación: «y que además se
+            parezcan a la acción $a$ que de verdad se ejecutó en ese estado». Ese segundo término es
+            el error cuadrático de siempre, con signo menos porque aquí estamos
+            <em>maximizando</em>: alejarse de $a$ resta. $\lambda$ pesa uno contra otro y en el
+            artículo se normaliza dividiendo por la escala típica de $Q$ —$\lambda = \alpha_{\text{bc}}
+            \,/\, \frac{1}{N}\sum_i |Q(s_i,a_i)|$— para no tener que reajustarlo en cada tarea. Con
+            $\lambda \to \infty$ recuperas TD3 puro (y se rompe); con $\lambda \to 0$ recuperas la
+            clonación de conducta (y no mejora). La gracia está en medio.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 El puente con el capítulo 21</div>
+          <p>
+            Léelo otra vez y compáralo con el objetivo de RLHF del
+            <a href="21-rlhf.html#objetivo-kl">capítulo 21</a>:
+            $\;\mathbb{E}[r_\theta] - \beta\,\mathrm{KL}(\pi \,\|\, \pi_{\text{ref}})$ (cuidado con
+            la letra: ese $\beta$ es el coeficiente del freno KL, no tiene nada que ver con el
+            subíndice de $\pi_\beta$).
+            <strong>Es la misma ecuación.</strong> «Maximiza un valor aprendido, pero no te alejes de
+            una política de referencia.» En RLHF la referencia es el modelo base tras el SFT y lo que
+            se teme es el <em>reward hacking</em>: que la política encuentre respuestas que el modelo
+            de recompensa <em>sobrevalora</em> porque están fuera de la distribución con la que se
+            entrenó. En RL offline la referencia es $\pi_\beta$ y lo que se teme es la extrapolación:
+            que la política encuentre acciones que $Q$ <em>sobrevalora</em> porque están fuera de la
+            distribución con la que se entrenó. Mismo miedo, mismo remedio, dos nombres. Que uno se
+            llame «penalización KL» y el otro «restricción por lotes» es un accidente histórico: son
+            dos comunidades que descubrieron la misma correa por separado.
+          </p>
+        </div>
+
+        <h3 id="se-pesimista">(b) Sé pesimista: CQL</h3>
+        <p>
+          La segunda familia no restringe la política: le deja mirar donde quiera, pero se encarga de
+          que lo que hay ahí <strong>no sea apetecible</strong>. En vez de prohibir, desincentiva.
+          Su representante es <strong>CQL</strong> (<em>Conservative Q-Learning</em>, Kumar y otros,
+          2020), y su idea es la de un tasador prudente: <em>si no tengo comprobante de esta operación,
+          la valoro a la baja</em>.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La pérdida de CQL</div>
+          <p>$$\mathcal{L}_{\text{CQL}}(\theta) = \underbrace{\alpha_c \, \mathbb{E}_{s \sim \mathcal{D}}\Big[\log \sum_{a} e^{\,Q_\theta(s,a)} \;-\; \mathbb{E}_{a \sim \hat\pi_\beta(\cdot\mid s)}\big[Q_\theta(s,a)\big]\Big]}_{\text{empujón conservador}} \;+\; \underbrace{\mathcal{L}_{\text{Bellman}}(\theta)}_{\text{el error TD de siempre}}$$</p>
+          <p class="math-note">
+            Se <em>minimiza</em>, y eso decide todos los signos. El segundo sumando es el error TD
+            que ya conoces. El primero es la novedad, y tiene dos mitades que tiran en direcciones
+            opuestas. El <em>log-sum-exp</em> es un $\max$ suavizado sobre todas las acciones, y como
+            entra <strong>sumando</strong>, minimizarlo <strong>empuja hacia abajo</strong> lo que la
+            red crea alto, sea lo que sea. La otra mitad entra <strong>restando</strong>, así
+            que minimizar la pérdida equivale a <em>maximizar</em> $Q$ ahí: <strong>vuelve a
+            subir</strong> el valor de las acciones que $\hat\pi_\beta$ —la política de comportamiento
+            estimada a partir de $\mathcal{D}$, es decir, las acciones que sí aparecen en el conjunto
+            de datos— ejecutaba en ese estado. Resultado neto: las acciones con datos tienen quien
+            las defienda, y las acciones que nadie ejecutó no tienen a nadie, así que se hunden hasta
+            dejar de ganar el $\max$. $\alpha_c$ gradúa la prudencia.
+          </p>
+          <p class="math-note">
+            La garantía teórica es preciosa, pero conviene enunciarla con cuidado: con $\alpha_c$
+            suficientemente grande, el <em>valor</em> que se deduce de la $Q$ aprendida,
+            $\hat{V}^\pi(s) = \mathbb{E}_{a\sim\pi(\cdot\mid s)}[\hat{Q}(s,a)]$, es una
+            <strong>cota inferior</strong> del $V^\pi(s)$ verdadero. (Es el valor esperado bajo $\pi$
+            el que queda por debajo, no cada entrada $\hat{Q}(s,a)$ por separado: eso último solo lo
+            garantiza la variante sin el término que vuelve a subir los datos.) El agente se
+            equivoca <em>por abajo</em>, que es el único lado por el que equivocarse no mata.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Optimismo y pesimismo, cada uno en su sitio</div>
+          <p>
+            Aquí hay una inversión que conviene saborear. En el <a href="02-bandido-multibrazo.html">
+            capítulo 2</a> el optimismo ante lo desconocido era una <strong>virtud</strong>: los
+            valores iniciales optimistas y las cotas UCB empujaban al agente a probar lo que no
+            conocía, y así aprendía. Con entorno, ser optimista con lo desconocido es exploración.
+            <strong>Sin entorno, ser optimista con lo desconocido es delirar</strong>, porque nunca
+            vas a poder ir a comprobarlo. Es el mismo sesgo, la misma fórmula, y cambia de signo según
+            haya o no una puerta por la que salir a mirar. El RL offline es, en una frase, el RL en el
+            que hay que ser pesimista.
+          </p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Método</th><th>Familia</th><th>Qué toca</th><th>En una frase</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Clonación (BC)</strong></td><td>—</td><td>Nada: es supervisado</td><td>Copia a $\pi_\beta$. Nunca la supera, casi nunca falla.</td></tr>
+              <tr><td><strong>BCQ</strong></td><td>(a) cerca de los datos</td><td>El conjunto sobre el que se toma el $\max$</td><td>Solo puedes elegir entre acciones que alguien ejecutó.</td></tr>
+              <tr><td><strong>TD3+BC</strong></td><td>(a) cerca de los datos</td><td>El objetivo del actor</td><td><a href="17-control-continuo.html#td3">TD3</a> más un término de clonación. Dos líneas.</td></tr>
+              <tr><td><strong>CQL</strong></td><td>(b) pesimismo</td><td>La pérdida del crítico</td><td>Hunde lo que no está en los datos hasta que deje de tentar.</td></tr>
+              <tr><td><strong>IQL</strong></td><td>(b) pesimismo</td><td>El objetivo, que deja de tener $\max$</td><td>Regresión expectil: aprende sin evaluar <em>ninguna</em> acción no vista.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Merece un párrafo la última fila, porque es la solución más radical y hoy una de las más
+          usadas. <strong>IQL</strong> (<em>Implicit Q-Learning</em>, Kostrikov y otros, 2021) observa
+          que el problema entero nace de una sola operación —el $\max$ sobre acciones— y decide
+          quitarla. En su lugar aprende un valor de estado $V(s)$ por <strong>regresión
+          expectil</strong> (prima cercana de la regresión por cuantiles) sobre los $Q(s,a)$ de las
+          acciones <em>que sí están en los datos</em>: un error cuadrático asimétrico que penaliza
+          mucho más quedarse <em>corto</em> que pasarse, de modo que $V(s)$ se ve empujada hacia el
+          <em>máximo</em> de los $Q$ observados en ese estado sin salirse nunca del soporte. Así el objetivo
+          $r + \gamma V(s')$ no evalúa jamás una acción que nadie ejecutó. Ni restricción explícita ni
+          penalización: sencillamente, no se pregunta.
+        </p>
+
+        <h2 id="ejemplo">El experimento: un agente que se cree $-2$ y cosecha $-22$</h2>
+        <p>
+          Toca comprobarlo. El programa monta dos escenarios, y en los dos hace exactamente lo mismo:
+          genera un conjunto de datos <strong>una vez</strong>, se lo entrega a cuatro métodos que
+          <em>ni siquiera reciben el objeto del entorno</em>, y solo al final vuelve al modelo
+          verdadero para medir cuánto vale de verdad cada política. La comparación clave es entre
+          <strong>lo que cada método cree que vale</strong> ($\max_a Q(s_0, a)$, su propia estimación)
+          y <strong>lo que obtiene al desplegarse</strong> (calculado con
+          <a href="05-programacion-dinamica.html#evaluacion">evaluación exacta de política</a>, sin
+          ruido de muestreo).
+        </p>
+        <ul>
+          <li><strong>Parte 1 · La cadena de cuatro casillas.</strong> Un senderista va de la casilla 0
+          a la meta. En cada casilla puede SEGUIR (avanza, $-1$) o ATAJAR (cae al pozo, $-20$). Con
+          $\gamma = 1$ el óptimo es obvio, $V^*(s_0) = -4$, y <em>todos</em> los valores verdaderos son
+          enteros: la tabla $Q$ se imprime entrada por entrada y se sigue con el dedo.</li>
+          <li><strong>Parte 2 · Un gridworld resbaladizo</strong> de $6 \times 6$ con cuatro trampas,
+          de la misma familia que las rejillas de los capítulos
+          <a href="05-programacion-dinamica.html#ejemplo">5</a> y
+          <a href="06-monte-carlo.html#ejemplo">6</a> pero mayor y con dinámica estocástica. Ahí se ve
+          además lo que la clonación <em>no puede hacer</em>.</li>
+        </ul>
+        <p>
+          Un detalle de diseño que conviene señalar: en los dos escenarios <strong>todas las
+          recompensas son $\le 0$</strong>, así que ningún retorno puede llegar a cero. El $0$ con el
+          que se inicializa la tabla es, por tanto, el valor más optimista concebible —es
+          <em>inalcanzable</em>—, y eso hace el error de extrapolación visible a simple vista. Y los
+          cuatro métodos comparten el mismo bucle <code>aprende_offline</code>: sus únicos mandos son
+          <code>soporte=True</code> (BCQ tabular) y <code>c&gt;0</code> (CQL). Las dos familias de
+          soluciones son literalmente el mismo código con dos líneas distintas. Del CQL de la fórmula
+          de arriba, la versión tabular escribe explícitamente solo la mitad que empuja hacia abajo
+          —el gradiente del <em>log-sum-exp</em>, que es exactamente el <em>softmax</em> de
+          $Q(s,\cdot)$—; de volver a subir las acciones con datos ya se encarga el ajuste de Bellman,
+          que en cada barrido las devuelve hacia su objetivo. El efecto neto es el mismo, y se ve en
+          la tabla que sale impresa.
+        </p>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">rl_offline.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>import numpy as np
+import matplotlib.pyplot as plt
+
+IND, CIAN, VERDE, AMBAR, ROJO, GRIS = (
+    "#4f46e5", "#0ea5e9", "#059669", "#d97706", "#dc2626", "#94a3b8")
+
+
+# =============================================================================
+# 1. Un MDP tabular cualquiera, descrito por su modelo exacto
+# =============================================================================
+class MDP:
+    """Modelo tabular: P[s,a,s'] y la recompensa Rsas[s,a,s'] de esa transición.
+
+    Este modelo es del autor del experimento, NO del agente. Solo se usa para
+    (a) generar el conjunto de datos una vez y (b) evaluar de verdad las
+    políticas al final. Ningún algoritmo de aprendizaje lo recibe.
+    """
+
+    def __init__(self, P, Rsas, terminal, s0):
+        self.P, self.Rsas, self.terminal, self.s0 = P, Rsas, terminal, s0
+        self.nS, self.nA = P.shape[0], P.shape[1]
+        self.R = np.einsum("sax,sax-&gt;sa", P, Rsas)   # recompensa esperada R(s,a)
+        self.acum = np.cumsum(P, axis=2)             # para muestrear s' de un tirón
+
+
+def registra(mdp, pi_beta, n_episodios, gamma, semilla, max_pasos=60):
+    """Registra el histórico D siguiendo la política de comportamiento pi_beta.
+
+    Devuelve D = (S, A, R, S2, FIN) —cinco vectores—, el retorno descontado que
+    se observó en cada episodio y de qué episodio salió cada transición (esto
+    último NO se le pasa a ningún algoritmo: solo lo usamos para comprobar al
+    final si alguien recorrió de verdad el camino que sale del aprendizaje).
+    D es TODO lo que verán los algoritmos: ni una llamada más al entorno.
+
+    Los episodios que llegan a max_pasos se truncan con FIN=False: el episodio
+    se corta, pero el futuro de ese estado sigue existiendo y sería mentira
+    decirle a Bellman que a partir de ahí vale cero.
+    """
+    rng = np.random.default_rng(semilla)
+    s = np.full(n_episodios, mdp.s0)
+    vivo = np.ones(n_episodios, dtype=bool)
+    ret, desc = np.zeros(n_episodios), np.ones(n_episodios)
+    Sl, Al, Rl, S2l, Fl, El = [], [], [], [], [], []
+    acum_pi = np.cumsum(pi_beta, axis=1)
+    for _ in range(max_pasos):
+        v = np.flatnonzero(vivo)
+        if v.size == 0:
+            break
+        ss = s[v]
+        u = rng.random(v.size)[:, None]
+        a = np.minimum((u &gt; acum_pi[ss]).sum(axis=1), mdp.nA - 1)
+        u2 = rng.random(v.size)[:, None]
+        s2 = np.minimum((u2 &gt; mdp.acum[ss, a]).sum(axis=1), mdp.nS - 1)
+        r = mdp.Rsas[ss, a, s2]
+        fin = mdp.terminal[s2]
+        Sl.append(ss); Al.append(a); Rl.append(r); S2l.append(s2); Fl.append(fin)
+        El.append(v)
+        ret[v] += desc[v] * r
+        desc[v] *= gamma
+        s[v] = s2
+        vivo[v[fin]] = False
+    D = (np.concatenate(Sl), np.concatenate(Al), np.concatenate(Rl),
+         np.concatenate(S2l), np.concatenate(Fl))
+    return D, ret, np.concatenate(El)
+
+
+def evalua_exacto(mdp, pi, gamma, Rsas=None, tol=1e-12, max_barridos=400):
+    """V^pi exacta por evaluación iterativa de política (capítulo 5).
+
+    Aquí SÍ se usa el modelo verdadero: es el juez, no el alumno. Al ser exacta,
+    el "retorno real" que sale no tiene ni un gramo de ruido de muestreo.
+    """
+    R = mdp.R if Rsas is None else np.einsum("sax,sax-&gt;sa", mdp.P, Rsas)
+    V = np.zeros(mdp.nS)
+    for _ in range(max_barridos):
+        Vn = np.einsum("sa,sa-&gt;s", pi, R + gamma * (mdp.P @ V))
+        if np.max(np.abs(Vn - V)) &lt; tol:
+            return Vn
+        V = Vn
+    return V
+
+
+def valor_optimo(mdp, gamma, tol=1e-12, max_barridos=400):
+    """V* exacta por iteración de valor: la vara de medir de arriba del todo."""
+    V = np.zeros(mdp.nS)
+    for _ in range(max_barridos):
+        Vn = np.max(mdp.R + gamma * (mdp.P @ V), axis=1)
+        if np.max(np.abs(Vn - V)) &lt; tol:
+            return Vn
+        V = Vn
+    return V
+
+
+def politica_optima(mdp, gamma):
+    """La política greedy respecto a V*, para saber cuánto se deja cada método."""
+    V = valor_optimo(mdp, gamma)
+    return matriz_politica(np.argmax(mdp.R + gamma * (mdp.P @ V), axis=1), mdp.nA)
+
+
+def matriz_politica(acciones, nA):
+    """Convierte un vector de acciones (una por estado) en una matriz pi(a|s)."""
+    pi = np.zeros((len(acciones), nA))
+    pi[np.arange(len(acciones)), acciones] = 1.0
+    return pi
+
+
+# =============================================================================
+# 2. Los métodos offline. Todos reciben SOLO (D, nS, nA): jamás el entorno
+# =============================================================================
+def cuenta_pares(D, nS, nA):
+    """N[s,a] = cuántas veces aparece el par (s,a) en el conjunto de datos."""
+    plano = np.bincount(D[0] * nA + D[1], minlength=nS * nA)
+    return plano.reshape(nS, nA).astype(float)
+
+
+def clonacion_de_conducta(N, moda=False):
+    """Aprendizaje supervisado puro: ajusta pi(a|s) a las frecuencias de D.
+
+    No hay recompensas, ni gamma, ni ecuación de Bellman: es un clasificador.
+    Por eso su techo es quien generó los datos. Con `moda=True` desplegamos la
+    acción más frecuente en vez de muestrear, que es la versión más fuerte de la
+    clonación (limpia el ruido de pi_beta, pero no puede cambiar su ruta).
+    """
+    total = N.sum(axis=1, keepdims=True)
+    if moda:
+        return matriz_politica(np.argmax(N, axis=1), N.shape[1])
+    return np.where(total &gt; 0, N / np.maximum(total, 1.0), 1.0 / N.shape[1])
+
+
+def aprende_offline(D, N, gamma, soporte=False, c=0.0, lr=1.0, n_iter=300, Q0=None):
+    """Q-learning offline: barridos completos sobre el conjunto FIJO D.
+
+    Es la actualización de siempre —objetivo r + gamma·max_{a'} Q(s',a')— pero el
+    búfer del capítulo 12 nunca se rellena: repasamos una y otra vez LAS MISMAS
+    transiciones. Cada barrido recalcula Q(s,a) como la media de los objetivos de
+    ese par (mismo punto fijo que dar pasitos de tamaño alpha, pero sin el ruido
+    del muestreo, así que el resultado es exactamente reproducible).
+
+    Los pares (s,a) que NO están en D no se actualizan jamás: se quedan con su
+    valor inicial. Ese valor inventado es la extrapolación del caso tabular.
+
+    Dos mandos, uno por cada familia de soluciones del capítulo:
+
+      soporte=True -&gt; el max solo recorre las acciones con N(s',a') &gt; 0 (BCQ
+          tabular: "quédate cerca de los datos", el primo tabular de la
+          penalización KL contra pi_ref del capítulo 21).
+      c &gt; 0 -&gt; término conservador de CQL: se resta c·softmax(Q(s,·)), es decir
+          se empuja hacia abajo el valor de lo que la tabla cree bueno, y con más
+          fuerza cuanto más alto lo cree. Las acciones respaldadas por datos
+          tienen quien las defienda (el término de Bellman las devuelve a su
+          sitio); las que nadie ejecutó nunca, no, así que se hunden hasta dejar
+          de ser el máximo. No hay ninguna restricción explícita: la política
+          final sigue siendo el argmax sobre TODAS las acciones.
+
+    Devuelve (Q, mascara_de_soporte).
+    """
+    S, A, R, S2, FIN = D
+    nS, nA = N.shape
+    en_datos = N &gt; 0
+    mascara = en_datos.copy()
+    huerfanos = ~en_datos.any(axis=1)        # estados que no salen en D
+    mascara[huerfanos] = True                # ahí no hay nada que restringir
+    con_datos = ~huerfanos
+    par = S * nA + A
+    Q = np.zeros((nS, nA)) if Q0 is None else Q0.copy()
+
+    for _ in range(n_iter):
+        # (1) objetivo TD. El (1 - FIN) es V(terminal) = 0, como siempre.
+        V2 = np.where(mascara, Q, -np.inf).max(axis=1) if soporte else Q.max(axis=1)
+        objetivo = R + gamma * np.where(FIN, 0.0, V2[S2])
+        suma = np.bincount(par, weights=objetivo, minlength=nS * nA).reshape(nS, nA)
+        media = suma / np.maximum(N, 1.0)
+        Q = np.where(en_datos, Q + lr * (media - Q), Q)
+        # (2) empujón conservador de CQL, solo en los estados que aparecen en D
+        if c &gt; 0.0:
+            z = Q - Q.max(axis=1, keepdims=True)          # softmax estable
+            p = np.exp(z)
+            p /= p.sum(axis=1, keepdims=True)
+            Q -= lr * c * np.where(con_datos[:, None], p, 0.0)
+    return Q, mascara
+
+
+def politica_greedy(Q, mascara=None):
+    """Política determinista greedy respecto a Q (opcionalmente restringida)."""
+    Qef = Q if mascara is None else np.where(mascara, Q, -np.inf)
+    return matriz_politica(np.argmax(Qef, axis=1), Q.shape[1])
+
+
+# =============================================================================
+# 3. PARTE 1 · La cadena de cuatro casillas, para seguirla con el dedo
+# =============================================================================
+SEGUIR, ATAJAR = 0, 1
+
+
+def construye_cadena(n=4, r_paso=-1.0, r_pozo=-20.0):
+    """Un senderista va de la casilla 0 a la META. En cada casilla puede:
+
+        SEGUIR -&gt; avanza una casilla, recompensa -1 (cuesta caminar)
+        ATAJAR -&gt; se sale del sendero, cae al POZO, recompensa -20
+
+    Con gamma = 1 la política óptima es obvia (seguir siempre) y V*(s0) = -4:
+    todos los valores verdaderos son enteros y se comprueban de cabeza.
+    """
+    META, POZO, nS = n, n + 1, n + 2
+    P = np.zeros((nS, 2, nS))
+    Rsas = np.zeros((nS, 2, nS))
+    for s in range(n):
+        P[s, SEGUIR, s + 1] = 1.0
+        Rsas[s, SEGUIR, s + 1] = r_paso
+        P[s, ATAJAR, POZO] = 1.0
+        Rsas[s, ATAJAR, POZO] = r_pozo
+    terminal = np.zeros(nS, dtype=bool)
+    for t in (META, POZO):
+        terminal[t] = True
+        P[t, :, t] = 1.0                  # absorbente y con recompensa 0
+    return MDP(P, Rsas, terminal, s0=0)
+
+
+def comportamiento_cadena(mdp, n, p_atajar, valladas):
+    """pi_beta: ataja con probabilidad p_atajar... salvo en las casillas valladas.
+
+    Ahí la probabilidad es CERO ESTRUCTURAL: no es que haya salido poco, es que
+    no puede salir nunca. Ese es el agujero de cobertura que ningún volumen de
+    datos podrá tapar. Y es lo normal en los datos reales: un médico jamás receta
+    el fármaco X al paciente de tipo Y, un conductor jamás gira contra el tráfico.
+    """
+    pi = np.zeros((mdp.nS, 2))
+    for s in range(n):
+        p = 0.0 if s in valladas else p_atajar
+        pi[s, ATAJAR], pi[s, SEGUIR] = p, 1.0 - p
+    pi[n:, SEGUIR] = 1.0                  # irrelevante: son absorbentes
+    return pi
+
+
+def tabla_q(titulo, Q, N, V_opt, n):
+    """Imprime la tabla Q casilla por casilla, marcando los huecos de cobertura."""
+    print(f"\n{titulo}")
+    print(f"{'casilla':&gt;8} | {'Q(s,SEGUIR)':&gt;12} | {'Q(s,ATAJAR)':&gt;12} | "
+          f"{'max_a Q(s,a)':&gt;13} | {'V*(s) real':&gt;11}")
+    print("-" * 74)
+    for s in range(n):
+        marca = "*" if N[s, ATAJAR] == 0 else " "
+        print(f"{s:&gt;8} | {Q[s, SEGUIR]:&gt;12.2f} | {Q[s, ATAJAR]:&gt;11.2f}{marca} | "
+              f"{Q[s].max():&gt;13.2f} | {V_opt[s]:&gt;11.2f}")
+
+
+def parte1():
+    """La cadena: el mecanismo del envenenamiento, número a número."""
+    n, gamma = 4, 1.0
+    mdp = construye_cadena(n)
+    pi_beta = comportamiento_cadena(mdp, n, p_atajar=0.15, valladas={2})
+    D, retornos, _ = registra(mdp, pi_beta, 400, gamma, semilla=22, max_pasos=n + 1)
+    N = cuenta_pares(D, mdp.nS, mdp.nA)
+
+    # --- Los cuatro métodos, todos sobre EXACTAMENTE el mismo D --------------
+    Q_ing, _ = aprende_offline(D, N, gamma)
+    Q_sop, masc = aprende_offline(D, N, gamma, soporte=True)
+    Q_cql, _ = aprende_offline(D, N, gamma, c=0.5, lr=0.5, n_iter=600)
+
+    V_opt = valor_optimo(mdp, gamma)
+    metodos = {
+        "Clonación de conducta": (clonacion_de_conducta(N), retornos.mean()),
+        "Q-learning offline": (politica_greedy(Q_ing), Q_ing[0].max()),
+        "Q-learning + soporte": (politica_greedy(Q_sop, masc),
+                                 np.where(masc, Q_sop, -np.inf)[0].max()),
+        "CQL tabular": (politica_greedy(Q_cql), Q_cql[0].max()),
+    }
+
+    print("=" * 78)
+    print("PARTE 1 · Cadena de 4 casillas.  SEGUIR = -1 por paso,  ATAJAR = -20 (pozo)")
+    print("=" * 78)
+    print(f"Conjunto de datos D: {len(D[0])} transiciones de 400 episodios de pi_beta.")
+    print("pi_beta ataja con probabilidad 0,15 ... salvo en la casilla 2, donde NUNCA.")
+    print(f"Óptimo real V*(s0) = {V_opt[0]:.2f}   |   valor real de pi_beta = "
+          f"{evalua_exacto(mdp, pi_beta, gamma)[0]:.2f}")
+
+    print("\nCuántas veces aparece cada par (s,a) en D  [ * = hueco de cobertura ]")
+    print(f"{'casilla':&gt;8} | {'n(s, SEGUIR)':&gt;13} | {'n(s, ATAJAR)':&gt;13}")
+    print("-" * 42)
+    for s in range(n):
+        marca = " *" if N[s, ATAJAR] == 0 else ""
+        print(f"{s:&gt;8} | {int(N[s, SEGUIR]):&gt;13d} | {int(N[s, ATAJAR]):&gt;13d}{marca}")
+
+    tabla_q("Tabla Q del Q-LEARNING OFFLINE 'a secas'  [ * = par que NO está en D ]",
+            Q_ing, N, V_opt, n)
+    print("El par (2, ATAJAR) no se ejecutó jamás, así que nadie lo actualizó nunca y")
+    print("sigue valiendo lo que valía al empezar: 0,00. Y 0,00 &gt; -2,00, de modo que el")
+    print("max de la casilla 2 se agarra a un número inventado... y el bootstrapping lo")
+    print("arrastra hacia atrás: Q(1,SEGUIR) = -1 + 0 = -1 en vez de -3, y de ahí")
+    print("Q(0,SEGUIR) = -1 + (-1) = -2 en vez de -4. Una sola celda envenena la cadena.")
+
+    tabla_q("Tabla Q de CQL TABULAR (mismo D, mismo bucle, con el empujón hacia abajo)",
+            Q_cql, N, V_opt, n)
+    print(f"CQL hunde Q(2,ATAJAR) de 0,00 a {Q_cql[2, ATAJAR]:.2f} sin haber visto esa acción")
+    print("jamás, el max vuelve a caer sobre SEGUIR y el veneno no llega a entrar.")
+
+    print("\nLo que cree cada método frente a lo que de verdad consigue al desplegarlo")
+    print(f"{'método':&gt;23} | {'se cree':&gt;9} | {'retorno real':&gt;13} | {'brecha':&gt;8} | "
+          f"P(ATAJAR) en s0 s1 s2 s3")
+    print("-" * 96)
+    reales, creidos = {}, {}
+    for k, (pi, cree) in metodos.items():
+        real = evalua_exacto(mdp, pi, gamma)[0]
+        reales[k], creidos[k] = real, cree
+        probs = " ".join(f"{pi[s, ATAJAR]:&gt;4.2f}" for s in range(n))
+        print(f"{k:&gt;23} | {cree:&gt;9.2f} | {real:&gt;13.2f} | {cree - real:&gt;8.2f} |      {probs}")
+    print("-" * 96)
+    print("El Q-learning offline se cree MEJOR que el óptimo real de la tarea (-4,00),")
+    print("cosa imposible por construcción, y al desplegarlo se tira al pozo desde la")
+    print("casilla 2 y cosecha -22,00. Factor 11 entre lo que cree y lo que consigue.")
+    print("La clonación no se engaña (no estima nada: le ponemos como 'se cree' el")
+    print("retorno medio observado en D), pero tampoco mejora: reproduce a pi_beta.")
+
+    # --- Dos controles honestos ---------------------------------------------
+    Q_pes, _ = aprende_offline(D, N, gamma, Q0=np.full((mdp.nS, mdp.nA), -20.0))
+    pi_pes = politica_greedy(Q_pes)
+    print("\nControl 1: el mismo Q-learning offline, pero con Q inicializada a -20")
+    print(f"  se cree {Q_pes[0].max():&gt;6.2f} y obtiene "
+          f"{evalua_exacto(mdp, pi_pes, gamma)[0]:&gt;6.2f}. Con una inicialización PESIMISTA")
+    print("  no se rompe. Eso no invalida el ejemplo: ES la moraleja. En una tabla, el")
+    print("  valor de lo que nunca viste es la inicialización; con una red neuronal es")
+    print("  lo que la red extrapola, y ahí no eliges tú. Lo único sistemático es que el")
+    print("  max se queda con los valores altos. Ser pesimista con lo desconocido no es")
+    print("  un truco de implementación: es el algoritmo conservador.")
+
+    D2, _, _ = registra(mdp, pi_beta, 40000, gamma, semilla=23, max_pasos=n + 1)
+    N2 = cuenta_pares(D2, mdp.nS, mdp.nA)
+    Q2, _ = aprende_offline(D2, N2, gamma)
+    print("\nControl 2: el mismo Q-learning offline con CIEN VECES más datos")
+    print(f"  {len(D2[0])} transiciones -&gt; se cree {Q2[0].max():&gt;6.2f} y obtiene "
+          f"{evalua_exacto(mdp, politica_greedy(Q2), gamma)[0]:&gt;6.2f}. Idéntico.")
+    print("  El agujero de cobertura es estructural, no estadístico: lo que falta no")
+    print("  son más datos, es OTRO tipo de datos, y el conjunto ya está cerrado.")
+
+    print("\nControl 3: si la clonación desplegara la MODA en vez de muestrear, aquí")
+    pi_moda = clonacion_de_conducta(N, moda=True)
+    print(f"  sacaría {evalua_exacto(mdp, pi_moda, gamma)[0]:.2f}, o sea el óptimo: en esta cadena el defecto de")
+    print("  pi_beta es puro ruido y la moda lo limpia. En el gridworld de la Parte 2")
+    print("  no habrá tanta suerte, porque allí el defecto de pi_beta es sistemático.")
+    return {"metodos": list(metodos), "cree": creidos, "real": reales,
+            "V_opt": V_opt[:n], "Q_ing": Q_ing[:n], "Q_cql": Q_cql[:n], "n": n}
+
+
+# =============================================================================
+# 4. PARTE 2 · Un gridworld 6x6 con trampas y suelo resbaladizo
+# =============================================================================
+FILAS, COLS, NA = 6, 6, 4
+DR = np.array([-1, 0, 1, 0])              # 0=arriba, 1=derecha, 2=abajo, 3=izquierda
+DC = np.array([0, 1, 0, -1])
+SIMBOLOS = ["^", "&gt;", "v", "&lt;"]
+INICIO, META = (5, 0), (0, 5)
+TRAMPAS = {(1, 1), (1, 4), (3, 1), (3, 3)}
+R_PASO, R_TRAMPA, R_META = -1.0, -20.0, 0.0
+GAMMA_G, DESLIZ = 0.95, 0.10
+
+
+def idx(f, c):
+    return f * COLS + c
+
+
+def construye_gridworld():
+    """Rejilla 6x6 con meta, cuatro trampas y suelo resbaladizo.
+
+    Cada paso cuesta -1, caer en una trampa -20 y llegar a la meta 0 (llegar no
+    premia: simplemente deja de costar). Con probabilidad 0,1 te desvías 90
+    grados. Ojo a este detalle, que es la clave del experimento: TODAS las
+    recompensas son &lt;= 0, así que ningún retorno puede llegar a cero. El cero con
+    el que se inicializa la tabla es, por tanto, el valor más optimista
+    concebible: exactamente lo que hace visible el error de extrapolación.
+    """
+    nS = FILAS * COLS
+    P = np.zeros((nS, NA, nS))
+    Rsas = np.zeros((nS, NA, nS))
+    terminal = np.zeros(nS, dtype=bool)
+    terminal[idx(*META)] = True
+    for t in TRAMPAS:
+        terminal[idx(*t)] = True
+    for f in range(FILAS):
+        for c in range(COLS):
+            s = idx(f, c)
+            if terminal[s]:
+                P[s, :, s] = 1.0
+                continue
+            for a in range(NA):
+                for a_ef, prob in ((a, 1 - DESLIZ), ((a + 1) % 4, DESLIZ / 2),
+                                   ((a + 3) % 4, DESLIZ / 2)):
+                    nf = min(max(f + DR[a_ef], 0), FILAS - 1)   # el borde te frena
+                    nc = min(max(c + DC[a_ef], 0), COLS - 1)
+                    s2 = idx(nf, nc)
+                    P[s, a, s2] += prob
+                    Rsas[s, a, s2] = (R_TRAMPA if (nf, nc) in TRAMPAS
+                                      else R_META if (nf, nc) == META else R_PASO)
+    return MDP(P, Rsas, terminal, s0=idx(*INICIO))
+
+
+def controlador_heuristico(mdp):
+    """El sistema que ya estaba en producción y que generó el histórico.
+
+    "Sube hasta la fila de la meta y luego ve hacia ella; si la casilla de
+    destino es una trampa, muévete en el otro eje". Es sensato (llega en 10
+    pasos, el mínimo) pero NO es óptimo: sube pegado al borde izquierdo rozando
+    dos trampas, y con el suelo resbaladizo eso se paga.
+    """
+    pol = np.zeros(mdp.nS, dtype=int)
+    for f in range(FILAS):
+        for c in range(COLS):
+            if mdp.terminal[idx(f, c)]:
+                continue
+            candidatas = ([0] if f &gt; META[0] else [2] if f &lt; META[0] else [])
+            candidatas += ([1] if c &lt; META[1] else [3] if c &gt; META[1] else [])
+            elegida = candidatas[0] if candidatas else 0
+            for a in candidatas:
+                nf = min(max(f + DR[a], 0), FILAS - 1)
+                nc = min(max(c + DC[a], 0), COLS - 1)
+                if (nf, nc) not in TRAMPAS:
+                    elegida = a
+                    break
+            pol[idx(f, c)] = elegida
+    return pol
+
+
+def epsilon_greedy(pol, epsilon, nS):
+    """pi_beta = epsilon-greedy sobre el controlador: así es un histórico real,
+    con su ruido de exploración y sus rutinas."""
+    pi = np.full((nS, NA), epsilon / NA)
+    pi[np.arange(nS), pol] += 1.0 - epsilon
+    return pi
+
+
+def prob_meta(mdp, pi):
+    """Probabilidad de acabar en la meta: la misma evaluación exacta, pero con
+    recompensa 1 al entrar en la meta, sin descuento y sin nada más."""
+    Rmeta = np.zeros_like(mdp.Rsas)
+    Rmeta[:, :, idx(*META)] = 1.0
+    Rmeta[mdp.terminal] = 0.0            # los terminales son absorbentes: no cuentan
+    return 100.0 * evalua_exacto(mdp, pi, 1.0, Rsas=Rmeta)[mdp.s0]
+
+
+def camino(mdp, pi, max_pasos=20):
+    """Recorrido de la política SIN deslizamiento, para leer qué hace de verdad.
+
+    Devuelve la lista de estados que pisa y su versión en texto.
+    """
+    ruta, vistos, s, atasco = [mdp.s0], {mdp.s0}, mdp.s0, False
+    while len(ruta) &lt;= max_pasos and not mdp.terminal[s]:
+        f, c = divmod(s, COLS)
+        a = int(np.argmax(pi[s]))
+        s = idx(min(max(f + DR[a], 0), FILAS - 1), min(max(c + DC[a], 0), COLS - 1))
+        if s in vistos:
+            atasco = True
+            break
+        ruta.append(s)
+        vistos.add(s)
+    txt = " ".join(f"({p // COLS},{p % COLS})" for p in ruta)
+    if atasco:
+        txt += f" [se atasca en ({ruta[-1] // COLS},{ruta[-1] % COLS})]"
+    elif mdp.terminal[s]:
+        txt += "=META" if s == idx(*META) else "=TRAMPA"
+    return ruta, txt
+
+
+def secuencias(D, ep):
+    """Reconstruye la lista de estados que visitó cada episodio del histórico."""
+    orden = np.argsort(ep, kind="stable")
+    S, S2, e = D[0][orden], D[3][orden], ep[orden]
+    cortes = np.flatnonzero(np.diff(e)) + 1
+    return [list(S[t]) + [S2[t[-1]]] for t in np.split(np.arange(len(e)), cortes)]
+
+
+def trozo_mas_largo(secs, ruta):
+    """Longitud del trozo más largo de `ruta` que alguien recorrió DE SEGUIDO.
+
+    Si sale igual que la ruta entera, esa política se limita a repetir algo que
+    ya estaba en los datos. Si sale mucho más corto, la política ha COSIDO
+    fragmentos de trayectorias distintas: eso es lo que la clonación no sabe
+    hacer, y la razón de que el RL offline no sea solo imitación.
+    """
+    def esta(sub):
+        return any(any(s[i:i + len(sub)] == sub for i in range(len(s) - len(sub) + 1))
+                   for s in secs)
+    mejor = 0
+    for i in range(len(ruta)):
+        j = i + mejor + 1
+        while j &lt;= len(ruta) and esta(ruta[i:j]):
+            mejor, j = j - i, j + 1
+    return mejor
+
+
+def entrena_todo(D, N):
+    """Los cuatro métodos sobre el mismo D. Devuelve {nombre: (pi, valor que cree)}."""
+    Q_ing, _ = aprende_offline(D, N, GAMMA_G)
+    Q_sop, masc = aprende_offline(D, N, GAMMA_G, soporte=True)
+    Q_cql, _ = aprende_offline(D, N, GAMMA_G, c=0.5, lr=0.5, n_iter=1500)
+    s0 = idx(*INICIO)
+    return {
+        "Clonación de conducta": (clonacion_de_conducta(N, moda=True), np.nan),
+        "Q-learning offline": (politica_greedy(Q_ing), Q_ing[s0].max()),
+        "Q-learning + soporte": (politica_greedy(Q_sop, masc),
+                                 np.where(masc, Q_sop, -np.inf)[s0].max()),
+        "CQL tabular": (politica_greedy(Q_cql), Q_cql[s0].max()),
+    }
+
+
+def parte2():
+    """El gridworld: el mismo fenómeno y, además, lo que la clonación no puede."""
+    mdp = construye_gridworld()
+    pol_h = controlador_heuristico(mdp)
+    pi_beta = epsilon_greedy(pol_h, 0.40, mdp.nS)
+    pares = int((~mdp.terminal).sum()) * NA
+    V_opt = valor_optimo(mdp, GAMMA_G)
+    pi_opt = politica_optima(mdp, GAMMA_G)
+
+    print("\n" + "=" * 78)
+    print("PARTE 2 · Gridworld 6x6 resbaladizo (meta, 4 trampas, cada paso -1)")
+    print("=" * 78)
+    print(f"gamma = {GAMMA_G} | desliz = {DESLIZ} | todas las recompensas &lt;= 0, así que")
+    print("NINGÚN retorno puede llegar a cero: el cero de la tabla es inalcanzable.")
+
+    # Cinco conjuntos de datos con la misma pi_beta: nada depende de una semilla.
+    datos, episodios = [], []
+    for sem in range(5):
+        D, _, ep = registra(mdp, pi_beta, 300, GAMMA_G, semilla=sem)
+        datos.append((D, cuenta_pares(D, mdp.nS, mdp.nA)))
+        episodios.append(ep)
+    cob = np.mean([100.0 * (N[~mdp.terminal] &gt; 0).sum() / pares for _, N in datos])
+    print(f"\nD: 300 episodios de pi_beta = epsilon-greedy(0,40) sobre el controlador")
+    print(f"heurístico -&gt; {np.mean([len(D[0]) for D, _ in datos]):.0f} transiciones. Cubren el {cob:.0f} % de los "
+          f"{pares} pares (s,a).")
+    print(f"El {100 - cob:.0f} % restante nunca se ejecutó: su valor es una invención de la")
+    print("tabla que nadie puede desmentir.")
+
+    acum = {}
+    politicas0 = None
+    for D, N in datos:
+        modelos = entrena_todo(D, N)      # &lt;- hasta aquí NADIE ha tocado el entorno
+        if politicas0 is None:
+            politicas0 = {k: v[0] for k, v in modelos.items()}
+        for k, (pi, cree) in modelos.items():
+            real = evalua_exacto(mdp, pi, GAMMA_G)[mdp.s0]   # &lt;- y solo aquí se despliega
+            acum.setdefault(k, []).append((cree, real, prob_meta(mdp, pi)))
+
+    print("\nLo que cada método CREE que vale su política frente a lo que de verdad")
+    print("obtiene al desplegarla (media de 5 conjuntos de datos):")
+    print("-" * 74)
+    print(f"{'método':&lt;24}{'V(inicio) que cree':&gt;19}{'retorno real':&gt;14}{'llega':&gt;9}")
+    print("-" * 74)
+    resumen = {}
+    for k, filas in acum.items():
+        cree, real, meta = np.mean(np.array(filas), axis=0)
+        resumen[k] = (cree, real, meta)
+        print(f"{k:&lt;24}{'—' if np.isnan(cree) else f'{cree:.2f}':&gt;19}{real:&gt;14.2f}{meta:&gt;8.0f} %")
+    print("-" * 74)
+    print(f"{'pi_beta (generó D)':&lt;24}{'—':&gt;19}"
+          f"{evalua_exacto(mdp, pi_beta, GAMMA_G)[mdp.s0]:&gt;14.2f}"
+          f"{prob_meta(mdp, pi_beta):&gt;8.0f} %")
+    pi_h = matriz_politica(pol_h, NA)
+    print(f"{'el controlador sin ruido':&lt;24}{'—':&gt;19}"
+          f"{evalua_exacto(mdp, pi_h, GAMMA_G)[mdp.s0]:&gt;14.2f}"
+          f"{prob_meta(mdp, pi_h):&gt;8.0f} %")
+    print(f"{'óptimo (con el modelo)':&lt;24}{V_opt[mdp.s0]:&gt;19.2f}"
+          f"{evalua_exacto(mdp, pi_opt, GAMMA_G)[mdp.s0]:&gt;14.2f}{prob_meta(mdp, pi_opt):&gt;8.0f} %")
+    print("-" * 74)
+    ql = resumen["Q-learning offline"]
+    print(f"Otra vez: el Q-learning offline se cree {ql[0]:.2f} en un problema donde lo mejor")
+    print(f"posible es {V_opt[mdp.s0]:.2f}, se equivoca en {ql[0] - ql[1]:+.1f} puntos sobre su propia política")
+    print("y casi nunca llega a la meta. Los conservadores se creen poco y lo cumplen.")
+    print("La clonación, por su parte, recupera el controlador limpio de ruido: ese es")
+    print("su techo, y no lo pasa. Los conservadores sí lo pasan. Veamos por qué.")
+
+    print("\nEl camino de cada política (sin deslizamiento, para verlo limpio):")
+    print("-" * 74)
+    rutas = {}
+    for k in ("Clonación de conducta", "Q-learning offline", "CQL tabular"):
+        rutas[k], txt = camino(mdp, politicas0[k])
+        print(f"  {k:&lt;22} {txt}")
+    print(f"  {'óptimo (referencia)':&lt;22} {camino(mdp, pi_opt)[1]}")
+    print("-" * 74)
+    secs = secuencias(datos[0][0], episodios[0])
+    print("¿Y cuánto de cada camino recorrió alguien DE VERDAD? El trozo más largo que")
+    print("aparece seguido en un solo episodio del conjunto de datos:")
+    for k in ("Clonación de conducta", "CQL tabular"):
+        r = rutas[k]
+        print(f"  {k:&lt;22} {trozo_mas_largo(secs, r):&gt;2d} casillas de {len(r)}")
+    print("-" * 74)
+    print("Ahí está lo que la clonación NO puede hacer. La clonación repite entero el")
+    print("camino de pi_beta por el borde izquierdo, que pasa rozando dos trampas: ese")
+    print("es su techo, y por eso su camino aparece tal cual en los datos. CQL se saca")
+    print("un camino por el centro que NADIE recorrió entero; cose trozos sueltos de la")
+    print("exploración de episodios distintos. Eso, y no la imitación, es lo que hace")
+    print("que valga la pena hacer RL offline. Y el Q-learning offline, en cambio, se")
+    print("queda empujando la pared de abajo, convencido de que esa acción, que nunca")
+    print("vio ejecutar, vale cero.")
+
+    # --- Control: ¿es culpa del algoritmo o del agujero en los datos? --------
+    print("\nControl: mismo código, distinta COBERTURA (subimos el epsilon de pi_beta)")
+    print("-" * 74)
+    print(f"{'epsilon':&gt;8}{'cobertura':&gt;12}{'BC real':&gt;10}{'QL cree':&gt;10}{'QL real':&gt;10}"
+          f"{'CQL cree':&gt;11}{'CQL real':&gt;11}")
+    print("-" * 74)
+    barrido = []
+    for eps in (0.05, 0.20, 0.40, 0.60, 0.80, 1.00):
+        pi_b = epsilon_greedy(pol_h, eps, mdp.nS)
+        fila = np.zeros(6)
+        for sem in range(3):
+            D, _, _ = registra(mdp, pi_b, 300, GAMMA_G, semilla=100 + sem)
+            N = cuenta_pares(D, mdp.nS, mdp.nA)
+            m = entrena_todo(D, N)
+            fila += np.array([
+                100.0 * (N[~mdp.terminal] &gt; 0).sum() / pares,
+                evalua_exacto(mdp, m["Clonación de conducta"][0], GAMMA_G)[mdp.s0],
+                m["Q-learning offline"][1],
+                evalua_exacto(mdp, m["Q-learning offline"][0], GAMMA_G)[mdp.s0],
+                m["CQL tabular"][1],
+                evalua_exacto(mdp, m["CQL tabular"][0], GAMMA_G)[mdp.s0]])
+        fila /= 3
+        barrido.append((eps, *fila))
+        print(f"{eps:&gt;8.2f}{fila[0]:&gt;11.0f} %{fila[1]:&gt;10.2f}{fila[2]:&gt;10.2f}"
+              f"{fila[3]:&gt;10.2f}{fila[4]:&gt;11.2f}{fila[5]:&gt;11.2f}")
+    print("-" * 74)
+    print("El Q-learning offline solo deja de mentir cuando la cobertura llega al 100 %:")
+    print("basta un puñado de pares (s,a) sin datos para que el max se agarre a ellos.")
+    print("El problema nunca fue el algoritmo, era el hueco. Fíjate también en la")
+    print("clonación: por muchos datos que le des se queda clavada en el techo de quien")
+    print("los generó, y con eps = 1 se hunde con él. Y en la otra punta, con muy poca")
+    print("cobertura, ser conservador tampoco regala nada: si D no contiene material")
+    print("mejor, no hay nada que cocinar. Ningún método gana siempre: depende de D.")
+    return {"mdp": mdp, "pi_beta": pi_beta, "pol_h": pol_h, "N0": datos[0][1],
+            "politicas0": politicas0, "barrido": barrido, "V_opt": V_opt}
+
+
+# =============================================================================
+# 5. La figura
+# =============================================================================
+def dibuja_tablero(ax, mdp, pi, titulo, N):
+    ax.set_title(titulo, fontsize=9)
+    ax.set_xlim(-0.5, COLS - 0.5)
+    ax.set_ylim(FILAS - 0.5, -0.5)
+    ax.set_xticks([]); ax.set_yticks([]); ax.set_aspect("equal")
+    for f in range(FILAS):
+        for c in range(COLS):
+            s = idx(f, c)
+            ax.add_patch(plt.Rectangle((c - 0.5, f - 0.5), 1, 1, fill=False,
+                                       edgecolor="#cbd5e0", lw=0.8))
+            if (f, c) in TRAMPAS:
+                ax.add_patch(plt.Rectangle((c - 0.5, f - 0.5), 1, 1, color="#f6b6b6"))
+                ax.text(c, f, "X", ha="center", va="center", color="#7a1f1f")
+            elif (f, c) == META:
+                ax.add_patch(plt.Rectangle((c - 0.5, f - 0.5), 1, 1, color="#bfe3bf"))
+                ax.text(c, f, "G", ha="center", va="center", fontweight="bold")
+            else:
+                if (N[s] == 0).any():
+                    ax.add_patch(plt.Rectangle((c - 0.5, f - 0.5), 1, 1, color="#eef2f7"))
+                ax.text(c, f, SIMBOLOS[int(np.argmax(pi[s]))], ha="center",
+                        va="center", fontsize=12)
+                if (f, c) == INICIO:
+                    ax.text(c - 0.38, f - 0.28, "S", fontsize=8, color="#475569")
+
+
+def dibuja(p1, p2):
+    fig = plt.figure(figsize=(13.0, 8.2))
+    gs = fig.add_gridspec(2, 12, height_ratios=[1.35, 1.0], hspace=0.38, wspace=2.0,
+                          left=0.06, right=0.985, top=0.93, bottom=0.06)
+
+    # (A) LA IMAGEN DEL CAPÍTULO: lo que se cree frente a lo que obtiene.
+    ax1 = fig.add_subplot(gs[0, 0:4])
+    ms = p1["metodos"]
+    x = np.arange(len(ms))
+    ax1.bar(x - 0.2, [p1["cree"][m] for m in ms], 0.4, color=AMBAR,
+            label="valor que se CREE")
+    ax1.bar(x + 0.2, [p1["real"][m] for m in ms], 0.4, color=IND,
+            label="retorno REAL al desplegarla")
+    ax1.axhline(p1["V_opt"][0], ls="--", lw=1.2, color=VERDE,
+                label=f"óptimo real ({p1['V_opt'][0]:.0f})")
+    for i, m in enumerate(ms):
+        ax1.annotate("", xy=(i + 0.2, p1["real"][m]), xytext=(i - 0.2, p1["cree"][m]),
+                     arrowprops=dict(arrowstyle="-&gt;", color=ROJO, lw=1.4))
+        ax1.text(i - 0.2, p1["cree"][m] + 0.6, f"{p1['cree'][m]:.1f}", ha="center",
+                 fontsize=8, color="#92400e")
+        ax1.text(i + 0.2, p1["real"][m] + 0.6, f"{p1['real'][m]:.1f}", ha="center",
+                 fontsize=8, color="#3730a3")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(["BC", "Q offline", "Q + soporte", "CQL"], fontsize=8.5)
+    ax1.set_ylim(-30.0, 2.5)
+    ax1.set_ylabel("Valor desde la casilla 0")
+    ax1.set_title("A) La cadena: se cree -2 y cosecha -22", fontsize=10.5)
+    ax1.legend(fontsize=7.5, loc="lower center")
+    ax1.grid(alpha=0.25, axis="y")
+
+    # (B) El veneno entrando por la casilla 2 y subiendo hacia atrás.
+    ax2 = fig.add_subplot(gs[0, 4:8])
+    cas = np.arange(p1["n"])
+    ax2.plot(cas, p1["V_opt"], "o--", color=VERDE, lw=1.6, label="V*(s) real")
+    ax2.plot(cas, p1["Q_ing"].max(axis=1), "o-", color=ROJO, lw=2,
+             label="V(s) que cree Q offline")
+    ax2.plot(cas, p1["Q_cql"].max(axis=1), "o-", color=IND, lw=2,
+             label="V(s) que cree CQL")
+    ax2.axvline(2, color=ROJO, ls=":", lw=1.2)
+    ax2.annotate("(2, ATAJAR) no está en D:\nsu valor sigue siendo 0,00\nporque nadie lo desmintió",
+                 xy=(2.0, 0.15), xytext=(1.55, 3.0), fontsize=7.5, color=ROJO,
+                 ha="center", va="center",
+                 arrowprops=dict(arrowstyle="-&gt;", color=ROJO, lw=1.2))
+    ax2.annotate("", xy=(0.06, -7.4), xytext=(1.65, -7.4),
+                 arrowprops=dict(arrowstyle="-&gt;", color=ROJO, lw=1.6))
+    ax2.text(0.72, -7.25, "el bootstrapping lo arrastra atrás",
+             fontsize=7, color=ROJO, ha="center", va="bottom")
+    ax2.set_xticks(cas)
+    ax2.set_ylim(-8.6, 4.2)
+    ax2.set_xlabel("Casilla de la cadena")
+    ax2.set_ylabel("Valor del estado")
+    ax2.set_title("B) El veneno entra por la casilla 2", fontsize=10.5)
+    ax2.legend(fontsize=7, loc="lower right")
+    ax2.grid(alpha=0.25)
+
+    # (C) El barrido de cobertura del gridworld: no era el algoritmo, era el hueco.
+    ax3 = fig.add_subplot(gs[0, 8:12])
+    b = np.array(p2["barrido"])
+    xs = np.arange(len(b))
+    ax3.plot(xs, b[:, 3], "o-", color=AMBAR, label="Q offline: cree")
+    ax3.plot(xs, b[:, 4], "o--", color=AMBAR, label="Q offline: obtiene")
+    ax3.plot(xs, b[:, 5], "s-", color=CIAN, label="CQL: cree")
+    ax3.plot(xs, b[:, 6], "s--", color=CIAN, label="CQL: obtiene")
+    ax3.plot(xs, b[:, 2], "^:", color=GRIS, label="clonación: obtiene")
+    opt = p2["V_opt"][p2["mdp"].s0]
+    ax3.axhline(opt, ls="--", lw=1.2, color=VERDE)
+    ax3.text(0.05, opt + 0.6, f"óptimo real ({opt:.1f})", color=VERDE, fontsize=7.5)
+    ax3.set_xticks(xs)
+    ax3.set_xticklabels([f"{r[0]:.2f}\n{r[1]:.0f} %" for r in b], fontsize=7.5)
+    ax3.set_xlabel("epsilon de pi_beta  /  cobertura de D")
+    ax3.set_ylabel("Retorno descontado")
+    ax3.set_ylim(-31.0, 2.5)
+    ax3.set_title("C) El gridworld: no era el algoritmo,\nera el hueco", fontsize=10.5)
+    ax3.legend(fontsize=7, loc="lower left", ncol=2)
+    ax3.grid(alpha=0.25)
+
+    # Abajo: los tableros. Gris = estados con alguna acción que D nunca vio.
+    tableros = [("pi_beta (generó D)", p2["pi_beta"]),
+                ("Clonación de conducta", p2["politicas0"]["Clonación de conducta"]),
+                ("Q-learning offline", p2["politicas0"]["Q-learning offline"]),
+                ("CQL tabular", p2["politicas0"]["CQL tabular"])]
+    for i, (titulo, pi) in enumerate(tableros):
+        ax = fig.add_subplot(gs[1, 3 * i:3 * i + 3])
+        dibuja_tablero(ax, p2["mdp"], pi, titulo, p2["N0"])
+    fig.text(0.5, 0.015, "Gris = estados donde alguna acción no aparece en el conjunto "
+             "de datos.  X = trampa,  G = meta,  S = salida.", ha="center",
+             fontsize=8.5, color="#475569")
+    plt.show()
+
+
+if __name__ == "__main__":
+    resumen1 = parte1()
+    resumen2 = parte2()
+    dibuja(resumen1, resumen2)
+</code></pre>
+        </div>
+
+        <p>
+          Esta es la salida completa, tal cual sale por la consola:
+        </p>
+
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment">==============================================================================
+PARTE 1 · Cadena de 4 casillas.  SEGUIR = -1 por paso,  ATAJAR = -20 (pozo)
+==============================================================================
+Conjunto de datos D: 1366 transiciones de 400 episodios de pi_beta.
+pi_beta ataja con probabilidad 0,15 ... salvo en la casilla 2, donde NUNCA.
+Óptimo real V*(s0) = -4.00   |   valor real de pi_beta = -10.63
+
+Cuántas veces aparece cada par (s,a) en D  [ * = hueco de cobertura ]
+ casilla |  n(s, SEGUIR) |  n(s, ATAJAR)
+------------------------------------------
+       0 |           352 |            48
+       1 |           307 |            45
+       2 |           307 |             0 *
+       3 |           249 |            58
+
+Tabla Q del Q-LEARNING OFFLINE 'a secas'  [ * = par que NO está en D ]
+ casilla |  Q(s,SEGUIR) |  Q(s,ATAJAR) |  max_a Q(s,a) |  V*(s) real
+--------------------------------------------------------------------------
+       0 |        -2.00 |      -20.00  |         -2.00 |       -4.00
+       1 |        -1.00 |      -20.00  |         -1.00 |       -3.00
+       2 |        -2.00 |        0.00* |          0.00 |       -2.00
+       3 |        -1.00 |      -20.00  |         -1.00 |       -1.00
+El par (2, ATAJAR) no se ejecutó jamás, así que nadie lo actualizó nunca y
+sigue valiendo lo que valía al empezar: 0,00. Y 0,00 &gt; -2,00, de modo que el
+max de la casilla 2 se agarra a un número inventado... y el bootstrapping lo
+arrastra hacia atrás: Q(1,SEGUIR) = -1 + 0 = -1 en vez de -3, y de ahí
+Q(0,SEGUIR) = -1 + (-1) = -2 en vez de -4. Una sola celda envenena la cadena.
+
+Tabla Q de CQL TABULAR (mismo D, mismo bucle, con el empujón hacia abajo)
+ casilla |  Q(s,SEGUIR) |  Q(s,ATAJAR) |  max_a Q(s,a) |  V*(s) real
+--------------------------------------------------------------------------
+       0 |        -6.00 |      -20.00  |         -6.00 |       -4.00
+       1 |        -4.50 |      -20.00  |         -4.50 |       -3.00
+       2 |        -3.00 |       -7.70* |         -3.00 |       -2.00
+       3 |        -1.50 |      -20.00  |         -1.50 |       -1.00
+CQL hunde Q(2,ATAJAR) de 0,00 a -7.70 sin haber visto esa acción
+jamás, el max vuelve a caer sobre SEGUIR y el veneno no llega a entrar.
+
+Lo que cree cada método frente a lo que de verdad consigue al desplegarlo
+                 método |   se cree |  retorno real |   brecha | P(ATAJAR) en s0 s1 s2 s3
+------------------------------------------------------------------------------------------------
+  Clonación de conducta |    -10.59 |        -10.59 |     0.00 |      0.12 0.13 0.00 0.19
+     Q-learning offline |     -2.00 |        -22.00 |    20.00 |      0.00 0.00 1.00 0.00
+   Q-learning + soporte |     -4.00 |         -4.00 |     0.00 |      0.00 0.00 0.00 0.00
+            CQL tabular |     -6.00 |         -4.00 |    -2.00 |      0.00 0.00 0.00 0.00
+------------------------------------------------------------------------------------------------
+El Q-learning offline se cree MEJOR que el óptimo real de la tarea (-4,00),
+cosa imposible por construcción, y al desplegarlo se tira al pozo desde la
+casilla 2 y cosecha -22,00. Factor 11 entre lo que cree y lo que consigue.
+La clonación no se engaña (no estima nada: le ponemos como 'se cree' el
+retorno medio observado en D), pero tampoco mejora: reproduce a pi_beta.
+
+Control 1: el mismo Q-learning offline, pero con Q inicializada a -20
+  se cree  -4.00 y obtiene  -4.00. Con una inicialización PESIMISTA
+  no se rompe. Eso no invalida el ejemplo: ES la moraleja. En una tabla, el
+  valor de lo que nunca viste es la inicialización; con una red neuronal es
+  lo que la red extrapola, y ahí no eliges tú. Lo único sistemático es que el
+  max se queda con los valores altos. Ser pesimista con lo desconocido no es
+  un truco de implementación: es el algoritmo conservador.
+
+Control 2: el mismo Q-learning offline con CIEN VECES más datos
+  132043 transiciones -&gt; se cree  -2.00 y obtiene -22.00. Idéntico.
+  El agujero de cobertura es estructural, no estadístico: lo que falta no
+  son más datos, es OTRO tipo de datos, y el conjunto ya está cerrado.
+
+Control 3: si la clonación desplegara la MODA en vez de muestrear, aquí
+  sacaría -4.00, o sea el óptimo: en esta cadena el defecto de
+  pi_beta es puro ruido y la moda lo limpia. En el gridworld de la Parte 2
+  no habrá tanta suerte, porque allí el defecto de pi_beta es sistemático.
+
+==============================================================================
+PARTE 2 · Gridworld 6x6 resbaladizo (meta, 4 trampas, cada paso -1)
+==============================================================================
+gamma = 0.95 | desliz = 0.1 | todas las recompensas &lt;= 0, así que
+NINGÚN retorno puede llegar a cero: el cero de la tabla es inalcanzable.
+
+D: 300 episodios de pi_beta = epsilon-greedy(0,40) sobre el controlador
+heurístico -&gt; 3465 transiciones. Cubren el 85 % de los 124 pares (s,a).
+El 15 % restante nunca se ejecutó: su valor es una invención de la
+tabla que nadie puede desmentir.
+
+Lo que cada método CREE que vale su política frente a lo que de verdad
+obtiene al desplegarla (media de 5 conjuntos de datos):
+--------------------------------------------------------------------------
+método                   V(inicio) que cree  retorno real    llega
+--------------------------------------------------------------------------
+Clonación de conducta                     —        -10.42      79 %
+Q-learning offline                    -2.72        -19.99       3 %
+Q-learning + soporte                  -8.41         -9.75      86 %
+CQL tabular                          -10.94         -9.90      84 %
+--------------------------------------------------------------------------
+pi_beta (generó D)                        —        -16.41      37 %
+el controlador sin ruido                  —        -10.42      79 %
+óptimo (con el modelo)                -8.84         -8.84      93 %
+--------------------------------------------------------------------------
+Otra vez: el Q-learning offline se cree -2.72 en un problema donde lo mejor
+posible es -8.84, se equivoca en +17.3 puntos sobre su propia política
+y casi nunca llega a la meta. Los conservadores se creen poco y lo cumplen.
+La clonación, por su parte, recupera el controlador limpio de ruido: ese es
+su techo, y no lo pasa. Los conservadores sí lo pasan. Veamos por qué.
+
+El camino de cada política (sin deslizamiento, para verlo limpio):
+--------------------------------------------------------------------------
+  Clonación de conducta  (5,0) (4,0) (3,0) (2,0) (1,0) (0,0) (0,1) (0,2) (0,3) (0,4) (0,5)=META
+  Q-learning offline     (5,0) (5,1) (5,2) (5,3) [se atasca en (5,3)]
+  CQL tabular            (5,0) (5,1) (5,2) (4,2) (4,3) (4,4) (3,4) (2,4) (2,5) (1,5) (0,5)=META
+  óptimo (referencia)    (5,0) (5,1) (5,2) (5,3) (5,4) (5,5) (4,5) (3,5) (2,5) (1,5) (0,5)=META
+--------------------------------------------------------------------------
+¿Y cuánto de cada camino recorrió alguien DE VERDAD? El trozo más largo que
+aparece seguido en un solo episodio del conjunto de datos:
+  Clonación de conducta  11 casillas de 11
+  CQL tabular             8 casillas de 11
+--------------------------------------------------------------------------
+Ahí está lo que la clonación NO puede hacer. La clonación repite entero el
+camino de pi_beta por el borde izquierdo, que pasa rozando dos trampas: ese
+es su techo, y por eso su camino aparece tal cual en los datos. CQL se saca
+un camino por el centro que NADIE recorrió entero; cose trozos sueltos de la
+exploración de episodios distintos. Eso, y no la imitación, es lo que hace
+que valga la pena hacer RL offline. Y el Q-learning offline, en cambio, se
+queda empujando la pared de abajo, convencido de que esa acción, que nunca
+vio ejecutar, vale cero.
+
+Control: mismo código, distinta COBERTURA (subimos el epsilon de pi_beta)
+--------------------------------------------------------------------------
+ epsilon   cobertura   BC real   QL cree   QL real   CQL cree   CQL real
+--------------------------------------------------------------------------
+    0.05         53 %    -10.42     -1.00    -19.15     -11.65     -12.01
+    0.20         73 %    -10.42     -2.06    -19.02     -11.70     -12.06
+    0.40         91 %    -10.42     -3.68    -19.85     -10.45      -9.63
+    0.60         99 %    -10.42     -6.33    -16.76     -11.24      -9.33
+    0.80        100 %    -11.95     -8.82     -9.55     -11.08      -9.36
+    1.00         95 %    -20.00     -7.72    -15.03     -14.88     -12.58
+--------------------------------------------------------------------------
+El Q-learning offline solo deja de mentir cuando la cobertura llega al 100 %:
+basta un puñado de pares (s,a) sin datos para que el max se agarre a ellos.
+El problema nunca fue el algoritmo, era el hueco. Fíjate también en la
+clonación: por muchos datos que le des se queda clavada en el techo de quien
+los generó, y con eps = 1 se hunde con él. Y en la otra punta, con muy poca
+cobertura, ser conservador tampoco regala nada: si D no contiene material
+mejor, no hay nada que cocinar. Ningún método gana siempre: depende de D.</span></pre>
+        </div>
+
+        <h2 id="terminal">Ejecutarlo en tu terminal</h2>
+        <p>
+          El mismo archivo funciona fuera del navegador y tarda alrededor de un segundo y medio.
+          Descárgalo con «Descargar .py» (o cópialo) y ejecútalo así:
+        </p>
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="comment"># 1) (opcional) crea un entorno virtual</span>
+<span class="prompt">$</span> python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+
+<span class="comment"># 2) instala las dependencias del manual</span>
+<span class="prompt">$</span> pip install -r requirements.txt
+
+<span class="comment"># 3) ejecuta el ejemplo (~1,5 s; imprime la salida de arriba y abre una gráfica)</span>
+<span class="prompt">$</span> python code/22-rl-offline/rl_offline.py
+<span class="comment">==============================================================================
+PARTE 1 · Cadena de 4 casillas.  SEGUIR = -1 por paso,  ATAJAR = -20 (pozo)
+==============================================================================
+Conjunto de datos D: 1366 transiciones de 400 episodios de pi_beta.
+...</span></pre>
+        </div>
+        <p class="pyodide-banner">
+          💡 Este ejemplo corre entero en el navegador (solo numpy y matplotlib) y es
+          <strong>determinista</strong>: dos ejecuciones dan exactamente los mismos números. Un CQL o
+          un TD3+BC de verdad necesitan <code>torch</code> y redes neuronales, pero el fenómeno que
+          les da sentido —el $\max$ agarrándose a un valor que nadie puede desmentir— es el mismo, y
+          en una tabla de $4 \times 2$ se ve con los ojos.
+        </p>
+
+        <h2 id="lo-que-acaba-de-pasar">Lo que acaba de pasar, número a número</h2>
+
+        <h3 id="la-cadena-el-mecanismo-al-desnudo">La cadena: el mecanismo al desnudo</h3>
+        <p>
+          La política de comportamiento atajaba con probabilidad $0{,}15$ en casi todas las casillas,
+          pero <strong>en la casilla 2 no atajó ni una sola vez</strong>. No por mala suerte: por
+          diseño. Es el equivalente de que un médico jamás recete el fármaco X a un paciente de tipo Y,
+          o de que un conductor jamás gire contra el tráfico. Y así, en $1.366$ transiciones,
+          $n(2, \text{ATAJAR}) = 0$.
+        </p>
+        <p>
+          A partir de ahí todo es aritmética que puedes seguir con una calculadora, y sale entera
+          impresa en la salida:
+        </p>
+        <ol>
+          <li>Nadie ejecutó $(2, \text{ATAJAR})$, así que <strong>ninguna actualización lo tocó</strong>
+          y $Q(2, \text{ATAJAR})$ se queda en su valor inicial: $0{,}00$.</li>
+          <li>Pero $0{,}00 > -2{,}00$, que es lo que vale la alternativa buena. Así que
+          $\max_a Q(2,a) = 0{,}00$: <strong>el $\max$ se agarra al número inventado</strong>.</li>
+          <li>El bootstrapping se lo lleva atrás:
+          $Q(1, \text{SEGUIR}) = -1 + 0 = -1$, cuando la verdad es $-3$.</li>
+          <li>Y otro paso más: $Q(0, \text{SEGUIR}) = -1 + (-1) = -2$, cuando la verdad es $-4$.</li>
+        </ol>
+        <p>
+          Una sola celda vacía, en una tabla de ocho celdas, envenena la cadena entera. Y el resultado
+          de desplegar esa política es el que tiene que ser: en la casilla 2 el agente ataja —cree que
+          vale $0$— y se tira al pozo.
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Método</th><th>Lo que <em>cree</em> que vale</th><th>Lo que <em>obtiene</em> al desplegarse</th><th>Brecha</th></tr></thead>
+            <tbody>
+              <tr><td>Clonación de conducta</td><td>$-10{,}59$</td><td>$-10{,}59$</td><td>$0{,}00$</td></tr>
+              <tr><td><strong>Q-learning offline</strong></td><td><strong>$-2{,}00$</strong></td><td><strong>$-22{,}00$</strong></td><td><strong>$+20{,}00$</strong></td></tr>
+              <tr><td>Q-learning + soporte (BCQ)</td><td>$-4{,}00$</td><td>$-4{,}00$</td><td>$0{,}00$</td></tr>
+              <tr><td>CQL tabular</td><td>$-6{,}00$</td><td>$-4{,}00$</td><td>$-2{,}00$</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 El número del capítulo</div>
+          <p>
+            El óptimo real de la tarea es $-4{,}00$. El Q-learning offline se cree $-2{,}00$: se cree
+            <strong>mejor que lo mejor posible</strong>, algo imposible por construcción. Y al
+            desplegarlo cosecha $-22{,}00$. <strong>Un factor 11 entre lo que cree y lo que
+            consigue.</strong> Fíjate en el signo de la brecha de CQL, que es el otro dato importante:
+            $-2{,}00$. CQL se equivoca <em>por abajo</em> —cree $-6$ y saca $-4$— y aun así elige la
+            política óptima. Un algoritmo que se subestima es incómodo; uno que se sobrestima es
+            peligroso.
+          </p>
+        </div>
+
+        <p>
+          La comparación entre las dos tablas $Q$ impresas es la mejor manera de ver qué hace cada
+          familia. El Q-learning «a secas» deja $Q(2, \text{ATAJAR}) = 0{,}00$ y pierde. La versión
+          con <strong>soporte</strong> (BCQ tabular) ni siquiera mira esa celda: su $\max$ solo recorre
+          acciones con datos, y de ahí sale la política óptima con una estimación clavada, $-4{,}00$.
+          Y <strong>CQL</strong> hace algo más sutil y más bonito: hunde $Q(2, \text{ATAJAR})$ desde
+          $0{,}00$ hasta $-7{,}70$ <em>sin haber visto jamás esa acción</em>, simplemente porque nadie
+          la defendía; el $\max$ vuelve a caer sobre SEGUIR y el veneno no llega a entrar. No hay
+          restricción explícita: la política final sigue siendo el <em>argmax</em> sobre todas las
+          acciones. Es que ya no hay nada arriba a lo que agarrarse.
+        </p>
+
+        <h3 id="tres-controles-honestos">Tres controles honestos</h3>
+        <p>
+          Un ejemplo que solo funciona si lo miras de refilón no vale nada, así que el programa imprime
+          las tres objeciones que se le pueden poner:
+        </p>
+        <ul>
+          <li>
+            <strong>Control 1: «lo has amañado con la inicialización».</strong> En parte sí, y es la
+            moraleja. Si inicializas la tabla a $-20$, el Q-learning offline
+            <em>no se rompe</em>: cree $-4{,}00$ y obtiene $-4{,}00$. En una tabla, el valor de lo que
+            nunca viste <em>es</em> la inicialización, y ahí puedes elegir ser pesimista. Con una red
+            neuronal no eliges tú: es lo que la red extrapole fuera de su soporte, y eso no se controla.
+            Lo único sistemático es que <strong>el $\max$ se queda con los valores altos</strong>,
+            vengan de donde vengan. Por eso ser pesimista con lo desconocido no es un truco de
+            implementación tabular: <em>es</em> el algoritmo conservador, escrito en grande.
+          </li>
+          <li>
+            <strong>Control 2: «te faltan datos».</strong> No. Con <strong>cien veces más datos</strong>
+            —$132.043$ transiciones en vez de $1.366$— el resultado es
+            <em>exactamente el mismo</em>: cree $-2{,}00$, obtiene $-22{,}00$. El agujero de cobertura
+            es <strong>estructural, no estadístico</strong>. Lo que falta no son más datos: es
+            <em>otro tipo</em> de datos, y el conjunto ya está cerrado. Esta es probablemente la
+            lección más importante del capítulo para quien vaya a montar un proyecto real.
+          </li>
+          <li>
+            <strong>Control 3: «tu clonación es débil aposta».</strong> Al contrario: si la clonación
+            despliega la <em>moda</em> en vez de muestrear, en esta cadena saca $-4{,}00$, o sea el
+            óptimo, porque aquí el defecto de $\pi_\beta$ es puro ruido y la moda lo limpia. En la
+            cadena, clonar bien basta. En el gridworld ya no, porque allí el defecto de $\pi_\beta$
+            es <strong>sistemático</strong>, no ruidoso.
+          </li>
+        </ul>
+
+        <h3 id="lo-que-la-clonacion-no-puede-hacer">El gridworld, y lo que la clonación no puede hacer</h3>
+        <p>
+          La segunda parte lleva el mismo experimento a una rejilla $6 \times 6$ con cuatro trampas y
+          suelo resbaladizo, con
+          $\gamma = 0{,}95$ y un $10\%$ de probabilidad de desviarse. El histórico son $300$ episodios
+          de un controlador heurístico razonable con exploración $\varepsilon$-greedy al $40\%$: unas
+          $3.465$ transiciones que cubren el $85\%$ de los $124$ pares $(s,a)$ no terminales. Ese
+          $15\%$ restante es el hueco, y todo lo demás se sigue.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Método</th><th>Cree</th><th>Obtiene</th><th>Llega a la meta</th></tr></thead>
+            <tbody>
+              <tr><td>Clonación de conducta</td><td>—</td><td>$-10{,}42$</td><td>$79\%$</td></tr>
+              <tr><td><strong>Q-learning offline</strong></td><td><strong>$-2{,}72$</strong></td><td><strong>$-19{,}99$</strong></td><td><strong>$3\%$</strong></td></tr>
+              <tr><td>Q-learning + soporte</td><td>$-8{,}41$</td><td>$-9{,}75$</td><td>$86\%$</td></tr>
+              <tr><td>CQL tabular</td><td>$-10{,}94$</td><td>$-9{,}90$</td><td>$84\%$</td></tr>
+              <tr><td>$\pi_\beta$ (generó $\mathcal{D}$)</td><td>—</td><td>$-16{,}41$</td><td>$37\%$</td></tr>
+              <tr><td>Óptimo (con el modelo)</td><td>$-8{,}84$</td><td>$-8{,}84$</td><td>$93\%$</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Otra vez lo mismo, y con medias de cinco conjuntos de datos distintos para que no dependa de
+          una semilla: el Q-learning offline se cree $-2{,}72$ en un problema donde lo mejor posible es
+          $-8{,}84$, se equivoca en $+17{,}3$ puntos <em>sobre su propia política</em> y llega a la
+          meta un $3\%$ de las veces. CQL, en cambio, cree $-10{,}94$ y saca $-9{,}90$: otra vez se
+          equivoca del lado seguro.
+        </p>
+        <p>
+          Merece la pena detenerse en la fila que no encaja del todo, porque es honesta y enseña algo.
+          La versión con <strong>soporte</strong> cree $-8{,}41$ y obtiene $-9{,}75$: se sobrestima en
+          $1{,}3$ puntos, e incluso se cree un poco mejor que el óptimo real de la tarea. No es un
+          fallo del razonamiento del capítulo, es su matiz: restringir el $\max$ al soporte elimina las
+          acciones <em>sin ningún dato</em>, pero las que quedan siguen siendo estimaciones de muestra
+          finita, y sobre estimaciones ruidosas el $\max$ sigue sesgando hacia arriba exactamente como
+          en el <a href="09-q-learning.html#sesgo-max">capítulo 9</a>. La restricción por soporte cura
+          la extrapolación, no el sesgo de maximización. El pesimismo explícito de CQL sí ataca los
+          dos, y por eso es el único de los cuatro cuya estimación queda <em>por debajo</em> de lo que
+          consigue.
+        </p>
+        <p>
+          Pero aquí aparece el argumento que la cadena no podía dar. Mira el <strong>camino</strong> de
+          cada política, y sobre todo la línea que viene después:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Política</th><th>Camino desde la salida</th><th>Trozo más largo que alguien recorrió <em>de seguido</em></th></tr></thead>
+            <tbody>
+              <tr><td>Clonación</td><td>Sube pegada al borde izquierdo y cruza por arriba</td><td><strong>11 casillas de 11</strong></td></tr>
+              <tr><td>CQL</td><td>Sale por el centro: (5,0)(5,1)(5,2)(4,2)(4,3)(4,4)(3,4)(2,4)(2,5)(1,5)(0,5)</td><td><strong>8 casillas de 11</strong></td></tr>
+              <tr><td>Q-learning offline</td><td>(5,0)(5,1)(5,2)(5,3) y ahí <em>se atasca empujando la pared</em></td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          El programa guarda de qué episodio salió cada transición —no se lo pasa a ningún
+          algoritmo— y busca el fragmento más largo de cada camino que aparezca seguido dentro de un
+          <em>solo</em> episodio del conjunto de datos. El camino de la clonación aparece entero,
+          <strong>11 de 11</strong>: normal, porque la clonación no sabe hacer otra cosa que repetir lo
+          que vio, y lo que vio es la ruta de $\pi_\beta$ por el borde izquierdo, que no es más corta
+          que la óptima —las dos llegan en diez pasos— pero pasa rozando dos
+          trampas. Ese es su techo, y lo alcanza exactamente ($-10{,}42$, el valor del controlador sin
+          ruido, ni una décima más).
+        </p>
+        <p>
+          El camino de CQL, en cambio, solo aparece <strong>8 de 11</strong>. Es decir:
+          <strong>nadie recorrió ese camino entero, jamás</strong>. CQL lo ha <em>cosido</em> a partir
+          de trozos sueltos de episodios distintos —un fragmento de la exploración de un episodio, un
+          fragmento de otro— y ha salido con una ruta que no está en los datos y que es mejor que
+          todas las que sí están. A eso se le llama <strong>stitching</strong> (coser trayectorias), y
+          es la respuesta definitiva a la pregunta «¿para qué complicarse, si puedo clonar?».
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Por qué el RL offline no es imitación</div>
+          <p>
+            La clonación de conducta está atada al <em>mejor camino completo</em> que hay en
+            $\mathcal{D}$. El RL offline está atado a las <em>mejores transiciones sueltas</em> que hay
+            en $\mathcal{D}$, y puede recombinarlas. Si el histórico contiene mil viajes mediocres que
+            entre todos tocan las piezas de un viaje excelente, la clonación te dará un viaje
+            mediocre y el RL offline puede darte el excelente. Esa capacidad de coser es
+            <strong>toda</strong> la ventaja del RL offline sobre el aprendizaje por imitación. Y es
+            también la razón de que necesite el bootstrapping —que es lo que propaga información entre
+            trayectorias distintas—, o sea la pieza que a la vez le da su poder y le abre la herida.
+          </p>
+        </div>
+
+        <h3 id="no-era-el-algoritmo-era-el-hueco">No era el algoritmo, era el hueco</h3>
+        <p>
+          El último bloque de la salida es el que cierra el argumento. Se repite todo el experimento
+          subiendo la exploración $\varepsilon$ de $\pi_\beta$, o sea variando la
+          <strong>cobertura</strong> del conjunto de datos, y sin cambiar una sola línea de los
+          algoritmos. (Son otras semillas y tres históricos por fila en vez de cinco; por eso la fila
+          $\varepsilon = 0{,}40$ marca un $91\%$ de cobertura y antes salía un $85\%$: cuánto cubre un
+          histórico fluctúa bastante de una recogida a otra, que es en sí mismo un aviso.)
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>$\varepsilon$ de $\pi_\beta$</th><th>Cobertura</th><th>Clonación</th><th>Q offline (cree)</th><th>Q offline (obtiene)</th><th>CQL (obtiene)</th></tr></thead>
+            <tbody>
+              <tr><td>$0{,}05$</td><td>$53\%$</td><td>$-10{,}42$</td><td>$-1{,}00$</td><td>$-19{,}15$</td><td>$-12{,}01$</td></tr>
+              <tr><td>$0{,}20$</td><td>$73\%$</td><td>$-10{,}42$</td><td>$-2{,}06$</td><td>$-19{,}02$</td><td>$-12{,}06$</td></tr>
+              <tr><td>$0{,}40$</td><td>$91\%$</td><td>$-10{,}42$</td><td>$-3{,}68$</td><td>$-19{,}85$</td><td>$-9{,}63$</td></tr>
+              <tr><td>$0{,}60$</td><td>$99\%$</td><td>$-10{,}42$</td><td>$-6{,}33$</td><td>$-16{,}76$</td><td>$-9{,}33$</td></tr>
+              <tr><td>$0{,}80$</td><td>$\mathbf{100\%}$</td><td>$-11{,}95$</td><td>$-8{,}82$</td><td>$\mathbf{-9{,}55}$</td><td>$-9{,}36$</td></tr>
+              <tr><td>$1{,}00$</td><td>$95\%$</td><td>$-20{,}00$</td><td>$-7{,}72$</td><td>$-15{,}03$</td><td>$-12{,}58$</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Léelo de arriba abajo y verás tres historias a la vez. La primera: el Q-learning offline
+          <strong>solo deja de mentir cuando la cobertura llega al $100\%$</strong>. Con el $99\%$
+          todavía se hunde ($-16{,}76$); con el $100\%$ pasa a $-9{,}55$ sin haber cambiado nada. Basta
+          un puñado de pares $(s,a)$ sin datos para que el $\max$ se agarre a ellos: el problema nunca
+          fue el algoritmo, era el hueco.
+        </p>
+        <p>
+          La segunda: la <strong>clonación se queda clavada</strong> en $-10{,}42$ le des los datos que
+          le des, porque ese es el techo de quien los generó; y cuando $\pi_\beta$ se vuelve puro ruido
+          ($\varepsilon = 1$) la clonación se hunde con ella hasta $-20{,}00$. Clonar es tan bueno
+          como el que enseña, ni más ni menos. Y fíjate de paso en que la cobertura tampoco crece
+          siempre: al pasar de $\varepsilon = 0{,}80$ a $\varepsilon = 1$ <em>baja</em> del $100\%$ al
+          $95\%$. Tiene sentido —los pares que se pierden están todos en la esquina de la meta—: una
+          $\pi_\beta$ del todo aleatoria deambula cerca de la salida y ya casi nunca llega hasta allí,
+          mientras que la $\varepsilon$-greedy conservaba un rumbo que la llevaba. Explorar más no es
+          lo mismo que cubrir más.
+        </p>
+        <p>
+          Y la tercera, la incómoda, que también sale impresa: con $\varepsilon \le 0{,}20$ —cobertura
+          del $73\%$ o menos— <strong>el conservador es peor que clonar</strong> ($-12{,}0$ frente a
+          $-10{,}4$). Y tiene todo el sentido: si $\mathcal{D}$ no contiene material mejor que
+          $\pi_\beta$, no hay nada que coser, y el pesimismo solo puede quitarte cosas.
+          <strong>Ningún método gana siempre: depende de $\mathcal{D}$.</strong> Por eso la clonación
+          es la línea base obligatoria y por eso la primera pregunta de un proyecto de RL offline no
+          es «¿qué algoritmo uso?» sino «¿qué hay dentro de mis datos?».
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Tres cambios de una línea que cambian la conclusión, para que veas que no hay truco:
+          </p>
+          <ul>
+            <li>En <code>parte1</code>, quita la valla: <code>valladas=set()</code>. Con
+            $\pi_\beta$ atajando de vez en cuando en <em>todas</em> las casillas, la cobertura es
+            completa y el Q-learning offline encuentra el óptimo sin ayuda. El fallo desaparece porque
+            desaparece el hueco.</li>
+            <li>Sube la prudencia de CQL en <code>parte1</code>, de <code>c=0.5</code> a
+            <code>c=3.0</code>. La política sigue siendo la óptima, pero mira cómo se desploma la
+            columna «se cree»: pasa de $-6{,}00$ a $-15{,}98$. Demasiado pesimismo no rompe nada, solo
+            hace que el agente <em>infravalore</em> su propia política. Ahora baja: con
+            <code>c=0.05</code> sigue saliendo el óptimo y la estimación se afina ($-4{,}20$), con
+            <code>c=0.01</code> también ($-4{,}04$)… y en <code>c=0.005</code> reaparece el delirio de
+            golpe (cree $-3{,}19$ y cosecha $-22{,}00$). Fíjate en lo poco que hace falta: al empujón
+            conservador le basta con hundir $Q(2,\text{ATAJAR})$ por debajo de $-2$, y a partir de ahí
+            todo lo demás es margen de seguridad que se paga en pesimismo.</li>
+            <li>En <code>parte2</code>, baja los episodios de $300$ a $60$. Con una cobertura ridícula,
+            los conservadores dejan de ganarle a la clonación. Es la fila $\varepsilon = 0{,}05$ de la
+            tabla, por otro camino.</li>
+          </ul>
+        </div>
+
+        <h2 id="evaluacion-sin-entorno">Evaluación sin entorno: el problema abierto</h2>
+        <p>
+          Hay una pregunta que llevas rondando desde hace varias páginas y que es, con diferencia, la
+          parte menos resuelta de todo esto. En el experimento hemos podido decir «cree $-2$ y obtiene
+          $-22$» porque teníamos el modelo verdadero para hacer de juez. <strong>En un problema real no
+          lo tienes.</strong> Tienes cuatro políticas candidatas, ningún entorno, y hay que elegir una
+          para desplegarla en un hospital.
+        </p>
+        <p>
+          Lo primero que hay que descartar es lo que acabamos de ver que no funciona:
+          <strong>no puedes usar el $Q$ del propio algoritmo como criterio</strong>. Es exactamente el
+          número que está mintiendo. Elegir el método cuyo $Q(s_0)$ sea mayor te habría hecho desplegar
+          el Q-learning offline en los dos escenarios. Peor aún: la métrica de validación que usarías
+          por costumbre —la pérdida TD sobre un conjunto de validación extraído de $\mathcal{D}$—
+          tampoco sirve, porque el error de extrapolación no aparece en ella: el algoritmo ajusta
+          perfectamente las transiciones que <em>tiene</em>, y el disparate está en las que no tiene.
+        </p>
+        <p>
+          A la disciplina que intenta resolver esto se la llama <strong>evaluación off-policy</strong>
+          (<em>off-policy evaluation</em>, OPE), y su herramienta más directa ya la conoces: el
+          <a href="06-monte-carlo.html#off-policy">muestreo por importancia del capítulo 6</a>.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Estimador por muestreo por importancia</div>
+          <p>$$\hat{V}^\pi = \frac{1}{M}\sum_{k=1}^{M} \left( \prod_{t=0}^{T_k-1} \frac{\pi(a_t^k \mid s_t^k)}{\pi_\beta(a_t^k \mid s_t^k)} \right) G_k$$</p>
+          <p class="math-note">
+            $M$ es el número de trayectorias completas del histórico, $G_k$ el retorno descontado
+            observado en la trayectoria $k$ y $T_k$ su longitud. El producto es el
+            <strong>cociente de importancia</strong> $\rho_k$ del capítulo 6 —allí la política de
+            comportamiento se llamaba $b$ y aquí $\pi_\beta$, pero es la misma letra con otro
+            nombre—, y esta es su versión <em>ordinaria</em>: reajusta el peso de cada trayectoria según lo
+            probable que fuera bajo la política que queremos evaluar, $\pi$, frente a la que la generó,
+            $\pi_\beta$. Es insesgado… sobre el papel. En la práctica tiene dos problemas graves: hay
+            que <strong>conocer $\pi_\beta$</strong> (y muchas veces no la conoces: el histórico lo
+            generó un humano), y el producto de $T_k$ cocientes tiene una varianza que
+            <strong>crece exponencialmente con el horizonte</strong>. Con episodios de cien pasos, casi
+            todos los pesos son cero y uno solo se lo lleva todo.
+          </p>
+        </div>
+
+        <p>
+          La caja de herramientas real combina tres enfoques, ninguno satisfactorio del todo:
+        </p>
+        <ul>
+          <li><strong>Muestreo por importancia</strong>, en sus versiones ponderada y
+          <em>por pasos</em>, que recortan varianza a cambio de sesgo. Y aun así, se vuelve inútil
+          cuando el horizonte es largo o $\pi$ se aleja de $\pi_\beta$.</li>
+          <li><strong>Métodos directos</strong>: aprender un modelo del entorno con $\mathcal{D}$
+          (<a href="18-model-based.html">capítulo 18</a>) y evaluar la política dentro de él. Rápido y
+          de baja varianza, pero hereda todos los errores del modelo… <em>y el modelo también
+          extrapola mal fuera de los datos</em>. El problema no se resuelve: se muda de sitio.</li>
+          <li><strong>Estimadores doblemente robustos</strong>, que combinan los dos anteriores de forma
+          que basta con que <em>uno</em> de los dos esté bien especificado para que el estimador sea
+          consistente. Es lo mejor que hay, y sigue sin ser fiable en horizontes largos.</li>
+        </ul>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ La honestidad que exige este campo</div>
+          <p>
+            Reconócelo abiertamente: <strong>hoy no existe una forma fiable de saber si una política
+            offline es buena sin ejecutarla</strong>. En la práctica industrial, la evaluación
+            off-policy se usa para <em>descartar</em> candidatas obviamente malas y para ordenar un
+            puñado de finalistas, y la decisión final se toma con un despliegue pequeño, vigilado y
+            reversible: un piloto, un A/B con poco tráfico, un ensayo clínico. Si alguien te presenta
+            una política aprendida offline y la única prueba que aporta es que su propia $Q$ dice que
+            es buenísima, ya sabes exactamente qué acabas de leer en este capítulo.
+          </p>
+        </div>
+
+        <h2 id="cuando-usarlo-y-cuando-no">Cuándo usarlo y cuándo no</h2>
+        <p>
+          Con todo lo anterior en la mano, la decisión es bastante mecánica. Estas son las preguntas,
+          en orden:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Pregunta</th><th>Si la respuesta es…</th><th>Entonces…</th></tr></thead>
+            <tbody>
+              <tr><td>¿Puedes interactuar con el entorno o con un simulador decente?</td><td>Sí</td><td>Haz RL online. El offline es una solución a un problema que no tienes.</td></tr>
+              <tr><td>¿Tu $\mathcal{D}$ contiene comportamiento <em>mejor que la media</em>, aunque sea a trozos?</td><td>No</td><td>No hay nada que coser. Clona y punto, o replantea la recogida de datos.</td></tr>
+              <tr><td>¿Cubre $\mathcal{D}$ las acciones que tu política querría tomar?</td><td>No</td><td>Ningún algoritmo lo arregla. Es el control 2: no faltan datos, falta <em>otro tipo</em> de datos.</td></tr>
+              <tr><td>¿Es $\pi_\beta$ ya casi óptima (un experto humano competente)?</td><td>Sí</td><td>La clonación va a ser dificilísima de batir. Empieza por ella y sé escéptico.</td></tr>
+              <tr><td>¿Puedes hacer un despliegue pequeño y reversible para validar?</td><td>Sí</td><td>Adelante: es el escenario ideal del RL offline, y el habitual en la industria.</td></tr>
+              <tr><td>¿Puedes recoger datos nuevos aunque sea de vez en cuando?</td><td>Sí</td><td>Mejor aún: <em>offline-to-online</em>. Preentrena offline y afina con poca interacción real.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Esa última fila merece un comentario, porque es el uso más extendido en producción. El RL
+          offline rara vez es el final del camino: casi siempre es el <strong>arranque</strong>. Se
+          entrena una política conservadora con el histórico, se despliega con supervisión, y los datos
+          que genera se añaden al conjunto para una segunda vuelta. Ese ciclo —offline para arrancar,
+          online con cuentagotas para afinar— es lo que hace practicable el RL en robótica real y en
+          recomendadores.
+        </p>
+
+        <h2 id="trampas-comunes">Trampas comunes</h2>
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Las siete de siempre</div>
+          <ul>
+            <li><strong>Creerse la $Q$ del agente.</strong> Ya lo has visto: $-2$ contra $-22$. Es
+            precisamente la magnitud que <em>no</em> hay que usar para decidir. Úsala solo como
+            síntoma: si tu $Q(s_0)$ supera el mejor retorno que aparece en $\mathcal{D}$, tienes un
+            problema, no un hallazgo.</li>
+            <li><strong>Validar con la pérdida TD.</strong> Un error TD pequeño sobre datos de
+            validación extraídos de $\mathcal{D}$ es perfectamente compatible con una política que
+            delira, porque el delirio vive fuera de $\mathcal{D}$ y ahí no hay pérdida que medir.</li>
+            <li><strong>Suponer que más datos arreglan la cobertura.</strong> Control 2: cien veces más
+            datos, el mismo desastre exacto. Multiplicar un histórico sesgado multiplica el sesgo.</li>
+            <li><strong>Saltarse la clonación de conducta.</strong> Sin esa línea base no sabes si tu
+            método sofisticado aporta algo. Y hay regímenes enteros —los de poca cobertura— donde no
+            aporta nada.</li>
+            <li><strong>Ajustar el conservadurismo mirando el resultado real.</strong> Elegir
+            $\alpha_c$ o $\lambda$ tras probar cada opción en el entorno es hacer trampas: si pudieras
+            probar en el entorno, no estarías haciendo RL offline. Es una fuga de información muy
+            común en los artículos, y todavía más común en los cuadernos de casa.</li>
+            <li><strong>Ignorar de dónde salió $\pi_\beta$.</strong> Si el histórico lo generaron varios
+            operadores, o un mismo sistema que fue cambiando de versión, $\pi_\beta$ es una mezcla, y
+            la moda de la clonación puede ser una acción que <em>nadie</em> tomaría (el promedio de dos
+            buenas maneras de esquivar un obstáculo es ir de frente contra él).</li>
+            <li><strong>Olvidar que el histórico es una foto del pasado.</strong> Si el mundo cambió
+            desde que se registró —nuevos usuarios, nuevo protocolo, nuevo hardware—, tu $\mathcal{D}$
+            describe un MDP que ya no existe. No hay algoritmo que arregle eso.</li>
+          </ul>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Resumen del capítulo</div>
+          <ul>
+            <li>El <strong>RL offline</strong> aprende de un conjunto fijo
+            $\mathcal{D} = \{(s,a,r,s')\}$ generado por una política $\pi_\beta$, sin ninguna
+            interacción nueva. Es <a href="12-dqn.html#replay">DQN con el búfer congelado</a>, y es la
+            única modalidad viable en medicina, conducción, recomendadores y robótica real.</li>
+            <li>La <strong>clonación de conducta</strong> es aprendizaje supervisado puro,
+            $\max_\theta \sum \log \pi_\theta(a_i \mid s_i)$. Nunca supera a $\pi_\beta$, es la línea
+            base obligatoria, y es dificilísima de batir.</li>
+            <li><strong>El Q-learning offline se rompe</strong> porque el $\max_{a'} Q(s',a')$ evalúa
+            acciones que nadie ejecutó jamás: su valor es una extrapolación que
+            <strong>nadie desmiente</strong>, y el <a href="07-td-aprendizaje.html#entre-mc-y-dp">
+            bootstrapping</a> la propaga hacia atrás. Es el
+            <a href="09-q-learning.html#sesgo-max">sesgo de maximización</a> sin entorno que lo corrija,
+            y <a href="13-mejoras-dqn.html#double">Double DQN</a> no lo arregla porque el error no es
+            ruido independiente, es una ausencia común de datos.</li>
+            <li>Dos familias de cura: <strong>quedarse cerca de los datos</strong> (BCQ,
+            <a href="17-control-continuo.html#td3">TD3</a>+BC), que es <em>literalmente</em> la
+            <a href="21-rlhf.html#objetivo-kl">penalización KL contra $\pi_{\text{ref}}$ del capítulo
+            21</a> con otro nombre; y <strong>ser pesimista</strong> (CQL, IQL), que hunde el valor de
+            lo que no está respaldado hasta que deja de ganar el $\max$.</li>
+            <li>En el ejemplo: el Q-learning offline se cree $-2{,}00$ —mejor que el óptimo real,
+            $-4{,}00$— y cosecha $-22{,}00$; los conservadores se creen poco y lo cumplen. Con cien
+            veces más datos, idéntico: <strong>el hueco es estructural</strong>.</li>
+            <li>La ventaja real sobre imitar es el <strong>stitching</strong>: CQL sale por un camino
+            del que solo $8$ de $11$ casillas fueron recorridas de seguido por alguien. Cose trozos de
+            trayectorias distintas.</li>
+            <li>La <strong>evaluación sin entorno</strong> sigue abierta. El
+            <a href="06-monte-carlo.html#off-policy">muestreo por importancia</a> explota en varianza
+            con el horizonte, los métodos directos heredan el error del modelo, y nunca hay que usar la
+            $Q$ del propio agente como criterio.</li>
+          </ul>
+        </div>
+
+        <p>
+          Y con esto se cierra el círculo del manual. El RL offline no ha traído ni una ecuación nueva:
+          ha cogido el $\max$ del <a href="09-q-learning.html">capítulo 9</a>, el bootstrapping del
+          <a href="07-td-aprendizaje.html">7</a>, el búfer del <a href="12-dqn.html">12</a> y la correa
+          del <a href="21-rlhf.html">21</a>, les ha quitado el entorno, y ha dejado que choquen. Si has
+          seguido el argumento hasta aquí, ya sabes leer un artículo de RL offline. Queda una última
+          parada: el <a href="23-panorama.html">capítulo 23</a>, donde damos un paso atrás para hablar
+          de lo que separa un experimento de RL que convence de uno que no —cómo evaluar, cómo no
+          engañarse con las propias métricas, qué medir y cuántas semillas hacen falta— y de hacia
+          dónde va el campo. Después de este capítulo, ese escepticismo te va a sonar familiar.
+        </p>
+
+        <div class="chapter-nav" id="chapter-nav"></div>
+      </main>
+    </div>
+  </div>
+
+  <script src="../assets/js/nav.js"></script>
+  <script src="../assets/js/main.js"></script>
+  <script src="../assets/js/pyodide-runner.js"></script>
+</body>
+</html>
