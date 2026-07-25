@@ -124,8 +124,9 @@ y pulsa ▶ Ejecutar: corre tu versión. Cada bloque tiene un **↺ Original** q
 solo ese ejemplo.
 
 **Cualquier párrafo se puede anotar.** Al pasar el ratón por encima aparece un
-**✎ crear nota**; los párrafos que ya tienen una llevan un **📝** en el margen izquierdo
-que abre la nota para leerla, editarla o eliminarla.
+**✎ crear nota**; los párrafos que ya tienen una llevan un **📝** en el margen izquierdo.
+Pasando el cursor por ese 📝 se lee la nota en un globo, sin abrir nada; haciendo clic se
+edita o se elimina.
 
 Todo se guarda en el navegador y sobrevive a recargar y a cambiar de capítulo. Desde el
 botón **💾 Mis cambios** de la barra lateral puedes:

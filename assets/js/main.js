@@ -290,10 +290,29 @@
     b.type = "button";
     b.className = "nota-ui " + (nota ? "nota-marca" : "nota-add");
     b.innerHTML = nota ? "📝" : "✎ <span>crear nota</span>";
-    b.title = nota ? "Ver, editar o eliminar tu nota" : "Crear una nota en este párrafo";
-    b.setAttribute("aria-label", b.title);
+    // OJO: sin title nativo en la marca, o el navegador pintaría SU tooltip
+    // encima del globo con el texto de la nota. El aria-label se queda.
+    b.setAttribute("aria-label", nota ? "Ver, editar o eliminar tu nota" : "Crear una nota en este párrafo");
+    if (!nota) b.title = "Crear una nota en este párrafo";
     b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); abreNota(p); });
     p.appendChild(b);
+
+    // Globo con el texto de la nota, para leerla sin abrir el modal.
+    // Va con la clase nota-ui para que textoParrafo() lo ignore: si no, su
+    // texto se colaría en la huella que identifica al párrafo.
+    if (nota) {
+      const g = document.createElement("span");
+      g.className = "nota-ui nota-globo";
+      g.setAttribute("role", "tooltip");
+      const cuerpo = document.createElement("span");
+      cuerpo.className = "ng-texto";
+      cuerpo.textContent = nota.texto;          // textContent: nunca innerHTML con texto del lector
+      const pie = document.createElement("span");
+      pie.className = "ng-pie";
+      pie.textContent = "Clic para editarla";
+      g.append(cuerpo, pie);
+      p.appendChild(g);
+    }
     p.classList.toggle("con-nota", !!nota);
   }
 
@@ -316,6 +335,10 @@
 
   function montaDialogoNotas() {
     if (dlgNota) return;
+    // Si en el HTML ya viniera un diálogo (página serializada, restauración de
+    // sesión…), lo tiramos: si no, quedarían dos y los clics irían al viejo,
+    // que no tiene ningún manejador.
+    document.querySelectorAll(".nota-dlg").forEach((e) => e.remove());
     dlgNota = document.createElement("dialog");
     dlgNota.className = "nota-dlg";
     dlgNota.innerHTML = `
@@ -606,7 +629,11 @@
 
   function montaPanelCambios() {
     const tools = document.querySelector(".sidebar-tools");
-    if (!tools || tools.querySelector(".btn-cambios")) return;
+    if (!tools) return;
+    // Idem que con el diálogo de notas: fuera cualquier resto previo, para no
+    // acabar con dos botones y dos paneles, uno de ellos sin manejadores.
+    tools.querySelectorAll(".btn-cambios").forEach((e) => e.remove());
+    document.querySelectorAll(".cambios-dlg").forEach((e) => e.remove());
 
     const btn = document.createElement("button");
     btn.className = "btn-cambios";
