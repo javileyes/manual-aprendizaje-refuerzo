@@ -123,10 +123,10 @@ MPLBACKEND=Agg python code/12-dqn/dqn_torch.py
 y pulsa ▶ Ejecutar: corre tu versión. Cada bloque tiene un **↺ Original** que restaura
 solo ese ejemplo.
 
-**Cualquier párrafo se puede anotar.** Al pasar el ratón por encima aparece un
-**✎ crear nota**; los párrafos que ya tienen una llevan un **📝** en el margen izquierdo.
+**Cualquier párrafo —y cualquier fórmula— se puede anotar.** Al pasar el ratón por encima
+aparece un **✎ crear nota**; los que ya tienen una llevan un **📝** en el margen izquierdo.
 Pasando el cursor por ese 📝 se lee la nota en un globo, sin abrir nada; haciendo clic se
-edita o se elimina.
+edita o se elimina. Son 1.199 párrafos y 223 fórmulas en los 23 capítulos.
 
 Todo se guarda en el navegador y sobrevive a recargar y a cambiar de capítulo. Desde el
 botón **💾 Mis cambios** de la barra lateral puedes:
@@ -140,10 +140,12 @@ botón **💾 Mis cambios** de la barra lateral puedes:
 
 > ℹ️ **Cómo se identifica cada cosa.** Los ejemplos, por su **nombre de fichero**
 > (`ppo_desde_cero.py`), no por el número del capítulo: así un renumerado no deja
-> huérfanos tus cambios. Las notas, por una **huella del texto del párrafo**, no por su
-> posición: así insertar un párrafo no descoloca las notas de los demás. En ambos casos se
-> guarda también una huella del original, y si el manual cambia después ese ejemplo o ese
-> párrafo, se te avisa en vez de aplicar tu versión sobre otra base o perderla en silencio.
+> huérfanos tus cambios. Las notas de párrafo, por una **huella de su texto**; las de
+> fórmula, por una huella de su **código LaTeX** (su texto renderizado no distingue una
+> fórmula de otra). Nunca por la posición: así insertar o quitar contenido en un capítulo
+> no descoloca las notas de lo demás. Y se guarda además una huella del original, de modo
+> que si el manual cambia después ese ejemplo o ese párrafo se te avisa, en vez de aplicar
+> tu versión sobre otra base o perderla en silencio.
 
 ### Dos familias de ejemplos
 

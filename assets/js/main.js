@@ -274,13 +274,35 @@
 
   const paginaActual = () => location.pathname.split("/").pop() || "index.html";
 
+  /* Las fórmulas también se pueden anotar, pero no valen ni su posición ni su
+     texto: al reducir toda fórmula a «§», las 247 del manual tendrían la MISMA
+     clave. Usamos su código LaTeX, y para eso hay que leerlo ANTES de que
+     MathJax se lo lleve del DOM.
+
+     Por eso esto se ejecuta de forma síncrona al cargar main.js —que va al final
+     del <body>, con el capítulo ya parseado— y no dentro de DOMContentLoaded:
+     MathJax espera a que el documento esté listo para componer, así que en este
+     instante las fórmulas siguen siendo texto «$$…$$». Si algún día dejara de
+     ser así, simplemente no habría dataset.tex y las fórmulas dejarían de ser
+     anotables, sin romper nada más. */
+  function capturaFormulas() {
+    const c = document.querySelector(".content");
+    if (!c) return;
+    c.querySelectorAll("p").forEach((p) => {
+      if (p.dataset.tex) return;
+      const m = p.textContent.match(/\$\$([\s\S]+?)\$\$/) ||
+                p.textContent.match(/\\\[([\s\S]+?)\\\]/);
+      if (m) p.dataset.tex = m[1].replace(/\s+/g, " ").trim();
+    });
+  }
+
   function parrafosAnotables() {
     const c = document.querySelector(".content");
     if (!c) return [];
     return [...c.querySelectorAll("p")].filter((p) =>
       !p.closest(".code-example, .terminal, .chapter-toc, .chapter-nav") &&
       !p.classList.contains("pyodide-banner") &&
-      textoParrafo(p).length >= 40);
+      (textoParrafo(p).length >= 40 || !!p.dataset.tex));
   }
 
   function pintaMarcaNota(p) {
@@ -321,10 +343,15 @@
     if (!dlgNota) return;
     const id = p.dataset.notaId;
     const nota = leeNotas()[id];
-    dlgNota.querySelector(".nt-extracto").textContent = "«" + (p.dataset.notaExtracto || "") + "»";
+    const esFormula = p.dataset.notaTipo === "formula";
+    const ext = dlgNota.querySelector(".nt-extracto");
+    // De una fórmula mostramos su LaTeX: es lo único legible y sin ambigüedad.
+    ext.textContent = esFormula ? (p.dataset.notaExtracto || "") : "«" + (p.dataset.notaExtracto || "") + "»";
+    ext.classList.toggle("nt-tex", esFormula);
     const ta = dlgNota.querySelector(".nt-texto");
     ta.value = nota ? nota.texto : "";
-    dlgNota.querySelector("h3").textContent = nota ? "Tu nota" : "Nueva nota";
+    dlgNota.querySelector("h3").textContent =
+      (nota ? "Tu nota" : "Nueva nota") + (esFormula ? " sobre esta fórmula" : "");
     dlgNota.querySelector(".nt-eliminar").disabled = !nota;
     dlgNota.dataset.para = id;
     dlgNota._parrafo = p;
@@ -378,6 +405,7 @@
           titulo: (document.title.split("·")[0] || "").trim(),
           seccion: p.dataset.notaSeccion || "",
           extracto: p.dataset.notaExtracto || "",
+          tipo: p.dataset.notaTipo || "texto",
           creada: (previa && previa.creada) || new Date().toISOString(),
           modificada: new Date().toISOString(),
         };
@@ -416,12 +444,32 @@
       else seccionDe.set(el, actual);
     });
 
+    const repes = {};
     ps.forEach((p) => {
       const t = textoParrafo(p);
-      p.dataset.notaId = pag + "::" + huella(t);
-      p.dataset.notaExtracto = t.length > 110 ? t.slice(0, 110).trim() + "…" : t;
-      p.dataset.notaSeccion = seccionDe.get(p) || "";
+      const sec = seccionDe.get(p) || "";
+      if (t.length >= 40) {
+        // Párrafo de texto: la clave sale de su contenido.
+        p.dataset.notaId = pag + "::" + huella(t);
+        p.dataset.notaExtracto = t.length > 110 ? t.slice(0, 110).trim() + "…" : t;
+        p.dataset.notaTipo = "texto";
+      } else {
+        // Fórmula suelta: la clave sale de su LaTeX, más el apartado en que está.
+        // Y si la MISMA fórmula se repite en el mismo apartado, se numera, que
+        // si no compartirían clave y también compartirían nota.
+        const base = huella("f|" + sec + "|" + p.dataset.tex);
+        repes[base] = (repes[base] || 0) + 1;
+        // «f/» y no «f»: la huella es hexadecimal y puede empezar por f, así que
+        // sin la barra la clave de un párrafo podría confundirse con la de una
+        // fórmula. La barra no aparece nunca en un número hexadecimal.
+        p.dataset.notaId = pag + "::f/" + base + (repes[base] > 1 ? "." + repes[base] : "");
+        p.dataset.notaExtracto = p.dataset.tex.length > 160
+          ? p.dataset.tex.slice(0, 160) + "…" : p.dataset.tex;
+        p.dataset.notaTipo = "formula";
+      }
+      p.dataset.notaSeccion = sec;
       p.classList.add("anotable");
+      if (p.dataset.notaTipo === "formula") p.classList.add("anotable-formula");
     });
     montaDialogoNotas();
     ps.forEach(pintaMarcaNota);
@@ -684,7 +732,8 @@
         ? `<ul class="cc-lista cc-notas">` + nids.map((id) => {
             const n = notas[id];
             const texto = n.texto.length > 90 ? n.texto.slice(0, 90) + "…" : n.texto;
-            return `<li><span class="nt-cita">${escapeHtml(texto)}` +
+            const icono = n.tipo === "formula" ? "➗ " : "";
+            return `<li><span class="nt-cita">${icono}${escapeHtml(texto)}` +
               (huerfana(id) ? ` <em class="nt-huerfana">(el párrafo ha cambiado)</em>` : "") +
               `</span><span>${donde(n)}</span></li>`;
           }).join("") + `</ul>`
@@ -786,6 +835,10 @@
     try { fn(); }
     catch (e) { console.error("Manual de RL · fallo en " + nombre + ":", e); }
   }
+
+  // Esto NO puede esperar a DOMContentLoaded: hay que leer el LaTeX antes de
+  // que MathJax componga las fórmulas y lo borre del DOM. Ver capturaFormulas().
+  arranca("captura de fórmulas", capturaFormulas);
 
   document.addEventListener("DOMContentLoaded", () => {
     arranca("tema", updateThemeButtons);
