@@ -4,7 +4,9 @@
 
 > Ábrelo en el navegador y **ejecuta el código Python sin instalar nada** (pulsa ▶ Ejecutar en cualquier ejemplo).
 > El código además es **editable**: cambia lo que quieras y vuelve a ejecutarlo para hacer los
-> «🧪 Experimenta» de cada capítulo ahí mismo. No se guarda nada, y un botón **↺ Original** lo restaura.
+> «🧪 Experimenta» de cada capítulo ahí mismo. Tus cambios se guardan en el navegador, puedes
+> exportarlos **todos a un `.json`** desde «💾 Mis cambios» y volver a importarlos, y un botón
+> **↺ Original** restaura el código del manual.
 
 ---
 
@@ -114,6 +116,25 @@ Para ejecutarlos **sin ventana** (por ejemplo, en un servidor), usa el backend `
 ```bash
 MPLBACKEND=Agg python code/12-dqn/dqn_torch.py
 ```
+
+### 4. Tus propios cambios: «💾 Mis cambios»
+
+Todos los bloques de código del manual son **editables en la propia página**. Lo que
+edites se guarda en el navegador y sobrevive a recargar y a cambiar de capítulo.
+
+Desde el botón **💾 Mis cambios** de la barra lateral puedes:
+
+- **⬇ Exportar `.json`** — baja *todas* tus versiones (de todos los capítulos) a un
+  único fichero `manual-rl-mis-cambios.json`.
+- **⬆ Importar `.json`** — recupéralas en otro navegador u otro ordenador. Guarda varios
+  ficheros si quieres tener distintas tandas de pruebas.
+- **↺ Restaurar todo** — devuelve el manual entero a su código original.
+
+Cada bloque tiene además su propio **↺ Original**, que restaura solo ese ejemplo.
+
+> ℹ️ El fichero guarda cada ejemplo por su **nombre** (`ppo_desde_cero.py`), no por el número
+> del capítulo, y anota una huella del original. Si el manual cambia un ejemplo después de que
+> tú guardaras tu versión, al abrirlo te avisa de que lo tuyo se escribió sobre otra base.
 
 ### Dos familias de ejemplos
 

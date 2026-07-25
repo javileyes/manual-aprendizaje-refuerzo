@@ -172,9 +172,76 @@ body {
 .brand .tagline { font-size: 12.5px; color: var(--text-faint); }
 
 .sidebar-tools {
-  display: flex; gap: 8px; padding: 14px 20px 6px;
+  display: flex; gap: 8px; padding: 14px 20px 6px; flex-wrap: wrap;
 }
 .sidebar-tools .theme-btn { width: auto; padding: 0 12px; gap: 6px; font-size: 13px; }
+
+/* Botón «Mis cambios» (guardar/exportar/importar el código editado) */
+.btn-cambios {
+  background: var(--bg-sunken); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius-sm); height: 40px; padding: 0 12px;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-sans); font-size: 13px; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.btn-cambios:hover { border-color: var(--accent); }
+.btn-cambios.hay-cambios { border-color: var(--warn-br); color: var(--warn); font-weight: 650; }
+.btn-cambios .cc-num { font-variant-numeric: tabular-nums; }
+
+/* Diálogo de «Mis cambios» */
+.cambios-dlg {
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--bg-elev); color: var(--text);
+  max-width: 620px; width: calc(100% - 32px); padding: 26px 28px 22px;
+  box-shadow: var(--shadow-lg); font-size: 15px; line-height: 1.6;
+}
+.cambios-dlg::backdrop { background: rgba(0,0,0,.5); }
+.cambios-dlg h3 { margin: 0 0 .4em; font-size: 1.25rem; }
+.cambios-dlg .cc-intro { margin: 0 0 1em; color: var(--text-soft); font-size: 14px; }
+.cambios-dlg .cc-cuenta {
+  font-size: 13px; color: var(--text-faint); text-transform: uppercase;
+  letter-spacing: .05em; font-weight: 700; margin-bottom: 8px;
+}
+.cambios-dlg .cc-cerrar { position: absolute; top: 12px; right: 12px; margin: 0; }
+.cambios-dlg .cc-cerrar button {
+  background: none; border: none; color: var(--text-faint); font-size: 17px;
+  cursor: pointer; padding: 4px 8px; border-radius: 6px;
+}
+.cambios-dlg .cc-cerrar button:hover { background: var(--bg-sunken); color: var(--text); }
+.cambios-dlg .cc-lista { list-style: none; margin: 0 0 14px; padding: 0; max-height: 40vh; overflow-y: auto; }
+.cambios-dlg .cc-lista li {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 14px;
+}
+.cambios-dlg .cc-lista li:last-child { border-bottom: none; }
+.cambios-dlg .cc-lista span { color: var(--text-faint); font-size: 13px; text-align: right; flex-shrink: 0; }
+.cambios-dlg .cc-lista a { color: var(--accent-text); text-decoration: none; }
+.cambios-dlg .cc-lista a:hover { text-decoration: underline; }
+.cambios-dlg .cc-vacio { color: var(--text-faint); font-size: 14px; margin: 0 0 14px; }
+.cambios-dlg .cc-aviso { font-size: 13.5px; border-radius: var(--radius-sm); padding: 9px 12px; margin: 0 0 12px; }
+.cambios-dlg .cc-aviso.bien { background: var(--intuition-bg); color: var(--ok); border: 1px solid var(--intuition-br); }
+.cambios-dlg .cc-aviso.malo { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-br); }
+.cambios-dlg .cc-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+.cambios-dlg .cc-acciones button {
+  font-family: var(--font-sans); font-size: 13.5px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--bg-sunken); color: var(--text);
+  padding: 8px 14px; border-radius: var(--radius-sm); transition: border-color .15s, background .15s;
+}
+.cambios-dlg .cc-acciones button:hover:not(:disabled) { border-color: var(--accent); }
+.cambios-dlg .cc-acciones button:disabled { opacity: .45; cursor: default; }
+.cambios-dlg .cc-exportar { background: var(--accent) !important; border-color: var(--accent) !important; color: #fff !important; }
+.cambios-dlg .cc-reset { color: var(--danger); }
+
+/* Aviso: guardaste tu versión sobre un original que después ha cambiado */
+.code-example.desfasado .code-header { box-shadow: inset 0 -2px 0 var(--warn-br); }
+.code-example.desfasado .code-header .file-name::after {
+  content: "el manual ha cambiado este ejemplo desde que lo guardaste";
+  font-family: var(--font-sans); font-size: 10.5px; color: #ffd79a;
+  border: 1px solid rgba(245,158,11,.5); border-radius: 999px; padding: 1px 7px;
+}
+@media (max-width: 620px) {
+  .code-example.desfasado .code-header .file-name::after { content: "modificado en el manual"; }
+}
 
 .nav { padding: 8px 12px 40px; }
 .nav-part {
