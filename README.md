@@ -3,6 +3,8 @@
 ### 📖 [**Léelo en vivo aquí → javileyes.github.io/manual-aprendizaje-refuerzo**](https://javileyes.github.io/manual-aprendizaje-refuerzo/)
 
 > Ábrelo en el navegador y **ejecuta el código Python sin instalar nada** (pulsa ▶ Ejecutar en cualquier ejemplo).
+> El código además es **editable**: cambia lo que quieras y vuelve a ejecutarlo para hacer los
+> «🧪 Experimenta» de cada capítulo ahí mismo. No se guarda nada, y un botón **↺ Original** lo restaura.
 
 ---
 

@@ -123,20 +123,137 @@
     return out.join("\n");
   }
 
-  function applyHighlighting() {
-    document.querySelectorAll("pre.code-source code").forEach((code) => {
-      if (code.dataset.hl) return;
-      const raw = code.textContent;
-      code.dataset.raw = raw;
-      code.innerHTML = highlightPython(raw);
-      code.dataset.hl = "1";
+  /* ---------- Código editable en la propia página ----------
+     Los bloques de código son editables para que los «🧪 Experimenta» de cada
+     capítulo se puedan hacer aquí mismo: cambias un número, pulsas ▶ y ves qué
+     pasa. Los cambios NO se guardan (al recargar vuelve el original) y hay un
+     botón «↺ Original» para deshacerlo todo de golpe.
+
+     Detalle de implementación: mientras escribes no re-coloreamos (sería saltón
+     y caro en los ejemplos largos); normalizamos y volvemos a colorear al salir
+     del bloque, que es también justo antes de que se ejecute. */
+
+  // ¿Soporta el navegador contenteditable="plaintext-only"? Si no, usamos "true"
+  // y nos encargamos nosotros del Enter.
+  const PLANO = (() => {
+    const d = document.createElement("div");
+    try { d.contentEditable = "plaintext-only"; } catch (_) { return false; }
+    return d.contentEditable === "plaintext-only";
+  })();
+
+  /* Lee el contenido como texto plano. No basta textContent: al pulsar Enter el
+     navegador puede insertar <br> o <div>, y textContent se comería el salto. */
+  function textoDe(el) {
+    let out = "";
+    (function walk(node) {
+      node.childNodes.forEach((n) => {
+        if (n.nodeType === 3) out += n.nodeValue;
+        else if (n.nodeName === "BR") out += "\n";
+        else {
+          if (/^(DIV|P)$/.test(n.nodeName) && out && !out.endsWith("\n")) out += "\n";
+          walk(n);
+        }
+      });
+    })(el);
+    return out;
+  }
+
+  function marcarModificado(ex) {
+    const code = ex.querySelector("pre.code-source code");
+    const btn = ex.querySelector(".btn-restore");
+    if (!code || !btn) return;
+    const cambiado = textoDe(code) !== code.dataset.original;
+    ex.classList.toggle("modificado", cambiado);
+    btn.hidden = !cambiado;
+  }
+
+  function repinta(code) {
+    const txt = textoDe(code);
+    code.innerHTML = highlightPython(txt);
+    return txt;
+  }
+
+  function prepareCodeBlocks() {
+    document.querySelectorAll(".code-example").forEach((ex) => {
+      const code = ex.querySelector("pre.code-source code");
+      if (!code || code.dataset.listo) return;
+
+      // El original intacto, para poder restaurarlo siempre.
+      code.dataset.original = code.textContent;
+      code.innerHTML = highlightPython(code.dataset.original);
+      code.dataset.listo = "1";
+
+      code.setAttribute("contenteditable", PLANO ? "plaintext-only" : "true");
+      code.setAttribute("spellcheck", "false");
+      code.setAttribute("role", "textbox");
+      code.setAttribute("aria-multiline", "true");
+      code.setAttribute("aria-label", "Código de ejemplo, editable");
+      code.setAttribute("autocapitalize", "off");
+      code.setAttribute("autocorrect", "off");
+
+      // Pista visual de que se puede tocar.
+      const nombre = ex.querySelector(".file-name");
+      if (nombre && !nombre.querySelector(".editable-hint")) {
+        const hint = document.createElement("span");
+        hint.className = "editable-hint";
+        hint.textContent = "editable";
+        hint.title = "Puedes cambiar el código y volver a ejecutarlo. No se guarda: al recargar vuelve el original.";
+        nombre.appendChild(hint);
+      }
+
+      // Botón de restauración, oculto mientras no haya cambios.
+      const acciones = ex.querySelector(".code-actions");
+      if (acciones && !acciones.querySelector(".btn-restore")) {
+        const btn = document.createElement("button");
+        btn.className = "btn-restore";
+        btn.type = "button";
+        btn.hidden = true;
+        btn.title = "Descartar mis cambios y volver al código original";
+        btn.innerHTML = "↺ <span>Original</span>";
+        btn.addEventListener("click", () => {
+          code.innerHTML = highlightPython(code.dataset.original);
+          marcarModificado(ex);
+          code.focus();
+        });
+        acciones.insertBefore(btn, acciones.querySelector(".btn-copy") || null);
+      }
+
+      code.addEventListener("input", () => marcarModificado(ex));
+
+      // Al salir del bloque: normalizamos lo que haya metido el navegador y
+      // devolvemos el coloreado.
+      code.addEventListener("blur", () => {
+        repinta(code);
+        marcarModificado(ex);
+      });
+
+      code.addEventListener("keydown", (e) => {
+        // Tab indenta (en Python es esencial) en vez de saltar de foco.
+        if (e.key === "Tab") {
+          e.preventDefault();
+          document.execCommand("insertText", false, "    ");
+          return;
+        }
+        // Sin plaintext-only, el Enter del navegador mete <div>/<br>: lo forzamos.
+        if (e.key === "Enter" && !PLANO) {
+          e.preventDefault();
+          document.execCommand("insertText", false, "\n");
+        }
+      });
+
+      // Pegar siempre como texto plano, nunca con formato.
+      code.addEventListener("paste", (e) => {
+        e.preventDefault();
+        const t = (e.clipboardData || window.clipboardData).getData("text/plain");
+        document.execCommand("insertText", false, t);
+      });
     });
   }
 
   /* ---------- Copiar y descargar ---------- */
   function getCodeText(exampleEl) {
     const code = exampleEl.querySelector("pre.code-source code");
-    return code ? (code.dataset.raw || code.textContent) : "";
+    return code ? textoDe(code) : "";
   }
   function setupCodeButtons() {
     document.querySelectorAll(".code-example").forEach((ex) => {
@@ -166,10 +283,10 @@
     setupMobileNav();
     setupProgressBar();
     highlightActiveNav();
-    applyHighlighting();
+    prepareCodeBlocks();
     setupCodeButtons();
   });
 
   // Exponer utilidades para el runner
-  window.RL = { getCodeText, escapeHtml };
+  window.RL = { getCodeText, escapeHtml, textoDe };
 })();
