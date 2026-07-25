@@ -296,17 +296,37 @@
     });
   }
 
-  function parrafosAnotables() {
+  /* Qué se puede anotar: párrafos, fórmulas, títulos de sección, puntos de lista
+     y recuadros completos (🧠 ➗ 🔑 ⚠️ 🧪) desde su título. */
+  function elementosAnotables() {
     const c = document.querySelector(".content");
     if (!c) return [];
-    return [...c.querySelectorAll("p")].filter((p) =>
-      !p.closest(".code-example, .terminal, .chapter-toc, .chapter-nav") &&
-      !p.classList.contains("pyodide-banner") &&
-      (textoParrafo(p).length >= 40 || !!p.dataset.tex));
+    const out = [];
+    c.querySelectorAll("p, h2, h3, li, .callout").forEach((el) => {
+      if (el.closest(".code-example, .terminal, .chapter-toc, .chapter-nav")) return;
+      if (el.classList.contains("pyodide-banner")) return;
+      if (el.classList.contains("callout")) {
+        if (el.querySelector(":scope > .callout-title")) out.push(el);
+      } else if (el.nodeName === "P") {
+        if (textoParrafo(el).length >= 40 || el.dataset.tex) out.push(el);
+      } else if (el.nodeName === "LI") {
+        if (textoParrafo(el).length >= 25) out.push(el);
+      } else {                                     // H2 / H3
+        if (textoParrafo(el).length >= 3) out.push(el);
+      }
+    });
+    return out;
   }
 
+  /* Dónde se cuelga el icono. En un recuadro va dentro de su título (alineado a
+     la derecha): fuera no cabría sin montarse sobre el borde de color, y en
+     móvil se saldría de la página. En lo demás, en el margen izquierdo. */
+  const contenedorMarca = (el) =>
+    el.classList.contains("callout") ? el.querySelector(":scope > .callout-title") : el;
+
   function pintaMarcaNota(p) {
-    p.querySelectorAll(":scope > .nota-ui").forEach((e) => e.remove());
+    const caja = contenedorMarca(p) || p;
+    caja.querySelectorAll(":scope > .nota-ui").forEach((e) => e.remove());
     const nota = leeNotas()[p.dataset.notaId];
     const b = document.createElement("button");
     b.type = "button";
@@ -317,7 +337,7 @@
     b.setAttribute("aria-label", nota ? "Ver, editar o eliminar tu nota" : "Crear una nota en este párrafo");
     if (!nota) b.title = "Crear una nota en este párrafo";
     b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); abreNota(p); });
-    p.appendChild(b);
+    caja.appendChild(b);
 
     // Globo con el texto de la nota, para leerla sin abrir el modal.
     // Va con la clase nota-ui para que textoParrafo() lo ignore: si no, su
@@ -333,7 +353,7 @@
       pie.className = "ng-pie";
       pie.textContent = "Clic para editarla";
       g.append(cuerpo, pie);
-      p.appendChild(g);
+      caja.appendChild(g);
     }
     p.classList.toggle("con-nota", !!nota);
   }
@@ -429,7 +449,7 @@
   }
 
   function preparaNotas() {
-    const ps = parrafosAnotables();
+    const ps = elementosAnotables();
     if (!ps.length) return;
     const pag = paginaActual();
     // Primero TODAS las claves y luego los iconos: si insertáramos la interfaz
@@ -439,37 +459,60 @@
     // se quedarían sin sección.
     const seccionDe = new Map();
     let actual = "";
-    document.querySelectorAll(".content h2[id], .content h3[id], .content p").forEach((el) => {
-      if (/^H[23]$/.test(el.nodeName)) actual = el.id;
-      else seccionDe.set(el, actual);
-    });
+    document.querySelectorAll(".content h2[id], .content h3[id], .content p, .content li, .content .callout")
+      .forEach((el) => {
+        if (/^H[23]$/.test(el.nodeName)) { actual = el.id; seccionDe.set(el, el.id); }
+        else seccionDe.set(el, actual);
+      });
 
+    // Las claves llevan un prefijo con «/» —que nunca aparece en un número
+    // hexadecimal— para que no puedan confundirse entre sí: sin él, la huella de
+    // un párrafo que empezara por «f» parecería la de una fórmula.
+    const corta = (t, n) => (t.length > n ? t.slice(0, n).trim() + "…" : t);
     const repes = {};
-    ps.forEach((p) => {
-      const t = textoParrafo(p);
-      const sec = seccionDe.get(p) || "";
-      if (t.length >= 40) {
-        // Párrafo de texto: la clave sale de su contenido.
-        p.dataset.notaId = pag + "::" + huella(t);
-        p.dataset.notaExtracto = t.length > 110 ? t.slice(0, 110).trim() + "…" : t;
-        p.dataset.notaTipo = "texto";
+    const unica = (base) => {
+      repes[base] = (repes[base] || 0) + 1;
+      return base + (repes[base] > 1 ? "." + repes[base] : "");
+    };
+
+    ps.forEach((el) => {
+      const t = textoParrafo(el);
+      const sec = seccionDe.get(el) || "";
+      let tipo, clave, extracto;
+
+      if (el.classList.contains("callout")) {
+        // Recuadro completo. Muchos comparten título («🧠 Intuición»), así que la
+        // clave mira también su contenido.
+        const tit = (el.querySelector(":scope > .callout-title").textContent || "").trim();
+        tipo = "recuadro";
+        clave = "c/" + unica(huella(sec + "|" + tit + "|" + t.slice(0, 240)));
+        extracto = tit + (t ? " — " + corta(t, 90) : "");
+      } else if (/^H[23]$/.test(el.nodeName)) {
+        // Título de sección: si tiene id lo usamos tal cual, que es lo más estable
+        // que hay en el capítulo (y es a donde apuntan los enlaces del manual).
+        tipo = "titulo";
+        clave = "h/" + (el.id || unica(huella(sec + "|" + t)));
+        extracto = t;
+      } else if (el.nodeName === "LI") {
+        tipo = "lista";
+        clave = "l/" + unica(huella(t));
+        extracto = corta(t, 110);
+      } else if (t.length >= 40) {
+        tipo = "texto";
+        clave = unica(huella(t));                 // sin prefijo: es el caso original
+        extracto = corta(t, 110);
       } else {
         // Fórmula suelta: la clave sale de su LaTeX, más el apartado en que está.
-        // Y si la MISMA fórmula se repite en el mismo apartado, se numera, que
-        // si no compartirían clave y también compartirían nota.
-        const base = huella("f|" + sec + "|" + p.dataset.tex);
-        repes[base] = (repes[base] || 0) + 1;
-        // «f/» y no «f»: la huella es hexadecimal y puede empezar por f, así que
-        // sin la barra la clave de un párrafo podría confundirse con la de una
-        // fórmula. La barra no aparece nunca en un número hexadecimal.
-        p.dataset.notaId = pag + "::f/" + base + (repes[base] > 1 ? "." + repes[base] : "");
-        p.dataset.notaExtracto = p.dataset.tex.length > 160
-          ? p.dataset.tex.slice(0, 160) + "…" : p.dataset.tex;
-        p.dataset.notaTipo = "formula";
+        tipo = "formula";
+        clave = "f/" + unica(huella("f|" + sec + "|" + el.dataset.tex));
+        extracto = corta(el.dataset.tex, 160);
       }
-      p.dataset.notaSeccion = sec;
-      p.classList.add("anotable");
-      if (p.dataset.notaTipo === "formula") p.classList.add("anotable-formula");
+
+      el.dataset.notaId = pag + "::" + clave;
+      el.dataset.notaExtracto = extracto;
+      el.dataset.notaTipo = tipo;
+      el.dataset.notaSeccion = sec;
+      el.classList.add("anotable", "anotable-" + tipo);
     });
     montaDialogoNotas();
     ps.forEach(pintaMarcaNota);
@@ -662,7 +705,7 @@
         return avisar("No he podido guardarlos en este navegador.", true);
       }
       aplicaEdicionesEnPagina();
-      parrafosAnotables().forEach((p) => { if (p.dataset.notaId) pintaMarcaNota(p); });
+      elementosAnotables().forEach((p) => { if (p.dataset.notaId) pintaMarcaNota(p); });
       refrescaBotonCambios();
       const partes = [];
       if (n) partes.push(`${n} ejemplo${n === 1 ? "" : "s"} de código`);
@@ -719,7 +762,7 @@
       const nids = Object.keys(notas).sort(porCapitulo(notas));
 
       // Notas cuyo párrafo ya no existe en su página (el texto ha cambiado).
-      const aquiIds = new Set(parrafosAnotables().map((p) => p.dataset.notaId));
+      const aquiIds = new Set(elementosAnotables().map((p) => p.dataset.notaId));
       const huerfana = (id) => notas[id].pagina === paginaActual() && !aquiIds.has(id);
 
       const bloqueCodigo = ids.length
@@ -784,7 +827,7 @@
         if (!window.confirm("Se borrarán TODAS tus notas de todo el manual (el código no se toca). " +
                             "Esto no se puede deshacer: expórtalas antes si quieres conservarlas. ¿Seguimos?")) return;
         escribeNotas({});
-        parrafosAnotables().forEach((p) => { if (p.dataset.notaId) pintaMarcaNota(p); });
+        elementosAnotables().forEach((p) => { if (p.dataset.notaId) pintaMarcaNota(p); });
         refrescaBotonCambios();
         aviso("Notas borradas.", false);
       });

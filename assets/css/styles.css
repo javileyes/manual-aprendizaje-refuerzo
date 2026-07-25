@@ -444,6 +444,43 @@ body {
   .content .callout p.anotable-formula > .nota-marca { left: -16px; }
 }
 
+/* --- Títulos de sección, puntos de lista y recuadros --- */
+
+/* Títulos: el icono va en el margen, alineado con la línea base del texto. */
+.content h2.anotable, .content h3.anotable { position: relative; }
+.content h2.anotable > .nota-marca, .content h3.anotable > .nota-marca { top: 2px; }
+.content h2.anotable > .nota-add { top: -6px; }
+.content h2.con-nota, .content h3.con-nota { box-shadow: none; padding-left: 0; margin-left: 0; }
+.content h2.con-nota > .nota-marca, .content h3.con-nota > .nota-marca { border-width: 2px; }
+
+/* Puntos de lista: la lista ya viene sangrada, así que el icono se acerca. */
+.content li.anotable { position: relative; }
+.content li.anotable > .nota-marca { left: -30px; width: 20px; height: 20px; font-size: 11px; }
+.content li.anotable > .nota-add { top: -13px; left: -4px; font-size: 11px; padding: 2px 8px; }
+.content li.con-nota { box-shadow: -3px 0 0 -1px var(--key-br); padding-left: 8px; margin-left: -8px; }
+
+/* Recuadros: el icono vive DENTRO de su título, a la derecha. Fuera no cabría
+   sin montarse sobre el borde de color, y en móvil se saldría de la página. */
+.callout > .callout-title { position: relative; }
+.callout > .callout-title > .nota-ui { margin-left: auto; flex-shrink: 0; }
+.callout > .callout-title > .nota-marca {
+  position: static; width: 22px; height: 22px; font-size: 12px;
+}
+.callout > .callout-title > .nota-add {
+  position: static; opacity: 0; visibility: hidden;
+  text-transform: none; letter-spacing: 0;
+}
+@media (hover: hover) {
+  .callout > .callout-title:hover > .nota-add,
+  .callout > .callout-title > .nota-add:focus-visible { opacity: 1; visibility: visible; }
+}
+@media (hover: none) { .callout > .callout-title > .nota-add { opacity: .5; visibility: visible; } }
+.callout > .callout-title > .nota-globo {
+  position: absolute; top: calc(100% + 8px); right: 0; left: auto;
+  text-transform: none; letter-spacing: normal; font-weight: 400;
+}
+.callout.con-nota { box-shadow: var(--shadow-md); }
+
 /* En el modal, el «extracto» de una fórmula es su LaTeX */
 .nota-dlg .nt-extracto.nt-tex {
   font-family: var(--font-mono); font-style: normal; font-size: 12.5px;

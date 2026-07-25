@@ -123,10 +123,20 @@ MPLBACKEND=Agg python code/12-dqn/dqn_torch.py
 y pulsa ▶ Ejecutar: corre tu versión. Cada bloque tiene un **↺ Original** que restaura
 solo ese ejemplo.
 
-**Cualquier párrafo —y cualquier fórmula— se puede anotar.** Al pasar el ratón por encima
-aparece un **✎ crear nota**; los que ya tienen una llevan un **📝** en el margen izquierdo.
-Pasando el cursor por ese 📝 se lee la nota en un globo, sin abrir nada; haciendo clic se
-edita o se elimina. Son 1.199 párrafos y 223 fórmulas en los 23 capítulos.
+**Casi cualquier cosa se puede anotar**: párrafos, fórmulas, títulos de sección, puntos de
+lista y recuadros completos (🧠 ➗ 🔑 ⚠️ 🧪). Al pasar el ratón por encima aparece un
+**✎ crear nota**; los que ya tienen una llevan un **📝** —en el margen izquierdo, o dentro
+del título si es un recuadro—. Pasando el cursor por ese 📝 se lee la nota en un globo, sin
+abrir nada; haciendo clic se edita o se elimina.
+
+| Qué | Cuántos |
+|---|---|
+| Párrafos | 1.200 |
+| Fórmulas | 223 |
+| Títulos de sección | 287 |
+| Puntos de lista | 396 |
+| Recuadros | 413 |
+| **Total anotable** | **2.519** |
 
 Todo se guarda en el navegador y sobrevive a recargar y a cambiar de capítulo. Desde el
 botón **💾 Mis cambios** de la barra lateral puedes:
@@ -138,14 +148,16 @@ botón **💾 Mis cambios** de la barra lateral puedes:
 - **↺ Restaurar código** y **🗑 Borrar notas**, por separado, para no llevarte una cosa
   por delante al querer descartar la otra.
 
-> ℹ️ **Cómo se identifica cada cosa.** Los ejemplos, por su **nombre de fichero**
-> (`ppo_desde_cero.py`), no por el número del capítulo: así un renumerado no deja
-> huérfanos tus cambios. Las notas de párrafo, por una **huella de su texto**; las de
-> fórmula, por una huella de su **código LaTeX** (su texto renderizado no distingue una
-> fórmula de otra). Nunca por la posición: así insertar o quitar contenido en un capítulo
-> no descoloca las notas de lo demás. Y se guarda además una huella del original, de modo
-> que si el manual cambia después ese ejemplo o ese párrafo se te avisa, en vez de aplicar
-> tu versión sobre otra base o perderla en silencio.
+> ℹ️ **Cómo se identifica cada cosa, y por qué.** Nada se identifica por su **posición**:
+> así, insertar o quitar contenido en un capítulo no descoloca lo que hayas anotado más
+> abajo. Los ejemplos de código van por su **nombre de fichero** (`ppo_desde_cero.py`), de
+> modo que un renumerado de capítulos tampoco los deja huérfanos. Los títulos de sección,
+> por su **`id`**, que es lo más estable del capítulo y es a donde apuntan los enlaces del
+> propio manual. Las fórmulas, por su **código LaTeX**: su texto renderizado no distingue
+> una fórmula de otra, así que las 223 compartirían clave. Y los párrafos, listas y
+> recuadros, por una **huella de su texto**. Además se guarda una huella del original, de
+> forma que si el manual cambia después ese ejemplo o ese párrafo se te avisa, en vez de
+> aplicar tu versión sobre otra base o perderla en silencio.
 
 ### Dos familias de ejemplos
 
