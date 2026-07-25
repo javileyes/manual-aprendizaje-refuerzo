@@ -273,7 +273,40 @@
             $A_t = \delta_t + \gamma\lambda\,A_{t+1}$. El parámetro $\lambda$ es el mando:
             $\lambda=0$ deja solo el primer término, $A_t=\delta_t$ (TD de un paso); $\lambda=1$ da
             $A_t = \sum_{l\ge 0}\gamma^l\delta_{t+l} = G_t - V_w(S_t)$ (la ventaja Monte Carlo). Valores
-            intermedios como $\lambda=0.95$ mezclan lo mejor de ambos.
+            intermedios como $\lambda=0{,}95$ mezclan lo mejor de ambos. Si esta familia con un mando entre
+            «un paso» y «todo el episodio» te suena, es porque ya la viste: GAE es el $\lambda$-retorno
+            <a href="10-td-lambda.html#lambda-retorno">del capítulo 10</a>, aplicado a ventajas en vez de
+            a valores.
+          </p>
+        </div>
+
+        <p>
+          Ese último salto —que con $\lambda=1$ la suma de errores TD sea exactamente la ventaja Monte
+          Carlo— es de los que uno prefiere ver escritos que creerse. Y sale solo, escribiendo los términos
+          en fila:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Por qué $\lambda=1$ devuelve $G_t - V(S_t)$</div>
+          <p>$$\begin{aligned}
+          \sum_{l\ge 0}\gamma^l\delta_{t+l}
+          &amp;= \big(R_{t+1} + \gamma V(S_{t+1}) - V(S_t)\big) \\
+          &amp;\quad + \gamma\big(R_{t+2} + \gamma V(S_{t+2}) - V(S_{t+1})\big) \\
+          &amp;\quad + \gamma^2\big(R_{t+3} + \gamma V(S_{t+3}) - V(S_{t+2})\big) + \cdots
+          \end{aligned}$$</p>
+          <p>$$\sum_{l\ge 0}\gamma^l\delta_{t+l} = R_{t+1} + \gamma R_{t+2} + \gamma^2 R_{t+3} + \cdots - V(S_t)
+          = G_t - V(S_t)$$</p>
+          <p class="math-note">
+            Mira la columna de los valores para ver por qué. El $+\gamma V(S_{t+1})$ de la primera línea se
+            cancela con el $-\gamma V(S_{t+1})$ de la segunda; el $+\gamma^2 V(S_{t+2})$ de la segunda, con
+            el $-\gamma^2 V(S_{t+2})$ de la tercera; y así hasta el final. Sobreviven las recompensas y un
+            único valor, el primero, que no tiene con quién cancelarse.
+            Una suma en la que casi todo se anula por parejas se llama <strong>telescópica</strong>, y
+            aquí hay letra pequeña: el argumento exige que $V$ sea <em>la misma función</em> en todos los
+            pasos, es decir, que no actualices el crítico a mitad del episodio. Con esa condición, la
+            conclusión es preciosa: <strong>el error de Monte Carlo y el error TD no son dos cosas
+            distintas, son la misma cosa mirada a dos escalas</strong>, y $\lambda$ es el mando que te
+            desliza de una a la otra.
           </p>
         </div>
 
@@ -282,11 +315,51 @@
             <thead><tr><th>$\lambda$</th><th>Ventaja usada</th><th>Sesgo</th><th>Varianza</th></tr></thead>
             <tbody>
               <tr><td>$0$</td><td>$\delta_t$ (TD un paso)</td><td>Alto (depende del crítico)</td><td>Baja</td></tr>
-              <tr><td>$0.9$–$0.97$</td><td>Mezcla de errores TD</td><td>Moderado</td><td>Moderada</td></tr>
+              <tr><td>$0{,}9$–$0{,}97$</td><td>Mezcla de errores TD</td><td>Moderado</td><td>Moderada</td></tr>
               <tr><td>$1$</td><td>$G_t - V(s)$ (Monte Carlo)</td><td>Nulo</td><td>Alta</td></tr>
             </tbody>
           </table>
         </div>
+
+        <h3 id="gae-a-mano">GAE con números, a mano</h3>
+        <p>
+          Todo esto cabe en una servilleta, así que hagamos las cuentas de un episodio entero.
+          Imagina un episodio de <strong>tres pasos</strong> con $\gamma = 1$ (para no arrastrar
+          decimales), en el que solo se cobra al final: $R = (0,\,0,\,1)$. El crítico es imperfecto y dice
+          $V(S_0)=0{,}5$, $V(S_1)=0{,}6$, $V(S_2)=0{,}8$; el estado tras el último paso es terminal, así que
+          $V(S_3)=0$. Los tres errores TD son:
+        </p>
+        <p>
+          $\delta_0 = 0 + 0{,}6 - 0{,}5 = 0{,}1$ &nbsp;·&nbsp;
+          $\delta_1 = 0 + 0{,}8 - 0{,}6 = 0{,}2$ &nbsp;·&nbsp;
+          $\delta_2 = 1 + 0 - 0{,}8 = 0{,}2$
+        </p>
+        <p>
+          Ahora aplicamos la recurrencia $A_t = \delta_t + \gamma\lambda A_{t+1}$ <em>hacia atrás</em>,
+          empezando por el último paso, con tres valores de $\lambda$:
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>$\lambda$</th><th>$A_2$</th><th>$A_1$</th><th>$A_0$</th></tr></thead>
+            <tbody>
+              <tr><td>$0$</td><td>$0{,}20$</td><td>$0{,}20$</td><td>$0{,}10$</td></tr>
+              <tr><td>$0{,}5$</td><td>$0{,}20$</td><td>$0{,}30$</td><td>$0{,}25$</td></tr>
+              <tr><td>$1$</td><td>$0{,}20$</td><td>$0{,}40$</td><td>$0{,}50$</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Dos cosas para llevarte. <strong>Primera: comprueba la telescópica.</strong> Con $\lambda=1$ sale
+          $A_0 = 0{,}50$; por el otro camino, $G_0 - V(S_0) = 1 - 0{,}5 = 0{,}5$. Cuadra. <strong>Segunda:
+          mira la columna $A_0$</strong>, la de la primera acción, la que decidió el episodio. Con
+          $\lambda=0$ recibe un tímido $0{,}10$ —el crítico se queda casi todo el mérito, porque ya
+          «esperaba» llegar—; con $\lambda=1$ recibe $0{,}50$, el crédito completo de haber alcanzado la
+          meta. Es decir: <strong>$\lambda$ es, literalmente, cuánto crédito de las recompensas lejanas
+          dejas llegar hasta la acción de ahora.</strong> Y también cuánto ruido lejano dejas llegar con
+          él, que es el precio.
+        </p>
 
         <h2 id="entropia">Entropía: no dejes de explorar</h2>
         <p>
@@ -298,9 +371,10 @@
 
         <div class="callout math">
           <div class="callout-title">➗ Bono de entropía</div>
-          <p>$$H\big(\pi(\cdot\mid s)\big) = -\sum_a \pi(a\mid s)\,\log \pi(a\mid s)$$</p>
+          <p>$$\mathcal{H}\big(\pi(\cdot\mid s)\big) = -\sum_a \pi(a\mid s)\,\log \pi(a\mid s)$$</p>
           <p class="math-note">
-            Añadimos $\beta\,H(\pi(\cdot\mid s))$ al objetivo (con $\beta$ pequeño, p. ej. $0.01$). Al
+            Añadimos $\beta\,\mathcal{H}(\pi(\cdot\mid s))$ al objetivo (con $\beta$ pequeño, p. ej.
+            $0{,}01$). Al
             maximizarlo, empujamos suavemente la política hacia distribuciones más repartidas, lo que
             mantiene viva la exploración. A medida que aprende, la ventaja acaba imponiéndose y la
             política se afila igualmente.
@@ -324,15 +398,49 @@
           todo el lote. Es más estable y aprovecha mejor el hardware. La verás en el ejemplo de PyTorch.
         </p>
 
+        <div class="callout intuition">
+          <div class="callout-title">🧠 ¿De dónde sale el nombre «A2C»?</div>
+          <p>
+            De quitarle una letra a otro algoritmo. El original fue <strong>A3C</strong>
+            (<em>Asynchronous Advantage Actor-Critic</em>, 2016): varios trabajadores jugaban <em>a la vez</em>
+            en copias distintas del entorno y enviaban sus gradientes a unos pesos compartidos cuando les
+            tocaba, sin esperarse unos a otros. La asincronía no estaba ahí por velocidad, sino para
+            <strong>decorrelacionar los datos</strong>: en cada instante los trabajadores estaban en sitios
+            distintos del entorno, así que el lote no era una ristra de transiciones casi idénticas. Es el
+            mismo problema que en DQN resolvía el <em>replay buffer</em> —y que aquí no podemos usar, porque
+            el gradiente de política solo es válido con datos de la política <em>actual</em>; a eso se le
+            llama ser <strong>on-policy</strong> y lo desmenuzaremos en el
+            <a href="16-ppo.html#por-que">capítulo 16</a>—.
+          </p>
+          <p>
+            Poco después se comprobó que la asincronía no aportaba casi nada: bastaba con
+            <strong>sincronizar</strong> a los trabajadores y juntar sus transiciones en un único lote. Se
+            cayó una «A» y quedó <strong>A2C</strong>, <em>Advantage Actor-Critic</em>: más simple, más
+            reproducible y más amable con la GPU. Nuestro ejemplo de PyTorch usa <strong>un solo
+            entorno</strong> para que el código se lea de un vistazo; una implementación seria lanzaría 8 o
+            16 copias en paralelo con algo como <code>gymnasium.vector.SyncVectorEnv</code> y recogería un
+            trocito de cada una en cada paso. La matemática es idéntica: solo cambia de dónde salen las
+            transiciones del lote.
+          </p>
+        </div>
+
         <h2 id="numpy">A2C desde cero en numpy</h2>
         <p>
           Nada como programarlo para creérselo. Vamos a enfrentar A2C contra REINFORCE en un entorno
           minúsculo, un <strong>pasillo de 11 casillas</strong> con dos metas: la de la izquierda paga
-          $+0.2$ y la de la derecha $+1.0$. Empiezas en el centro, así que la política óptima es
+          $+0{,}2$ y la de la derecha $+1{,}0$. Empiezas en el centro, así que la política óptima es
           <em>ir siempre a la derecha</em>. El detalle que lo hace interesante: a cada paso le sumamos
-          <strong>ruido</strong> a la recompensa, imitando un entorno estocástico. Ese ruido es veneno
-          para REINFORCE (que lo acumula en el retorno) y casi inofensivo para A2C (cuyo crítico
-          aprende a preverlo y solo arrastra el ruido de un paso).
+          <strong>ruido</strong> a la recompensa, imitando un entorno estocástico.
+        </p>
+        <p>
+          Ese ruido es veneno para REINFORCE y casi inofensivo para A2C, pero <strong>no porque el crítico
+          lo adivine</strong> —es gaussiano de media cero e independiente en cada paso; eso no lo adivina
+          nadie—, sino por <em>dónde entra</em> en cada estimador. En REINFORCE, $G_t$ suma las recompensas
+          ruidosas de todos los pasos que quedan: si el episodio dura cinco pasos, arrastra cinco golpes de
+          ruido, y su varianza crece con la longitud del episodio. En A2C, en cambio,
+          $\delta_t = R_{t+1} + \gamma V_w(S_{t+1}) - V_w(S_t)$ solo contiene el ruido del paso actual: toda
+          la cola futura la resume el crítico con un número liso, sin ruido dentro. Lo que hacemos es
+          cambiar ruido real por sesgo del crítico, y con ruido moderado ese cambio sale rentable.
         </p>
         <p>
           El actor es un <strong>softmax lineal</strong> sobre <em>features</em> one-hot del estado y
@@ -364,9 +472,13 @@ recompensa RUIDOSA) para comparar la VARIANZA de sus curvas de aprendizaje:
 
 Para que la comparación sea justa, el entrenamiento usa la recompensa ruidosa,
 pero la métrica que dibujamos es el retorno LIMPIO (sin ruido): así la curva
-refleja la calidad de la política, no el azar de las recompensas. El crítico de
-A2C aprende a predecir ese ruido y lo cancela vía la ventaja, de modo que su
-curva sube antes y con bandas mucho más estrechas.
+refleja la calidad de la política, no el azar de las recompensas.
+
+OJO a un matiz que suele contarse mal: A2C no ADIVINA el ruido (es gaussiano de
+media cero e independiente en cada paso; nadie lo adivina). Lo que hace es no
+ACUMULARLO: su delta solo contiene el ruido del paso actual, mientras que el G_t
+de REINFORCE arrastra el de toda la trayectoria. Por eso A2C falla menos veces y
+su banda entre semillas sale la mitad de ancha.
 
 Cómo ejecutarlo:
     pip install -r requirements.txt
@@ -557,22 +669,70 @@ if __name__ == "__main__":
         </div>
 
         <p>
-          Pulsa <strong>▶ Ejecutar</strong>. Al terminar verás dos curvas y una consola. La de
-          <strong>A2C</strong> (azul) sube deprisa hasta rozar el retorno óptimo (cerca de $0.95$) y su
-          banda es estrecha: todas las semillas aprenden parecido. La de <strong>REINFORCE</strong>
-          (naranja) se queda bastante por debajo y con una banda mucho más ancha: el ruido acumulado en
-          el retorno ahoga la pequeña diferencia entre ir a la izquierda o a la derecha. Ese contraste
-          es, en una imagen, para qué sirve un crítico.
+          Pulsa <strong>▶ Ejecutar</strong>. Al terminar verás dos curvas y una consola. Las dos suben, y
+          conviene decirlo con precisión: la mayoría de semillas de <em>ambos</em> métodos acaban
+          encontrando la meta buena, cerca del óptimo $0{,}96$. La diferencia está en <strong>cuántas veces
+          fallan</strong>. Con las ocho semillas por defecto, A2C se atasca en una (se queda en $0{,}49$) y
+          REINFORCE en dos (una en $0{,}19$ y otra en $0{,}00$), y esos fracasos hunden la media —$0{,}89$
+          frente a $0{,}74$— y ensanchan la banda naranja hasta el doble de la azul ($0{,}37$ frente a
+          $0{,}17$). Es más: cuando REINFORCE acierta, suele llegar arriba <em>antes</em> que A2C. Así que
+          lo que compra aquí el crítico no es tanto velocidad como <strong>fiabilidad</strong>, y eso es
+          exactamente lo que uno espera de un reductor de varianza.
         </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ La comparación tiene truco (y conviene saberlo)</div>
+          <p>
+            El REINFORCE de la curva naranja es el crudo, <strong>sin línea base</strong>: multiplica
+            $\nabla_\theta\log\pi$ por el retorno entero. El que construiste en el
+            <a href="14-policy-gradient-reinforce.html#baseline">capítulo 14</a> sí llevaba baseline, así
+            que la pregunta natural es si bastaría con añadírselo para alcanzar a A2C. En este pasillo,
+            <strong>no</strong>: si le pegas al REINFORCE de arriba un $V_w$ lineal aprendido como el del
+            capítulo 14, la banda entre semillas apenas se mueve del $0{,}37$ de la naranja, muy lejos del
+            $0{,}17$ de la azul. Y es que el fallo que aquí hace daño no es el temblor del gradiente, sino
+            que una semilla se enganche a la meta pequeña —o se quede dando vueltas sin llegar a
+            ninguna— y no vuelva; contra eso una referencia sola no puede hacer nada. Lo que separa de verdad a A2C de
+            REINFORCE-con-baseline no es tener una referencia —la tienen los dos—, sino el
+            <strong>bootstrapping</strong>: resumir todo el futuro en $V_w(S_{t+1})$ en lugar de jugarlo y
+            sumarlo.
+          </p>
+        </div>
 
         <div class="callout intuition">
           <div class="callout-title">🧪 Experimenta</div>
           <p>
-            Sube <code>SIGMA</code> de $0.5$ a $1.5$ y vuelve a ejecutar: el ruido crece y REINFORCE se
-            hunde aún más, mientras A2C aguanta. Después prueba <code>SIGMA = 0.0</code> (sin ruido):
-            ¿ves cómo la ventaja se estrecha? Sin ruido, el retorno Monte Carlo no es tan malo, y por eso
-            el crítico luce menos. La lección: <strong>cuanto más ruidoso el mundo, más te salva el
-            crítico</strong>.
+            <strong>Sube el ruido.</strong> Pon <code>SIGMA = 0.8</code> y vuelve a ejecutar: ahora fallan
+            semillas por los dos lados y las medias casi se igualan ($0{,}81$ para A2C, $0{,}77$ para
+            REINFORCE). Prueba después <code>SIGMA = 0.0</code>, sin nada de ruido: las dos curvas se pegan
+            ($0{,}95$ y $0{,}95$), ninguna semilla falla y las bandas se encogen a $0{,}02$. Sin ruido el
+            retorno Monte Carlo no es tan malo, y el crítico luce menos. La lección: el crítico no te
+            regala rendimiento, te da <strong>resistencia al ruido</strong>.
+          </p>
+          <p>
+            <strong>Toca las dos tasas de aprendizaje.</strong> Deja <code>alpha_pi=0.15</code> y baja
+            <code>alpha_v</code> de $0{,}30$ a $0{,}05$ —o sea, un crítico <em>tres veces más lento</em> que
+            el actor—: el retorno final sube a $0{,}947$ y <em>las ocho</em> semillas convergen. Súbelo en
+            cambio a $0{,}60$ y se desploma a $0{,}58$, con la mitad de las semillas hundidas. No hay
+            ninguna regla mágica del estilo «el crítico tiene que ir por delante del actor»: hay una zona
+            buena y se encuentra probando. Lo que sí es general es la <em>forma</em> del fallo: un crítico
+            con el paso demasiado grande no converge, y un crítico que no converge le manda al actor una
+            brújula rota.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Y ahora lleva el experimento hasta romperlo</div>
+          <p>
+            Pon <code>SIGMA = 1.5</code>. Verás que <strong>A2C se hunde tanto o más que REINFORCE</strong>:
+            $0{,}25$ frente a $0{,}55$. No es un error del código, es el límite de la idea. Cuando el ruido
+            de cada recompensa ($\sigma = 1{,}5$) es mayor que toda la diferencia de premio entre las dos
+            metas ($1{,}0$ frente a $0{,}2$), el crítico lineal no llega nunca a converger, sus $V_w$
+            oscilan sin control y el $\delta_t$ que le pasa al actor es ruido con otro nombre. REINFORCE,
+            con su retorno crudo, al menos apunta de media en la dirección buena. Mimar al crítico ayuda un
+            poco pero no lo arregla: con <code>alpha_v=0.02</code> A2C remonta hasta $0{,}62$, todavía muy
+            lejos del $0{,}95$ de antes. Y es que aquí el problema no es el tamaño del paso, es que no hay
+            suficiente señal que aprender. La moraleja completa es esta: <strong>el crítico te salva del
+            ruido moderado, pero un crítico que no ha aprendido nada es peor que no tener ninguno.</strong>
           </p>
         </div>
 
@@ -584,6 +744,30 @@ if __name__ == "__main__":
           <strong>dos cabezas</strong>, una para los logits de la política (actor) y otra para el valor
           (crítico). Estimamos la ventaja con <strong>GAE</strong> y añadimos el bono de entropía.
         </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 ¿Una red o dos?</div>
+          <p>
+            Nada obliga a compartir el tronco: podrían ser dos redes independientes, una para $\pi_\theta$ y
+            otra para $V_w$. Compartirlo tiene una ventaja evidente —aprender a <em>mirar</em> el estado es
+            trabajo común, y con imágenes ese trabajo es casi toda la red— y un inconveniente que se paga en
+            la práctica: los dos objetivos viven en <strong>escalas muy distintas</strong>. En una ejecución
+            real de este código, la pérdida del crítico ronda el centenar (los retornos de CartPole valen
+            decenas y el error va al cuadrado) mientras que la del actor anda por las centésimas. Lo que
+            compite de verdad no son esos dos números sino los gradientes que cada término manda al tronco,
+            pero la idea es la misma: si uno empuja mucho más fuerte que el otro, arrastra las
+            <em>features</em> hacia lo que le conviene a él y el otro deja de mejorar. Para arbitrar entre
+            ambos está <code>coef_valor</code>. Y el $0{,}5$ que ves ahí no se deduce de nada: es el valor
+            de consenso que arrastra toda la literatura. Si alguna vez ves que el retorno se estanca
+            mientras la pérdida del crítico manda, esa es la primera perilla que tocar.
+          </p>
+          <p>
+            Regla práctica: con observaciones vectoriales pequeñas —como las cuatro cifras de CartPole— dos
+            redes separadas suelen ir igual de bien y te ahorran ese ajuste; con píxeles, el tronco
+            compartido es prácticamente obligatorio, porque no puedes permitirte entrenar dos veces la misma
+            torre convolucional.
+          </p>
+        </div>
 
         <div class="callout warn">
           <div class="callout-title">⚠️ Este ejemplo se ejecuta en tu terminal</div>
@@ -685,6 +869,11 @@ def main():
     np.random.seed(semilla)
 
     env = gym.make("CartPole-v1")
+    # Sembrar el entorno, no solo torch y numpy: el estado inicial de CartPole es
+    # aleatorio y la semilla va en reset(), no en el constructor. Sin esto, dos
+    # ejecuciones del mismo script dan trazas distintas. Es la receta del cap. 22.
+    env.reset(seed=semilla)
+    env.action_space.seed(semilla)
     dim_obs = env.observation_space.shape[0]
     n_acciones = env.action_space.n
 
@@ -807,12 +996,91 @@ if __name__ == "__main__":
 </code></pre>
         </div>
 
+        <div class="callout math">
+          <div class="callout-title">➗ Una sola pérdida para los dos</div>
+          <p>$$\mathcal{L}(\theta, w) \;=\;
+          \underbrace{-\,\hat{\mathbb{E}}_t\big[\log \pi_\theta(A_t\mid S_t)\,\hat{A}_t\big]}_{\text{actor}}
+          \;+\; c_v\,\underbrace{\hat{\mathbb{E}}_t\big[(V_w(S_t) - \hat{G}_t)^2\big]}_{\text{crítico}}
+          \;-\; c_H\,\underbrace{\hat{\mathbb{E}}_t\big[\mathcal{H}(\pi_\theta(\cdot\mid S_t))\big]}_{\text{entropía}}$$</p>
+          <p class="math-note">
+            Esta fórmula es, literalmente, la línea
+            <code>perdida = perdida_actor + coef_valor * perdida_critico - coef_entropia * entropia</code>.
+            Fíjate en los <strong>signos</strong>, que es donde se pierde todo el mundo: el optimizador
+            <strong>minimiza</strong>, así que todo lo que queríamos <em>maximizar</em> entra con un menos.
+            El objetivo del actor y la entropía llevan signo negativo; la pérdida del crítico no, porque ahí
+            sí queremos bajar un error de verdad. $c_v = 0{,}5$ (<code>coef_valor</code>) equilibra dos
+            pérdidas de escalas muy distintas y $c_H = 0{,}01$ (<code>coef_entropia</code>) da un empujoncito
+            a la exploración sin llegar a mandar. Y dos detalles del código que son puro oficio: las ventajas
+            se normalizan a media $0$ y desviación $1$ antes de multiplicarlas (así la escala del gradiente
+            del actor no depende de si el episodio duró $20$ o $400$ pasos), y
+            <code>clip_grad_norm_(..., 0.5)</code> recorta la norma del gradiente para que un lote raro no
+            pegue un volantazo.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El número que imprime esa pérdida no significa nada</div>
+          <p>
+            Si vienes del aprendizaje supervisado, la tentación es mirar <code>perdida</code> y esperar que
+            baje. No lo hará, y no pasa nada: aquí <strong>la pérdida no es un error</strong>. El término del
+            actor es $-\log\pi\cdot\hat A$ con ventajas normalizadas, así que ronda cero por construcción y su
+            signo depende del lote; el término de entropía <em>baja</em> según la política mejora y se afila,
+            lo que <em>sube</em> la pérdida total; y hasta la diana del crítico se mueve, porque cambia con la
+            política. Es un número que sirve para calcular gradientes, no para diagnosticar. Para saber si vas
+            bien mira siempre el <strong>retorno medio por episodio</strong> —la <code>media(100)</code> que
+            imprime el programa—, nunca la pérdida.
+          </p>
+        </div>
+
         <p>
-          Al ejecutarlo verás cómo la media de pasos que aguanta el poste sube con rapidez de $\sim 20$
-          a varios cientos en menos de un minuto. Pero también notarás algo revelador: la curva
-          <strong>sube y baja</strong>, oscila, no se queda clavada en el máximo de $500$. Esa
-          inestabilidad no es un fallo tuyo: es la naturaleza de A2C.
+          Al ejecutarlo verás cómo la media de pasos que aguanta el poste sube deprisa: arranca en poco más
+          de $20$ y en cosa de un minuto anda ya por los doscientos y pico. Pero también notarás algo revelador: la
+          curva <strong>sube y baja</strong>, oscila, y no se queda clavada en el máximo de $500$. Mira esta
+          ejecución real y sigue la columna de la derecha entre las actualizaciones $450$ y $480$:
         </p>
+
+        <div class="terminal">
+          <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+          <pre><span class="prompt">$</span> python code/15-actor-critico/a2c_torch.py
+<span class="comment">act    0 | episodios    81 | media(100) =   24.7
+...
+act  100 | episodios  5136 | media(100) =  113.2
+...
+act  200 | episodios  6829 | media(100) =  169.1
+...
+act  300 | episodios  8025 | media(100) =  256.6
+...
+act  330 | episodios  8291 | media(100) =  238.4
+act  340 | episodios  8376 | media(100) =  269.4
+act  350 | episodios  8482 | media(100) =  216.7
+act  360 | episodios  8562 | media(100) =  265.5
+...
+act  450 | episodios  9268 | media(100) =  239.6
+act  460 | episodios  9332 | media(100) =  302.8
+act  470 | episodios  9397 | media(100) =  303.2
+act  480 | episodios  9474 | media(100) =  299.1
+act  490 | episodios  9568 | media(100) =  229.2
+
+Entrenamiento terminado. Mejor media(100) = 353 pasos (de un máximo de 500).</span></pre>
+        </div>
+        <p>
+          Fíjate en la columna de la derecha y verás el vaivén: $256{,}6$, luego $238{,}4$, sube a
+          $269{,}4$, se cae a $216{,}7$… y la mejor media de todo el entrenamiento, $353$, no llega a
+          clavarse en ningún sitio. Esa inestabilidad no es un fallo tuyo: es la naturaleza de A2C,
+          y es exactamente lo que <a href="16-ppo.html">PPO</a> viene a domesticar en el próximo capítulo.
+        </p>
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Estos números deberían salirte <strong>idénticos</strong>, porque el script siembra las cuatro
+            fuentes de azar: <code>torch</code>, <code>numpy</code>, el estado inicial del entorno
+            (<code>env.reset(seed=…)</code>) y el muestreo del espacio de acciones
+            (<code>env.action_space.seed(…)</code>). Comprueba qué pasa si borras las dos últimas líneas
+            y ejecutas dos veces: obtendrás dos trazas distintas, porque el estado inicial de CartPole es
+            aleatorio. Es el error de reproducibilidad más común en RL —sembrar el modelo y olvidarse del
+            entorno— y lo desarrollamos en el <a href="22-panorama.html#hacer-repetible">capítulo 22</a>.
+          </p>
+        </div>
 
         <h2 id="terminal">Ejecutarlo en tu terminal</h2>
         <p>

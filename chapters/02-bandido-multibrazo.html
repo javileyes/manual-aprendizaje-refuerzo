@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>2. El bandido multibrazo · Manual de RL</title>
-  <meta name="description" content="El dilema exploración–explotación en su forma más pura: bandidos multibrazo, medias incrementales, ε-greedy y UCB, con el testbed de 10 brazos en Python ejecutable." />
+  <meta name="description" content="El dilema exploración–explotación en su forma más pura: bandidos multibrazo, medias incrementales, ε-greedy, valores iniciales optimistas, UCB, Thompson sampling y el arrepentimiento, con el testbed de 10 brazos en Python ejecutable." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎯</text></svg>" />
   <link rel="stylesheet" href="../assets/css/styles.css" />
   <script>
@@ -182,6 +182,22 @@
           </p>
         </div>
 
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Cuidado, que el subíndice ha cambiado de significado</div>
+          <p>
+            Antes escribíamos $Q_t(a)$ y ahora escribimos $Q_n$, y no son el mismo reloj. El $t$ de
+            $Q_t(a)$ cuenta <strong>tiradas totales</strong>, las de todos los brazos juntos; el $n$
+            de $Q_n$ cuenta solo las tiradas <strong>de ese brazo</strong>. Si llevas 100 tiradas y
+            doce de ellas han sido del brazo 3, para el brazo 3 estamos en $t = 101$ pero en
+            $n = 13$.
+          </p>
+          <p>
+            Si te ayuda, míralo en el código de más abajo: el reloj global es la variable
+            <code>t</code> del bucle y el reloj de cada brazo es <code>N[a]</code>. Por eso la
+            actualización divide entre <code>N[filas, A]</code> y no entre <code>t</code>.
+          </p>
+        </div>
+
         <p>
           Esta forma —<em>estimación nueva ← estimación vieja + paso · (objetivo − estimación
           vieja)</em>— es un patrón que verás una y otra vez en todo el manual. En Q-Learning, en
@@ -210,13 +226,24 @@
           <div class="callout-title">➗ Actualización con paso constante</div>
           <p>$$Q_{n+1} = Q_n + \alpha\,\big(R_n - Q_n\big)$$</p>
           <p class="math-note">
-            Si desarrollas la recursión llegas a una media <strong>ponderada por recencia</strong>:
+            Y esta recursión se puede desarrollar entera, porque es la misma línea una y otra vez.
+            Reagrupa primero la actualización como $Q_{n+1} = \alpha R_n + (1-\alpha)Q_n$ —«un poco
+            de lo nuevo, el resto de lo viejo»— y luego sustituye $Q_n$ por su propia expresión, y
+            después $Q_{n-1}$ por la suya, hasta llegar al principio:
           </p>
+          <p>$$Q_{n+1} = \alpha R_n + (1-\alpha)\Big[\alpha R_{n-1} + (1-\alpha)Q_{n-1}\Big] = \cdots$$</p>
           <p>$$Q_{n+1} = (1-\alpha)^n\,Q_1 + \sum_{i=1}^{n} \alpha\,(1-\alpha)^{\,n-i}\,R_i$$</p>
           <p class="math-note">
-            El peso de una recompensa cae <strong>exponencialmente</strong> cuanto más antigua sea
-            (el factor $(1-\alpha)^{\,n-i}$). Así el agente «olvida» el pasado lejano y se adapta a
-            los cambios. Los pesos suman $1$, así que sigue siendo una media legítima.
+            Lo que ha quedado es una media <strong>ponderada por recencia</strong>: el peso de una
+            recompensa cae <strong>exponencialmente</strong> cuanto más antigua sea (el factor
+            $(1-\alpha)^{\,n-i}$), y lo mismo le pasa a la estimación inicial $Q_1$, que se
+            desvanece sola. Así el agente «olvida» el pasado lejano y se adapta a los cambios.
+          </p>
+          <p class="math-note">
+            ¿Y sigue siendo una media de verdad? Sí: los pesos suman exactamente $1$. Los de las
+            recompensas forman una geométrica,
+            $\sum_{i=1}^{n}\alpha(1-\alpha)^{\,n-i} = \alpha\,\frac{1-(1-\alpha)^n}{1-(1-\alpha)} = 1-(1-\alpha)^n$,
+            que junto con el $(1-\alpha)^n$ que se lleva $Q_1$ da $1$ clavado.
           </p>
         </div>
 
@@ -227,6 +254,38 @@
             cambia). Con $\alpha$ constante <em>nunca</em> converge del todo: se queda fluctuando en
             torno al valor actual, siempre atenta a los cambios. No es un defecto, es justo lo que
             quieres en un entorno <strong>no estacionario</strong> —que es la norma en el RL real.
+            Lo <a href="#ejemplo">mediremos con números</a> al final del capítulo: en un mundo que
+            se mueve, el paso constante acierta un $75\%$ de las veces y la media muestral se
+            queda en un $45\%$.
+          </p>
+        </div>
+
+        <div class="callout math">
+          <div class="callout-title">➗ ¿Qué pasos garantizan la convergencia? Robbins-Monro</div>
+          <p>
+            Esa frase de «converge / no converge» no es una impresión: hay un teorema detrás. Una
+            sucesión de pasos $\alpha_n(a)$ garantiza que la estimación converja al valor real (con
+            probabilidad 1) si cumple estas dos condiciones, llamadas de
+            <strong>Robbins-Monro</strong>:
+          </p>
+          <p>$$\sum_{n=1}^{\infty} \alpha_n(a) = \infty \qquad\text{y}\qquad \sum_{n=1}^{\infty} \alpha_n^2(a) < \infty$$</p>
+          <p class="math-note">
+            Y cada una dice algo muy concreto. <strong>La primera</strong> exige que los pasos sumen
+            infinito: que sean lo bastante grandes, en total, como para llegar a cualquier sitio por
+            lejos que esté la respuesta y por mala que fuera la estimación inicial.
+            <strong>La segunda</strong> exige que sus cuadrados sumen finito: que acaben siendo lo
+            bastante pequeños como para que el ruido de las recompensas deje de zarandear la
+            estimación.
+          </p>
+          <p class="math-note">
+            El paso $\alpha_n = 1/n$ cumple las dos: la serie armónica $\sum 1/n$ diverge, y
+            $\sum 1/n^2 = \pi^2/6$ es finita. Justo en el filo. El paso constante $\alpha_n = \alpha$
+            cumple la primera pero <strong>no</strong> la segunda ($\sum \alpha^2 = \infty$), y por
+            eso no converge nunca del todo: se queda oscilando. Que quede claro que eso lo elegimos
+            a sabiendas, porque en un mundo que cambia <em>no queremos</em> que la estimación se
+            congele. Estas dos condiciones volverán a aparecer, casi con las mismas palabras, cuando
+            hablemos de la convergencia de
+            <a href="09-q-learning.html">Q-Learning</a>.
           </p>
         </div>
 
@@ -270,6 +329,87 @@
           </p>
         </div>
 
+        <h2 id="optimistas">Valores iniciales optimistas: explorar sin azar</h2>
+        <p>
+          Antes de seguir, un rompecabezas que sale del propio experimento que ejecutarás dentro de
+          un rato. La política <em>greedy</em> pura, la que no explora <em>jamás</em>, acaba
+          eligiendo la acción óptima el <strong>$39{,}4\%$</strong> de las veces. Y eso no cuadra:
+          si se atasca en el primer brazo que le sale medio bien, debería acertar el $10\%$ del
+          tiempo, que es lo que le tocaría por puro azar con $k = 10$ brazos. ¿De dónde salen los
+          otros treinta puntos?
+        </p>
+        <p>
+          De la inicialización. Arrancamos con $Q_1(a) = 0$ para todos los brazos, y los valores
+          reales $q_*(a)$ salen de una $\mathcal{N}(0,1)$: <strong>la mitad de los brazos son
+          peores que ese cero</strong>. Así que cuando el agente <em>greedy</em> prueba el primer
+          brazo y le decepciona, su $Q$ baja por debajo de cero… y de repente todos los brazos que
+          aún no ha tocado, que siguen valiendo $0$, le parecen mejores. Se va al siguiente. Ese
+          cero no era neutro: era <strong>moderadamente optimista</strong>, y le ha obligado a
+          explorar sin quererlo. Medido: el agente <em>greedy</em> llega a probar $3{,}2$ brazos
+          distintos de media y se queda con el mejor de esos tres. De ahí el $39{,}4\%$.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 La decepción es el motor de la exploración</div>
+          <p>
+            Si un cero de más ya provoca eso, subamos la apuesta a propósito: inicializa
+            $Q_1(a) = +5$ para todos. Ningún brazo puede cumplir semejante expectativa (los
+            $q_*(a)$ rondan el $0$ y rara vez pasan de $2$), así que <em>todos</em> decepcionan.
+            El agente prueba uno, se lleva un chasco, su $Q$ baja, y entonces el siguiente brazo
+            sin tocar —que aún vale $5$— pasa a ser el más apetecible. Y así uno detrás de otro,
+            dando varias vueltas a la lista entera antes de que las estimaciones bajen lo bastante
+            como para que se estabilice.
+          </p>
+          <p>
+            Es exploración <strong>sistemática y sin una sola tirada de dado</strong>: no hay
+            $\varepsilon$, no hay moneda, no hay azar. Solo un agente codicioso al que la realidad
+            va desengañando en orden.
+          </p>
+        </div>
+
+        <p>
+          Los números, con paso constante $\alpha = 0{,}1$ para los dos contendientes (ahora verás
+          por qué), sobre las mismas 500 ejecuciones de 1000 pasos:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Estrategia</th><th>% óptima en los 100 primeros pasos</th><th>% óptima en los 100 últimos</th></tr></thead>
+            <tbody>
+              <tr><td>$Q_1 = 5$, <em>greedy</em> puro</td><td>$18{,}9\%$</td><td>$\mathbf{88{,}2\%}$</td></tr>
+              <tr><td>$Q_1 = 0$, ε-greedy con $\varepsilon = 0{,}1$</td><td>$38{,}6\%$</td><td>$78{,}3\%$</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Lee la tabla de izquierda a derecha y tienes la historia entera. El optimista
+          <strong>arranca peor que nadie</strong> —la mitad de bien que el ε-greedy— porque está
+          gastando sus primeras tiradas en desengañarse de los diez brazos uno por uno. Y termina
+          diez puntos por encima, porque cuando acaba de desengañarse ya no le queda ninguna razón
+          para explorar: explota, y explota sobre buena información. Paga la exploración
+          <strong>por delante y una sola vez</strong>, mientras que el ε-greedy la paga a plazos
+          hasta el final de los tiempos.
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Dos letras pequeñas, y las dos importan</div>
+          <p>
+            <strong>Uno: hace falta paso constante.</strong> Con $\alpha = 1/n$, la primerísima
+            tirada de un brazo tiene $n = 1$, o sea paso $1$, y la actualización se convierte en
+            $Q \leftarrow R$: el $5$ desaparece de golpe y con él todo el optimismo. El agente hace
+            entonces una única pasada por los diez brazos y se queda con el que mejor haya salido
+            <em>en una sola tirada</em>. Medido: $60{,}9\%$ en los 100 primeros pasos (parece mejor,
+            claro, porque no está explorando) pero solo $70{,}8\%$ al final, diecisiete puntos por
+            debajo. El optimismo hay que <em>dosificarlo</em>, y quien lo dosifica es $\alpha$.
+          </p>
+          <p>
+            <strong>Y dos: es un truco de arranque, no una estrategia.</strong> Su exploración se
+            agota sola y no vuelve: pasadas unas cuantas tiradas ya no queda ni rastro del $5$
+            inicial. Si el mundo cambia en el paso 5000 —si el mejor brazo deja de serlo—, este
+            agente no se va a enterar nunca. Sirve para problemas
+            <strong>estacionarios</strong>, y ya vimos que esos son la excepción en el RL real.
+          </p>
+        </div>
+
         <h2 id="ucb">UCB: optimismo ante la incertidumbre</h2>
         <p>
           El ε-greedy explora <em>a ciegas</em>: cuando decide explorar, elige cualquier brazo con
@@ -287,6 +427,13 @@
             $N_t(a)$ es el número de veces que se ha elegido $a$ antes de $t$. $\ln t$ es el
             logaritmo natural del paso actual. $c > 0$ controla cuánta exploración quieres. Todo ese
             término de la raíz es un <strong>bono de incertidumbre</strong>.
+          </p>
+          <p class="math-note">
+            Un caso límite que hay que tratar aparte: en el primer paso $\ln 1 = 0$ y
+            $N_t(a) = 0$, o sea $0/0$. Por convenio, un brazo nunca probado tiene bono
+            <strong>infinito</strong> —por eso en el código verás <code>bonus[N == 0] = np.inf</code>—,
+            que es la forma matemática de decir «de lo que no has probado no sabes nada, así que
+            pruébalo».
           </p>
         </div>
 
@@ -306,9 +453,17 @@
           olvidado para siempre.</li>
         </ul>
         <p>
-          Un detalle práctico: si $N_t(a) = 0$, el bono es infinito, de modo que UCB
-          <strong>prueba cada brazo al menos una vez</strong> antes de ponerse selectivo. En la
-          práctica, en este problema, UCB suele ser el que mejor arranca.
+          Y ojo a los primeros pasos, porque en la gráfica que veremos luego se ve algo raro. Como
+          todos los brazos arrancan con $N_t(a) = 0$ y bono infinito, UCB los
+          <strong>prueba todos</strong> antes de ponerse selectivo: durante los $k = 10$ primeros
+          pasos está obligado a elegir a ciegas y su
+          recompensa media se queda pegada a $0$: es el <strong>peor</strong> de los cuatro métodos
+          en ese tramo, mientras el ε-greedy llega al paso 10 con $0{,}81$. En el paso 11 elige por primera vez
+          con criterio y la recompensa pega un salto a $1{,}07$; en los pasos 12, 13 y 14 vuelve a
+          bajar (a $0{,}86$, $0{,}85$ y $0{,}81$), porque el brazo que acaba de explotar ya ha
+          gastado parte de su bono y le toca reexaminar a los rivales. Ese diente de sierra
+          alrededor del paso $k+1$ es la huella dactilar de UCB. A partir de ahí sube sin pausa y
+          termina siendo el mejor de los cuatro en esta ventana de mil pasos.
         </p>
 
         <div class="callout intuition">
@@ -319,17 +474,201 @@
           </p>
         </div>
 
-        <h3 id="gradiente">Otra vía: el gradiente de bandidos</h3>
+        <h3 id="de-donde-sale-ucb">¿De dónde sale esa raíz? (y por qué se llama «cota»)</h3>
         <p>
-          No es la única familia de métodos. En vez de estimar valores, podríamos aprender una
+          La fórmula tiene pinta de haber caído del cielo, pero se deduce en tres pasos y merece la
+          pena verlo, porque explica el nombre.
+        </p>
+        <p>
+          <strong>Primero, la forma.</strong> $Q_t(a)$ es una media de $N_t(a)$ muestras, y el
+          error típico de una media cae como $\sigma/\sqrt{N}$: promediar cuatro tiradas te da la
+          mitad de error que promediar una. Así que cualquier medida honesta de «cuánto podría
+          estar equivocándome con este brazo» <em>tiene</em> que llevar un $1/\sqrt{N}$. La raíz no
+          es un adorno.
+        </p>
+        <p>
+          <strong>Segundo, cuánto.</strong> Para ponerle número hace falta una desigualdad de
+          concentración. La de <strong>Hoeffding</strong>, para recompensas acotadas en $[0,1]$,
+          dice que la media muestral no se queda corta por mucho, y casi nunca:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ De Hoeffding a UCB</div>
+          <p>$$\Pr\big\{\,q_*(a) > Q_t(a) + u\,\big\} \;\le\; e^{-2\,N_t(a)\,u^2}$$</p>
+          <p class="math-note">
+            Ahora elegimos cuánto riesgo aceptamos. Pedimos que la probabilidad de habernos quedado
+            cortos se desvanezca con el tiempo, digamos como $t^{-4}$, e igualamos:
+          </p>
+          <p>$$e^{-2N_t(a)u^2} = t^{-4} \;\Longrightarrow\; 2\,N_t(a)\,u^2 = 4\ln t \;\Longrightarrow\; u = \sqrt{\frac{2\ln t}{N_t(a)}}$$</p>
+          <p class="math-note">
+            Ahí está el bono, con $c = \sqrt{2}$ incluido de propina. El $\ln t$ no se metió a mano:
+            <strong>aparece porque hemos exigido equivocarnos cada vez menos a medida que pasa el
+            tiempo</strong>.
+          </p>
+        </div>
+
+        <p>
+          <strong>Y tercero, el nombre.</strong> Lo que acabamos de construir es esto: con
+          probabilidad muy alta, $q_*(a) \le Q_t(a) + u$. Es decir, $Q_t(a) + u$ es una
+          <strong>cota superior</strong> de lo que ese brazo puede valer de verdad —una <em>upper
+          confidence bound</em>—. Y entonces la regla $A_t = \arg\max_a [Q_t(a) + u]$ se lee de una
+          forma preciosa: <em>UCB no elige el brazo que mejor parece; elige el brazo cuyo mejor
+          caso razonable es el mejor de todos.</em> Si aun así te decepciona, su cota baja y deja
+          de molestar; y si no te decepciona, es que era bueno.
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ La letra pequeña del $c$</div>
+          <p>
+            La cuenta de arriba exige que las recompensas estén acotadas en $[0,1]$, y las nuestras
+            son gaussianas, o sea que no están acotadas por ningún lado: el $c = \sqrt{2}$ teórico
+            no se aplica literalmente aquí. En el testbed usaremos $c = 2$, que es lo que funciona
+            en la práctica. Es un patrón que verás muchas veces en el manual: la teoría te da la
+            <strong>forma</strong> de la fórmula, y la constante se ajusta a ojo.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ ¿Y por qué no usamos UCB en el resto del manual?</div>
+          <p>
+            Es la pregunta lógica: si es el mejor de los cuatro, ¿por qué en todos los capítulos
+            que vienen volvemos al humilde ε-greedy? Por dos motivos, y los dos son estructurales.
+          </p>
+          <p>
+            <strong>Uno:</strong> el bono $\sqrt{\ln t / N_t(a)}$ presupone que la recompensa de
+            cada brazo viene siempre de la <em>misma</em> distribución. En un MDP la diana se
+            mueve: el valor de una acción depende de la política que uses después, y esa política
+            está cambiando mientras aprendes. Un brazo que probaste hace mil pasos ya no es el
+            mismo brazo.
+          </p>
+          <p>
+            <strong>Y dos:</strong> UCB necesita un contador honesto $N(a)$ para cada acción. Con
+            una tabla pequeña eso es fácil; con una red neuronal y millones de estados distintos,
+            ese contador sencillamente no existe —cada estado se visita una vez y nunca más—.
+            Recuperar la idea de «bono por incertidumbre» en RL profundo es un problema abierto y
+            un área de investigación entera: es lo que veremos en el
+            <a href="19-exploracion-avanzada.html">capítulo 19</a>.
+          </p>
+        </div>
+
+        <h3 id="thompson">Otra forma de ser optimista: Thompson sampling</h3>
+        <p>
+          UCB resume toda su incertidumbre sobre un brazo en un solo número, el bono. Hay una
+          alternativa más antigua (es de 1933) y sorprendentemente elegante: en vez de un número,
+          mantener una <strong>distribución de probabilidad</strong> sobre lo que crees que vale
+          cada brazo, y decidir así:
+        </p>
+        <div class="callout key">
+          <div class="callout-title">🔑 La regla entera de Thompson sampling</div>
+          <p>
+            Saca un número al azar de la creencia de cada brazo y tira de aquel cuya muestra haya
+            salido más alta. Nada más.
+          </p>
+        </div>
+        <p>
+          Con recompensas de sí/no (¿el usuario ha hecho clic?) la cuenta cabe en cuatro líneas.
+          Empiezas creyendo lo mismo de todos los brazos, una $\text{Beta}(1,1)$, que es la
+          distribución uniforme sobre «probabilidad de éxito». Cada vez que el brazo $a$ acierta le
+          sumas uno a su primer parámetro y cada vez que falla, al segundo: tras $s_a$ éxitos y
+          $f_a$ fracasos su creencia es $\text{Beta}(1 + s_a,\, 1 + f_a)$. Y para elegir, muestreas
+          un $\theta_a \sim \text{Beta}(1 + s_a,\, 1 + f_a)$ por brazo y te quedas con el mayor.
+        </p>
+        <p>
+          Lo bonito es que <strong>nadie ha tenido que programar la exploración</strong>: sale
+          sola. Un brazo probado poco tiene una Beta <em>ancha</em>, así que de vez en cuando le
+          sale una muestra alta y se lleva la tirada; un brazo probado mil veces tiene una Beta
+          estrechísima clavada en su valor real, y ya solo gana si de verdad es el mejor. La
+          exploración se apaga por sí misma exactamente al ritmo al que se acumulan los datos. Es
+          el algoritmo que mueve hoy la mayoría de los tests A/B adaptativos. Llevarlo tal cual al
+          RL profundo es muy difícil —mantener una distribución sobre los millones de pesos de una
+          red no es cosa menor—, pero la idea inspira métodos que sí funcionan, y volveremos a
+          ella en el
+          <a href="19-exploracion-avanzada.html#panorama">capítulo 19</a>.
+        </p>
+
+        <h3 id="gradiente">Otra vía más: el gradiente de bandidos</h3>
+        <p>
+          Los tres métodos anteriores estiman valores. Hay una familia que ni siquiera hace eso: en
+          vez de estimar valores, aprende directamente una
           <strong>preferencia</strong> numérica $H_t(a)$ por cada acción y convertirla en
           probabilidades con la función <em>softmax</em>: $\pi_t(a) = e^{H_t(a)} / \sum_b e^{H_t(b)}$.
           Las preferencias se ajustan por <strong>ascenso de gradiente</strong> sobre la recompensa
           esperada, subiendo la de las acciones que rinden por encima de una recompensa media de
           referencia y bajando las demás. Es el germen de los métodos de <strong>gradiente de
-          política</strong> que protagonizarán la Parte 3 del manual (capítulo 14 en adelante); por
-          ahora nos quedamos con ε-greedy y UCB.
+          política</strong> que protagonizarán la Parte 3 del manual
+          (<a href="14-policy-gradient-reinforce.html">capítulo 14</a> en adelante); por ahora nos
+          quedamos con ε-greedy y UCB.
         </p>
+
+        <h2 id="arrepentimiento">¿Cuánto se pierde por explorar? El arrepentimiento</h2>
+        <p>
+          Llevamos todo el capítulo diciendo que explorar «cuesta» y que explorar de más «sale
+          caro», sin poner un número encima. Pues hay un número, y es con el que se mide
+          absolutamente todo en bandidos: el <strong>arrepentimiento</strong> (en inglés,
+          <em>regret</em>).
+        </p>
+        <p>
+          La idea es comparar tu partida con la de un oráculo que conociera $q_*$ desde el
+          principio y hubiera tirado siempre del mejor brazo $a^\star$. Para cada brazo definimos su
+          <strong>desventaja</strong> $\Delta_a$, lo que pierdes por tirar de él en vez del mejor:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Arrepentimiento</div>
+          <p>$$\Delta_a \doteq q_*(a^\star) - q_*(a), \qquad L_T \doteq T\,q_*(a^\star) - \sum_{t=1}^{T} q_*(A_t) = \sum_{a} \Delta_a\,N_T(a)$$</p>
+          <p class="math-note">
+            $L_T$ no mide lo que te llevas, sino lo que has <strong>dejado</strong> de llevarte en
+            $T$ tiradas. Fíjate en la segunda igualdad, que es pura contabilidad: agrupa las
+            tiradas por brazo y ya está. Cada tirada gastada en el brazo $a$ cuesta exactamente
+            $\Delta_a$, ni más ni menos.
+          </p>
+        </div>
+
+        <p>
+          De esa contabilidad sale una idea que no es nada obvia: explorar un brazo <em>casi</em>
+          tan bueno como el óptimo es baratísimo, porque su $\Delta_a$ es diminuto. Lo que arruina
+          la partida es insistir en uno malo. <strong>Un buen algoritmo no es el que explora poco,
+          sino el que explora barato.</strong>
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 El techo del ε-greedy, calculado antes de medirlo</div>
+          <p>
+            Con esto en la mano podemos <em>predecir</em> el resultado del experimento que
+            programaremos dentro de un momento, sin ejecutarlo. Con $\varepsilon$ fijo, la
+            probabilidad de elegir el brazo óptimo <em>nunca</em> puede pasar de
+            $1 - \varepsilon + \varepsilon/k$: incluso con las estimaciones perfectas, esa fracción
+            $\varepsilon$ de tiradas se va al azar. Con $k=10$ eso son $91\%$ para
+            $\varepsilon = 0{,}1$ y $99{,}1\%$ para $\varepsilon = 0{,}01$.
+          </p>
+          <p>
+            En recompensa sale aún más claro. La media del mejor de diez brazos
+            $\mathcal{N}(0,1)$ vale $\mathbb{E}[\max_a q_*(a)] \approx 1{,}539$, y la tirada al
+            azar reparte entre todos los brazos, cuya media es $0$. Así que el techo de un
+            ε-greedy es $(1-\varepsilon) \times 1{,}539$: para $\varepsilon = 0{,}1$ son
+            $1{,}385$. Guárdate ese número: cuando ejecutes el experimento verás que el de
+            $0{,}1$ saca $1{,}368$, casi el $99\%$ de su techo. <strong>En recompensa ya no puede
+            mejorar sin bajar $\varepsilon$.</strong> El de $0{,}01$, en cambio, tiene el techo en
+            $1{,}524$ y se queda en $1{,}320$: a él no le sobra techo, le falta tiempo.
+          </p>
+          <p>
+            Y hay un detalle que confirma justo lo que acabamos de decir sobre explorar barato. En
+            <em>porcentaje de acción óptima</em> el de $0{,}1$ sí deja margen: $81{,}2\%$ frente a
+            su techo del $91\%$. ¿Cómo puede estar a diez puntos de su techo en aciertos y a uno en
+            recompensa? Porque cuando falla, falla con buen gusto: el $\Delta_a$ medio del brazo
+            que elige cuando no elige el óptimo es $0{,}92$, y el de un brazo cualquiera tomado al
+            azar sería $1{,}71$. Se equivoca casi siempre con un brazo <em>casi</em> tan bueno como
+            el mejor, y esos errores apenas se notan en la recompensa.
+          </p>
+          <p>
+            Ese es el defecto de fondo del ε-greedy: como $\varepsilon$ no baja nunca, paga
+            $\Delta$ por cada tirada explorada <em>para siempre</em>, y su arrepentimiento crece
+            <strong>lineal</strong> con $T$. UCB, en cambio, apaga su exploración solo (el bono
+            encoge según $N_t(a)$ crece) y consigue un arrepentimiento $O(\ln T)$. Y no se puede
+            hacer mucho mejor: Lai y Robbins demostraron en 1985 que <em>ningún</em> algoritmo
+            puede bajar de $\Omega(\ln T)$. Explorar tiene un precio mínimo, y es este.
+          </p>
+        </div>
 
         <h2 id="algoritmo">El algoritmo, paso a paso</h2>
         <p>Juntando todo, un agente de bandido con medias incrementales y ε-greedy hace esto:</p>
@@ -347,8 +686,72 @@
         <p>
           Para UCB solo cambia la primera línea del bucle: se elige
           $A = \arg\max_a\big[Q(a) + c\sqrt{\ln t / N(a)}\big]$ (tratando $N(a)=0$ como bono infinito).
-          Vamos a programarlo y a comparar las cuatro estrategias.
         </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ ¿Y si hay empate?</div>
+          <p>
+            Un detalle que parece menor y no lo es: ¿qué haces cuando dos brazos empatan a la mejor
+            estimación? En el paso 1 empatan <em>todos</em>, porque todos arrancan en $Q = 0$.
+            Nuestro código usa <code>np.argmax</code>, que en caso de empate devuelve siempre el
+            índice más pequeño, así que las 500 ejecuciones del agente <em>greedy</em> tiran del
+            brazo 0 en el primer paso y van bajando por la lista a medida que los brazos les
+            defraudan. El libro de Sutton
+            &amp; Barto rompe los empates <strong>al azar</strong>. Ninguna de las dos está mal,
+            pero los números cambian.
+          </p>
+          <p>
+            Que un detalle así mueva el resultado te dice lo frágil que es la política
+            <em>greedy</em>: sin exploración, su suerte depende del orden en que le vengan dadas.
+          </p>
+        </div>
+
+        <h3 id="a-mano">Cuatro tiradas, a mano</h3>
+        <p>
+          Antes de dejárselo al ordenador, hagamos el bucle con lápiz. Tres brazos, todos los $Q$ a
+          cero, paso $1/N$, política ε-greedy. Supón que la moneda de $\varepsilon$ ha salido
+          «explora» en los pasos 3 y 4 —mala suerte estadística, pero nos viene bien para tener los
+          tres brazos con datos—:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>$t$</th><th>Brazo elegido</th><th>$R$</th><th>La cuenta</th><th>$Q$ después</th><th>$N$ después</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td>1</td><td>$+1{,}0$</td><td>$0 + \tfrac11(1{,}0 - 0) = 1{,}0$</td><td>$(1{,}0;\ 0;\ 0)$</td><td>$(1, 0, 0)$</td></tr>
+              <tr><td>2</td><td>1</td><td>$-0{,}2$</td><td>$1{,}0 + \tfrac12(-0{,}2 - 1{,}0) = 0{,}4$</td><td>$(0{,}4;\ 0;\ 0)$</td><td>$(2, 0, 0)$</td></tr>
+              <tr><td>3</td><td>2</td><td>$-0{,}3$</td><td>$0 + \tfrac11(-0{,}3 - 0) = -0{,}3$</td><td>$(0{,}4;\ -0{,}3;\ 0)$</td><td>$(2, 1, 0)$</td></tr>
+              <tr><td>4</td><td>3</td><td>$+2{,}0$</td><td>$0 + \tfrac11(2{,}0 - 0) = 2{,}0$</td><td>$(0{,}4;\ -0{,}3;\ 2{,}0)$</td><td>$(2, 1, 1)$</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Fíjate en la fila 2: la segunda tirada del brazo 1 salió mal ($-0{,}2$) y su estimación
+          no se fue a $-0{,}2$, se quedó a medio camino en $0{,}4$. Eso es la media incremental
+          haciendo su trabajo: <em>corregir, no sustituir</em>.
+        </p>
+        <p>
+          Ahora estamos en $t=5$. La política <em>greedy</em> tirará del brazo 3, que es el mejor
+          estimado. ¿Y UCB con $c = 2$? Como $\ln 5 = 1{,}609$:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Brazo</th><th>$Q$</th><th>$N$</th><th>Bono $2\sqrt{\ln 5 / N}$</th><th>Total</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td>$+0{,}40$</td><td>$2$</td><td>$1{,}794$</td><td>$2{,}194$</td></tr>
+              <tr><td>2</td><td>$-0{,}30$</td><td>$1$</td><td>$2{,}537$</td><td>$2{,}237$</td></tr>
+              <tr><td>3</td><td>$+2{,}00$</td><td>$1$</td><td>$2{,}537$</td><td>$\mathbf{4{,}537}$</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Gana el brazo 3, igual que <em>greedy</em>. Pero mira el brazo 2: es el <strong>peor
+          estimado</strong> de los tres —el único con $Q$ negativo— y aun así <strong>adelanta al
+          brazo 1</strong>, solo por tener la mitad de datos. Ese sorpasso es UCB en una línea: no
+          está premiando lo bueno, está premiando <em>lo que todavía no sabemos</em>. Y en cuanto
+          el brazo 2 se tire una segunda vez su bono caerá a la altura del brazo 1 —$1{,}89$ en el
+          paso 6— y volverá a quedarse detrás. El beneficio de la duda se cobra una sola vez.
+        </p>
+        <p>Vamos a programarlo y a comparar las estrategias con números de verdad.</p>
 
         <h2 id="ejemplo">El testbed de 10 brazos, en Python</h2>
         <p>
@@ -362,8 +765,10 @@
         <p>
           El truco para que corra en segundos: <strong>vectorizar con numpy</strong>. En vez de un
           bucle por ejecución, avanzamos las 500 ejecuciones a la vez, como filas de una matriz.
-          Dibujamos las dos gráficas del libro: recompensa media por paso y porcentaje de veces que
-          se elige la acción óptima.
+          Dibujamos las dos gráficas del libro —recompensa media por paso y porcentaje de veces que
+          se elige la acción óptima— y de paso imprimimos el <strong>arrepentimiento acumulado</strong>
+          de cada estrategia y la comparación de los <strong>valores iniciales optimistas</strong>
+          que veíamos antes.
         </p>
 
         <div class="code-example" data-packages="numpy,matplotlib">
@@ -392,6 +797,11 @@ Cada estrategia se promedia sobre 500 ejecuciones independientes de
 una normal N(0, 1) y la recompensa de tirar del brazo a es
 R = q*(a) + ruido, con ruido ~ N(0, 1).
 
+Ademas se mide el ARREPENTIMIENTO (regret): lo que el agente ha dejado
+de ganar frente a haber tirado siempre del mejor brazo. Y al final se
+compara la exploracion por valores iniciales optimistas con la
+exploracion al azar del epsilon-greedy.
+
 Se dibujan dos graficas, como en el libro de Sutton &amp; Barto:
   1) recompensa media por paso,
   2) porcentaje de veces que se elige la accion optima.
@@ -408,8 +818,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def simular(k=10, n_ejec=500, n_pasos=1000, epsilon=0.0, ucb_c=None, semilla=0):
-    """Ejecuta n_ejec bandidos en paralelo y devuelve dos curvas promedio.
+def simular(k=10, n_ejec=500, n_pasos=1000, epsilon=0.0, ucb_c=None, semilla=0,
+            q_inicial=0.0, alpha=None, no_estacionario=False):
+    """Ejecuta n_ejec bandidos en paralelo y devuelve tres curvas promedio.
 
     Parametros
     ----------
@@ -419,25 +830,43 @@ def simular(k=10, n_ejec=500, n_pasos=1000, epsilon=0.0, ucb_c=None, semilla=0):
     epsilon  : probabilidad de explorar (0 = greedy puro). Se ignora si ucb_c.
     ucb_c    : si no es None, usa UCB con esta constante c en vez de e-greedy.
     semilla  : semilla del generador para reproducibilidad.
+    q_inicial: valor inicial de todas las estimaciones Q (0 = neutro,
+               5 = optimista: mira la seccion de valores iniciales optimistas).
+    alpha    : paso de aprendizaje. None = media muestral 1/N (estacionario);
+               un numero en (0, 1] = paso constante (ponderado por recencia).
+    no_estacionario : si es True, los q*(a) arrancan todos iguales a 0 y hacen
+               un paseo aleatorio de desviacion 0.01 en cada paso (ejercicio
+               2.5 del libro). Ojo: la accion optima cambia con el tiempo, por
+               eso se recalcula dentro del bucle.
 
-    Devuelve (recompensa_media, prop_optima): dos arrays de longitud
-    n_pasos con la recompensa promediada sobre ejecuciones en cada paso y
-    la proporcion de ejecuciones que eligieron la accion optima.
+    Devuelve (recompensa_media, prop_optima, arrepentimiento): tres arrays de
+    longitud n_pasos con, en cada paso, la recompensa promediada sobre
+    ejecuciones, la proporcion de ejecuciones que eligieron la accion optima y
+    el arrepentimiento medio de ese paso, q*(a*) - q*(A_t).
     """
     rng = np.random.default_rng(semilla)
 
     # Valores reales q*(a): una fila por ejecucion, una columna por brazo.
     q_estrella = rng.standard_normal((n_ejec, k))
+    if no_estacionario:
+        # Todos los brazos arrancan iguales: lo unico que los separara es
+        # la deriva aleatoria que se les suma en cada paso.
+        q_estrella[:] = 0.0
     accion_optima = np.argmax(q_estrella, axis=1)      # (n_ejec,)
 
-    Q = np.zeros((n_ejec, k))       # estimaciones Q_t(a)
+    Q = np.full((n_ejec, k), float(q_inicial))   # estimaciones Q_t(a)
     N = np.zeros((n_ejec, k))       # veces que se ha elegido cada accion
     filas = np.arange(n_ejec)       # indices [0, 1, ..., n_ejec-1]
 
     recompensa_media = np.zeros(n_pasos)
     prop_optima = np.zeros(n_pasos)
+    arrepentimiento = np.zeros(n_pasos)
 
     for t in range(n_pasos):
+        if no_estacionario:
+            q_estrella += 0.01 * rng.standard_normal((n_ejec, k))
+            accion_optima = np.argmax(q_estrella, axis=1)
+
         if ucb_c is not None:
             # Cota superior de confianza (UCB). Un brazo nunca probado
             # (N = 0) recibe prioridad infinita para forzar que se pruebe.
@@ -446,6 +875,10 @@ def simular(k=10, n_ejec=500, n_pasos=1000, epsilon=0.0, ucb_c=None, semilla=0):
             bonus[N == 0] = np.inf
             A = np.argmax(Q + bonus, axis=1)
         else:
+            # Ojo al desempate: np.argmax devuelve SIEMPRE el indice mas
+            # bajo de los que empatan, asi que en el paso 1 (todos los Q
+            # valen lo mismo) las 500 ejecuciones tiran del brazo 0.
+            # Sutton &amp; Barto rompen los empates al azar.
             A = np.argmax(Q, axis=1)                    # accion greedy
             if epsilon &gt; 0:
                 explora = rng.random(n_ejec) &lt; epsilon
@@ -455,14 +888,17 @@ def simular(k=10, n_ejec=500, n_pasos=1000, epsilon=0.0, ucb_c=None, semilla=0):
         # Recompensa de cada ejecucion: q*(A) mas ruido gaussiano.
         R = q_estrella[filas, A] + rng.standard_normal(n_ejec)
 
-        # Media incremental: Q &lt;- Q + (1/N) (R - Q).
+        # Media incremental: Q &lt;- Q + paso (R - Q), con paso = 1/N o alpha.
         N[filas, A] += 1
-        Q[filas, A] += (R - Q[filas, A]) / N[filas, A]
+        paso = alpha if alpha is not None else 1.0 / N[filas, A]
+        Q[filas, A] += paso * (R - Q[filas, A])
 
         recompensa_media[t] = R.mean()
         prop_optima[t] = np.mean(A == accion_optima)
+        arrepentimiento[t] = np.mean(q_estrella[filas, accion_optima]
+                                     - q_estrella[filas, A])
 
-    return recompensa_media, prop_optima
+    return recompensa_media, prop_optima, arrepentimiento
 
 
 # --- Comparamos las cuatro estrategias ---
@@ -474,13 +910,25 @@ estrategias = {
 }
 
 resultados = {}
-print(f"{'Estrategia':20s} {'recomp. media':&gt;14s} {'% optima':&gt;10s}")
-print("-" * 46)
+print(f"{'Estrategia':20s} {'recomp. media':&gt;14s} {'% optima':&gt;10s} {'arrepent.':&gt;11s}")
+print("-" * 58)
 for nombre, kwargs in estrategias.items():
-    rec, opt = simular(**kwargs)
+    rec, opt, arr = simular(**kwargs)
     resultados[nombre] = (rec, opt)
-    # Promedios sobre los ultimos 100 pasos (comportamiento ya asentado).
-    print(f"{nombre:20s} {rec[-100:].mean():14.3f} {100 * opt[-100:].mean():9.1f}%")
+    # Promedios sobre los ultimos 100 pasos (comportamiento ya asentado);
+    # el arrepentimiento, en cambio, es acumulado sobre los 1000 pasos.
+    print(f"{nombre:20s} {rec[-100:].mean():14.3f} {100 * opt[-100:].mean():9.1f}%"
+          f" {arr.sum():11.1f}")
+
+# --- Explorar sin azar: valores iniciales optimistas (paso constante) ---
+print("\nValores iniciales optimistas (paso constante alpha = 0.1)")
+for nombre, kwargs in {
+    "Q1=5, greedy      ": dict(q_inicial=5.0, epsilon=0.0, alpha=0.1),
+    "Q1=0, e-greedy 0.1": dict(q_inicial=0.0, epsilon=0.1, alpha=0.1),
+}.items():
+    _, opt, _ = simular(**kwargs)
+    print(f"  {nombre}: {100 * opt[:100].mean():4.1f}% optimas en los 100 primeros"
+          f" pasos, {100 * opt[-100:].mean():4.1f}% en los 100 ultimos")
 
 # --- Dos graficas: recompensa media y % de accion optima ---
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.4))
@@ -511,18 +959,76 @@ plt.show()
           y numpy). Verás dos curvas muy elocuentes. En la de <em>acción óptima</em>, la política
           <em>greedy</em> se estanca pronto muy por debajo del resto: se ha atascado. El
           <em>ε-greedy</em> con $\varepsilon=0{,}1$ sube rápido pero hace techo (ese $10\%$ de
-          tiradas al azar le impide explotar del todo). El de $\varepsilon=0{,}01$ arranca más
-          lento pero termina más arriba, y a largo plazo acabaría superando al de $0{,}1$. Y
-          <em>UCB</em> suele ser el mejor de los cuatro en esta ventana de mil pasos.
+          tiradas al azar le impide explotar del todo). Y <em>UCB</em> es el mejor de los cuatro en
+          esta ventana de mil pasos.
+        </p>
+        <p>
+          El de $\varepsilon = 0{,}01$ arranca mucho más lento y a los 1000 pasos <em>todavía va
+          por detrás</em>: un $64{,}2\%$ de acciones óptimas frente al $81{,}2\%$ del de $0{,}1$
+          (lo tienes en la tabla de aquí abajo). Explorando solo una de cada cien tiradas tarda
+          unas diez veces más en descubrir cuál es el mejor brazo. Pero su techo es más alto y
+          acaba adelantando: si alargas el experimento a 20.000 pasos, las dos curvas se cruzan
+          hacia el paso 10.000 y al final el de $0{,}01$ va por el $90{,}8\%$ frente al
+          $88{,}6\%$ del de $0{,}1$. Eso sí, para <em>ver</em> el cruce hay que subir mucho el
+          <code>n_ejec</code>: con 500 ejecuciones las dos curvas se solapan tanto en esa zona que
+          el punto de corte baila varios miles de pasos según la semilla. Las cifras de arriba están
+          medidas con 20.000 ejecuciones. La moraleja no es «este $\varepsilon$ es mejor», sino que
+          $\varepsilon$ se elige <strong>según cuántas tiradas vayas a tener</strong>: con
+          presupuesto corto, explora más; con presupuesto largo, explora poco.
         </p>
 
         <div class="callout intuition">
           <div class="callout-title">🧪 Experimenta</div>
           <p>
             Cambia $\varepsilon = 0{,}1$ por $\varepsilon = 0{,}4$: explorará tantísimo que la
-            recompensa media <em>bajará</em> —explorar de más también cuesta—. Prueba luego a subir
-            la $c$ de UCB de $2$ a $4$ y observa cómo explora aún más al principio. Jugar con estos
-            mandos es aprender a <em>dosificar</em> la exploración.
+            recompensa media <em>baja</em> de $1{,}368$ a $0{,}917$ y el arrepentimiento se
+            dispara de $237$ a $638$. Explorar de más también cuesta, y cuesta caro.
+          </p>
+          <p>
+            Prueba luego a subir la $c$ de UCB de $2$ a $4$. Verás que en los 100 primeros pasos la
+            recompensa media <em>cae</em> de $0{,}948$ a $0{,}580$ —está explorando mucho más— y
+            que, contra lo que uno esperaría, tampoco lo recupera después: acaba en $1{,}369$ y un
+            $71{,}7\%$ de acciones óptimas, por debajo del $1{,}498$ y el $86{,}5\%$ de $c=2$. En
+            mil pasos no le da tiempo a amortizar tanta curiosidad. Jugar con estos mandos es
+            aprender a <em>dosificar</em> la exploración.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta: un mundo que se mueve</div>
+          <p>
+            Todo lo anterior ha sido en un mundo <strong>estacionario</strong>, donde el paso
+            $1/n$ es el rey. Vamos a comprobar lo que decíamos en
+            <a href="#paso-constante">«Paso constante»</a>: que cuando el mundo cambia, no
+            converger es una <em>ventaja</em>. La bandera <code>no_estacionario=True</code> hace
+            arrancar los diez brazos <strong>iguales</strong> y luego les añade un paseo aleatorio
+            de desviación $0{,}01$ en cada paso. Lanza estas dos llamadas y compara:
+          </p>
+          <p>
+            <code>simular(epsilon=0.1, alpha=None, n_pasos=10000, no_estacionario=True)</code><br />
+            <code>simular(epsilon=0.1, alpha=0.1,  n_pasos=10000, no_estacionario=True)</code>
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Paso</th><th>Recompensa media (últimos 100)</th><th>% de acción óptima (últimos 100)</th></tr></thead>
+              <tbody>
+                <tr><td>$1/n$ (media muestral)</td><td>$1{,}112$</td><td>$45{,}2\%$</td></tr>
+                <tr><td>$\alpha = 0{,}1$ (constante)</td><td>$\mathbf{1{,}348}$</td><td>$\mathbf{75{,}2\%}$</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Treinta puntos de diferencia. La media muestral se ha vuelto tan pesada que ya casi no
+            reacciona: sigue creyendo lo que aprendió hace ocho mil tiradas. El paso constante
+            olvida, y por eso acierta. <strong>Esa es la razón de que en el resto del manual el
+            paso sea casi siempre constante</strong>: en cuanto hay una política que va cambiando,
+            el mundo que ve el agente deja de ser estacionario.
+          </p>
+          <p>
+            Un detalle de implementación que parece menor y decide el experimento: la acción óptima
+            se recalcula <em>dentro</em> del bucle. Si la calculas una sola vez al principio, como
+            en el caso estacionario, estarías midiendo el acierto contra el óptimo de hace diez mil
+            pasos.
           </p>
         </div>
 
@@ -541,12 +1047,16 @@ plt.show()
 
 <span class="comment"># 3) ejecuta el ejemplo (abre una ventana con las dos gráficas)</span>
 <span class="prompt">$</span> python code/02-bandido-multibrazo/bandidos.py
-<span class="comment">Estrategia            recomp. media   % optima
-----------------------------------------------
-greedy (e=0)                  1.063      39.4%
-e-greedy (e=0.01)             1.320      64.2%
-e-greedy (e=0.1)              1.368      81.2%
-UCB (c=2)                     1.498      86.5%</span></pre>
+<span class="comment">Estrategia            recomp. media   % optima   arrepent.
+----------------------------------------------------------
+greedy (e=0)                  1.063      39.4%       494.1
+e-greedy (e=0.01)             1.320      64.2%       347.9
+e-greedy (e=0.1)              1.368      81.2%       236.9
+UCB (c=2)                     1.498      86.5%       150.5
+
+Valores iniciales optimistas (paso constante alpha = 0.1)
+  Q1=5, greedy      : 18.9% optimas en los 100 primeros pasos, 88.2% en los 100 ultimos
+  Q1=0, e-greedy 0.1: 38.6% optimas en los 100 primeros pasos, 78.3% en los 100 ultimos</span></pre>
         </div>
         <p class="pyodide-banner">
           💡 Como fijamos la semilla con <code>np.random.default_rng(0)</code>, obtendrás estos
@@ -557,12 +1067,13 @@ UCB (c=2)                     1.498      86.5%</span></pre>
         <h2 id="comparativa">Resumen de las estrategias</h2>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Estrategia</th><th>Cómo explora</th><th>Ventaja</th><th>Inconveniente</th></tr></thead>
+            <thead><tr><th>Estrategia</th><th>Cómo explora</th><th>Arrepentimiento a 1000 pasos</th><th>Ventaja</th><th>Inconveniente</th></tr></thead>
             <tbody>
-              <tr><td><em>greedy</em></td><td>No explora</td><td>Simplísima</td><td>Se atasca en un brazo subóptimo</td></tr>
-              <tr><td><em>ε-greedy</em> ($0{,}1$)</td><td>Al azar, mucho</td><td>Aprende rápido</td><td>Hace techo: sigue explorando de más</td></tr>
-              <tr><td><em>ε-greedy</em> ($0{,}01$)</td><td>Al azar, poco</td><td>Mejor a largo plazo</td><td>Lento al principio</td></tr>
-              <tr><td><em>UCB</em> ($c=2$)</td><td>Dirigida por incertidumbre</td><td>Muy eficiente aquí</td><td>Más difícil de extender a RL con estados</td></tr>
+              <tr><td><em>greedy</em></td><td>No explora</td><td>$494$</td><td>Simplísima</td><td>Se atasca en un brazo subóptimo</td></tr>
+              <tr><td><em>ε-greedy</em> ($0{,}1$)</td><td>Al azar, mucho</td><td>$237$</td><td>Aprende rápido</td><td>Hace techo: sigue explorando de más</td></tr>
+              <tr><td><em>ε-greedy</em> ($0{,}01$)</td><td>Al azar, poco</td><td>$348$</td><td>Mejor a largo plazo</td><td>Muy lento al principio</td></tr>
+              <tr><td>$Q_1$ optimista</td><td>Por decepción</td><td>$242$ (la mitad, en los 100 primeros pasos)</td><td>Explora sin azar y acaba muy arriba ($88{,}2\%$)</td><td>Solo sirve al arrancar, y exige paso constante</td></tr>
+              <tr><td><em>UCB</em> ($c=2$)</td><td>Dirigida por incertidumbre</td><td>$151$</td><td>Muy eficiente aquí; arrepentimiento $O(\ln T)$</td><td>Más difícil de extender a RL con estados</td></tr>
             </tbody>
           </table>
         </div>
@@ -577,12 +1088,42 @@ UCB (c=2)                     1.498      86.5%</span></pre>
             <li>La <strong>media incremental</strong> $Q_{n+1} = Q_n + \tfrac{1}{n}(R_n - Q_n)$
             actualiza sin guardar el historial. Con paso constante $\alpha$ se adapta a entornos
             <strong>no estacionarios</strong>.</li>
-            <li><strong>greedy</strong> se atasca; <strong>ε-greedy</strong> explora al azar;
-            <strong>UCB</strong> explora con criterio, siendo optimista ante la incertidumbre.</li>
+            <li><strong>greedy</strong> se atasca; <strong>ε-greedy</strong> explora al azar; los
+            <strong>valores iniciales optimistas</strong> exploran por decepción, sin azar;
+            <strong>UCB</strong> explora con criterio, siendo optimista ante la incertidumbre; y
+            <strong>Thompson</strong> explora muestreando de lo que cree.</li>
+            <li>El <strong>arrepentimiento</strong> $L_T = \sum_a \Delta_a N_T(a)$ pone número a
+            todo esto: no mide lo que te llevas, sino lo que has dejado de llevarte. Un buen
+            algoritmo no es el que explora poco, sino el que explora <strong>barato</strong>.</li>
             <li>El patrón <em>estimación ← estimación + paso · (objetivo − estimación)</em> es la
             columna vertebral de casi todo lo que viene.</li>
           </ul>
         </div>
+
+        <h2 id="hacia-los-mdp">Un puente hacia el capítulo 3</h2>
+        <p>
+          Antes de irnos, dos apuntes que te ahorrarán confusiones dentro de un capítulo.
+        </p>
+        <p>
+          <strong>El bandido es un MDP de un solo estado.</strong> Cuando en el
+          <a href="03-mdp.html#del-bandido">capítulo 3</a> aparezca $q_*(s, a)$ —el valor de hacer
+          $a$ <em>estando en</em> $s$— no estarás aprendiendo un objeto nuevo: la $q_*(a)$ de este
+          capítulo es literalmente $q_*(s_0, a)$ con un único estado $s_0$ que nunca cambia. Por
+          eso aquí podíamos escribir $\mathbb{E}[R_t \mid A_t = a]$ sin mencionar ningún estado, y
+          por eso también escribimos $R_t$ y no $R_{t+1}$: sin estados no hay «paso siguiente» al
+          que llevarle la cuenta. Es la misma recompensa, medida con otro reloj.
+        </p>
+        <p>
+          <strong>Y hay un escalón intermedio entre los dos capítulos</strong>, que conviene
+          conocer aunque no lo desarrollemos: el <strong>bandido contextual</strong>. En cada
+          tirada ves un <em>contexto</em> —el usuario que acaba de entrar en la web, la hora del
+          día, el historial clínico del paciente— y eliges un brazo teniendo en cuenta ese
+          contexto. Hay estados, pero <strong>no hay consecuencias</strong>: el contexto de la
+          tirada siguiente te lo da el mundo, tu acción no lo decide. Así funcionan de verdad
+          buena parte de los recomendadores y de la publicidad en línea. En cuanto tu acción
+          empieza a decidir en qué situación te encontrarás mañana, el escalón se acaba y estás en
+          un MDP.
+        </p>
 
         <p>
           Hasta aquí, un mundo de un solo estado. En el <a href="03-mdp.html">capítulo 3</a> damos

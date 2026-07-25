@@ -80,11 +80,13 @@ def construir_modelo():
 def evaluar_politica(politica, P, R, gamma, theta=1e-8):
     """Evaluación iterativa de política: barre la ecuación de Bellman de
     esperanza hasta que V deja de cambiar. `politica` es un vector de índices
-    de acción (uno por estado). Devuelve V^pi.
+    de acción (uno por estado). Devuelve (V^pi, nº de barridos gastados).
     """
     nS = len(politica)
     V = np.zeros(nS)
+    barridos = 0
     while True:
+        barridos += 1
         delta = 0.0
         for s in range(nS):
             a = politica[s]
@@ -93,7 +95,7 @@ def evaluar_politica(politica, P, R, gamma, theta=1e-8):
             V[s] = v_nuevo
         if delta < theta:
             break
-    return V
+    return V, barridos
 
 
 def valores_de_accion(V, P, R, gamma):
@@ -114,17 +116,21 @@ def mejorar_politica(V, P, R, gamma):
 
 def iteracion_de_politica(P, R, gamma, politica0=None):
     """Iteración de política (GPI): evaluar V^pi y luego volverse greedy,
-    repetido hasta que la política ya no cambia. Devuelve (politica, V, iteraciones).
+    repetido hasta que la política ya no cambia. Contamos también los barridos
+    de evaluación que se gastan por el camino, que es el coste real.
+    Devuelve (politica, V, iteraciones, barridos_totales).
     """
     nS, nA = R.shape
     politica = np.zeros(nS, dtype=int) if politica0 is None else politica0.copy()
     iteraciones = 0
+    barridos_totales = 0
     while True:
         iteraciones += 1
-        V = evaluar_politica(politica, P, R, gamma)
+        V, barridos = evaluar_politica(politica, P, R, gamma)
+        barridos_totales += barridos
         nueva, _ = mejorar_politica(V, P, R, gamma)
         if np.array_equal(nueva, politica):
-            return politica, V, iteraciones
+            return politica, V, iteraciones, barridos_totales
         politica = nueva
 
 
@@ -207,9 +213,6 @@ def dibujar(idx, V, politica, terminal):
 
 
 # --- Programa principal: resolvemos el gridworld de las dos formas ------------
-# (Sin bloque `if __name__ == "__main__"` a propósito, para que este mismo código
-#  se ejecute tal cual en el navegador con Pyodide, que lo corre en un espacio de
-#  nombres nuevo donde __name__ no vale "__main__".)
 estados, idx, P, R, terminal = construir_modelo()
 n_no_term = int((~terminal).sum())
 print(f"Gridworld {FILAS}x{COLS}: {len(estados)} estados "
@@ -218,7 +221,7 @@ print(f"Gridworld {FILAS}x{COLS}: {len(estados)} estados "
 # (1) EVALUACIÓN DE POLÍTICA sobre una política fija y mediocre: "ir siempre
 # a la derecha". Se queda atascada contra la pared este y acumula costes.
 pol_derecha = np.full(len(estados), 1, dtype=int)  # 1 = derecha
-V_derecha = evaluar_politica(pol_derecha, P, R, GAMMA)
+V_derecha, _ = evaluar_politica(pol_derecha, P, R, GAMMA)
 inicio = (2, 0)
 print(f"\nEvaluación de 'siempre derecha': V del inicio {inicio} = "
       f"{V_derecha[idx[inicio]]:.2f}  (se atasca y suma -1 sin fin)")
@@ -227,9 +230,9 @@ print(f"\nEvaluación de 'siempre derecha': V del inicio {inicio} = "
 # ver que converge igual (semilla fija para reproducibilidad).
 rng = np.random.default_rng(0)
 pol_inicial = rng.integers(0, len(ACCIONES), size=len(estados))
-pol_pi, V_pi, iters_pi = iteracion_de_politica(P, R, GAMMA, pol_inicial)
+pol_pi, V_pi, iters_pi, barridos_pi = iteracion_de_politica(P, R, GAMMA, pol_inicial)
 print(f"\nIteración de política: convergió en {iters_pi} iteraciones "
-      f"(evaluar + mejorar).")
+      f"= {barridos_pi} barridos de evaluación en total.")
 print(politica_a_texto(idx, pol_pi, terminal))
 
 # (3) ITERACIÓN DE VALOR.

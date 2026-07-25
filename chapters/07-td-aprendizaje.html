@@ -107,6 +107,63 @@
             modelo (como MC) y no espera al final (como DP).</li>
         </ul>
 
+        <p>
+          Puestos uno al lado del otro, los tres métodos se distinguen en seis cosas:
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th></th><th>Programación dinámica</th><th>Monte Carlo</th><th>TD(0)</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>¿Necesita modelo?</strong></td>
+                <td>Sí: la $p(s',r \mid s,a)$ entera</td>
+                <td>No: solo experiencia</td>
+                <td>No: solo experiencia</td>
+              </tr>
+              <tr>
+                <td><strong>¿Cómo trata el futuro?</strong></td>
+                <td>Esperanza exacta sobre <em>todas</em> las transiciones posibles</td>
+                <td>Una muestra completa, hasta el final del episodio</td>
+                <td>Una muestra de <em>un</em> paso, y el resto estimado</td>
+              </tr>
+              <tr>
+                <td><strong>¿Hace bootstrapping?</strong></td>
+                <td>Sí</td>
+                <td>No</td>
+                <td>Sí</td>
+              </tr>
+              <tr>
+                <td><strong>¿Cuándo actualiza?</strong></td>
+                <td>En barridos, sin necesidad de actuar</td>
+                <td>Al terminar el episodio</td>
+                <td>En cada paso, en línea</td>
+              </tr>
+              <tr>
+                <td><strong>¿Sirve en tareas continuas?</strong></td>
+                <td>Sí</td>
+                <td>No: necesita un final</td>
+                <td>Sí</td>
+              </tr>
+              <tr>
+                <td><strong>Sesgo y varianza</strong></td>
+                <td>Sin ruido de muestreo… porque no muestrea nada</td>
+                <td>Insesgado, varianza alta</td>
+                <td>Sesgado, varianza baja</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Lee la tabla por columnas y verás que TD(0) no es un método a medio camino: es el que
+          <strong>se queda con la casilla buena de cada vecino</strong> —la independencia del modelo de Monte
+          Carlo y el bootstrapping de la programación dinámica— y solo paga un precio, el sesgo de la última
+          fila. Ese precio es el tema del resto del capítulo.
+        </p>
+
         <h2 id="error-td">El error TD y la actualización TD(0)</h2>
         <p>
           Estamos en el estado $S_t$ con una estimación actual $V(S_t)$. Damos <strong>un</strong> paso,
@@ -162,6 +219,31 @@
           </p>
         </div>
 
+        <p>
+          Y hay algo más fuerte que un parecido de familia entre las dos reglas. El error que usa Monte
+          Carlo <em>es</em>, exactamente, la suma descontada de los errores TD de todo el episodio. Merece
+          la pena hacer la cuenta, porque es la identidad más reutilizada del manual:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Un mismo error, mirado a dos escalas</div>
+          <p>Partimos de la definición recursiva del retorno, $G_t = R_{t+1} + \gamma\,G_{t+1}$, y sumamos y restamos $\gamma\,V(S_{t+1})$:</p>
+          <p>$$G_t - V(S_t) = \underbrace{R_{t+1} + \gamma V(S_{t+1}) - V(S_t)}_{\textstyle \delta_t} \;+\; \gamma\,\bigl[\,G_{t+1} - V(S_{t+1})\,\bigr]$$</p>
+          <p>El corchete de la derecha es el mismo objeto que teníamos a la izquierda, un paso más adelante. Repitiendo hasta el final del episodio (donde $G_T = 0$ y $V(S_T) = 0$, y por tanto el corchete se anula):</p>
+          <p>$$G_t - V(S_t) \;=\; \sum_{k=0}^{T-t-1} \gamma^{\,k}\,\delta_{t+k}$$</p>
+          <p class="math-note">
+            Léela en los dos sentidos. De izquierda a derecha: <strong>Monte Carlo y TD no usan señales
+            distintas, usan la misma señal a distinta escala</strong>; el error de MC es el paquete entero y
+            el error TD es cada plazo por separado. De derecha a izquierda: si acumulas todos los $\delta$ de
+            un episodio y los aplicas de golpe, has hecho Monte Carlo. La letra pequeña: la igualdad exige que
+            $V$ <em>no cambie</em> durante el episodio (el caso <em>offline</em>); si actualizas sobre la
+            marcha, la diferencia es de orden $\alpha$ y en la práctica se desprecia. Esta identidad es la
+            pieza que sostiene las trazas de elegibilidad del capítulo
+            <a href="10-td-lambda.html">10</a> y la fórmula de GAE del capítulo
+            <a href="15-actor-critico.html">15</a>; cuando llegues allí, reconócela.
+          </p>
+        </div>
+
         <div class="callout warn">
           <div class="callout-title">⚠️ Sesgo frente a varianza</div>
           <p>
@@ -175,6 +257,12 @@
             que aún es una estimación imperfecta. En la práctica, esa reducción de varianza suele ganar la
             partida: TD tiende a aprender <em>más rápido y de forma más estable</em>, como comprobarás
             en el ejemplo de más abajo.
+          </p>
+          <p>
+            Cuidado con quedarse solo con eso, porque la diferencia entre TD y MC <strong>no es únicamente
+            de velocidad</strong>: con datos finitos los dos convergen a respuestas <em>distintas</em>. Lo
+            veremos con números en <a href="#a-que-converge">el experimento de los ocho episodios</a>, al
+            final del capítulo.
           </p>
         </div>
 
@@ -201,6 +289,28 @@
           </li>
         </ol>
 
+        <div class="callout intuition">
+          <div class="callout-title">🧠 El cero del terminal no es un detalle de implementación</div>
+          <p>
+            Vuelve al primer punto: $V(\text{terminal}) = 0$, y además nunca se actualiza. Parece burocracia
+            y es la pieza que sostiene todo lo demás. En el último paso de un episodio, $S_{t+1}$ es
+            terminal, así que el objetivo TD se reduce a $R_{t+1} + \gamma\cdot 0 = R_{t+1}$: la única cifra
+            <strong>real</strong>, sin estimaciones dentro, que entra en todo el proceso. Ahí es donde la
+            cadena del bootstrapping toca suelo. Si dejaras que el terminal tuviera un valor distinto de
+            cero, estarías inventando un futuro después del final, y ese invento se propagaría hacia atrás
+            episodio tras episodio contaminando toda la tabla.
+          </p>
+          <p>
+            En este capítulo la condición está implícita (los terminales ocupan las posiciones $0$ y $6$ del
+            vector <code>V</code>, valen $0$ y el bucle nunca los actualiza), pero a partir del siguiente la
+            verás escrita a mano y con tres grafías distintas: <code>(0.0 if fin else 1.0)</code>
+            multiplicando el término del futuro en los capítulos <a href="08-sarsa.html">8</a> y
+            <a href="09-q-learning.html">9</a>, y <code>(1.0 - term)</code> en el
+            <a href="12-dqn.html">12</a>. Son la misma idea: <em>si el episodio ha terminado, no hay futuro
+            que estimar</em>.
+          </p>
+        </div>
+
         <div class="callout key">
           <div class="callout-title">🔑 Aprendizaje en línea</div>
           <p>
@@ -208,6 +318,28 @@
             terminar el episodio. TD es un método <em>en línea</em> (<em>online</em>): puede aprender de
             entornos que nunca terminan (tareas continuas), donde Monte Carlo, que necesita un final,
             no es aplicable.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 ¿Y esto converge?</div>
+          <p>
+            Sí, y se sabe exactamente bajo qué condiciones. Con la política fija, todos los estados
+            visitados infinitas veces y una tasa de aprendizaje que cumpla las dos condiciones de
+            <strong>Robbins-Monro</strong>, TD(0) converge a $V_\pi$ con probabilidad 1:
+          </p>
+          <p>$$\sum_{n=1}^{\infty}\alpha_n = \infty, \qquad \sum_{n=1}^{\infty}\alpha_n^2 &lt; \infty$$</p>
+          <p>
+            La primera dice que los pasos deben sumar lo bastante como para llegar a cualquier parte, por
+            lejos que empieces. La segunda, que deben menguar lo bastante deprisa como para que el ruido
+            acabe promediándose y la estimación se pose. La media incremental $\alpha_n = 1/n$ del
+            <a href="02-bandido-multibrazo.html#paso-constante">capítulo 2</a> cumple las dos. Un $\alpha$
+            <strong>constante</strong>, como el que usamos aquí y en casi todo el manual, cumple la primera y
+            no la segunda: por eso $V$ nunca se queda quieta del todo, sigue rebotando alrededor de la
+            respuesta. Ese rebote es justo el suelo de error que verás en las curvas de más abajo, y se paga
+            a cambio de algo que en RL suele importar más que la convergencia exacta: no dejar nunca de
+            adaptarse. Las mismas dos condiciones reaparecerán con el
+            <a href="09-q-learning.html">Q-Learning</a>.
           </p>
         </div>
 
@@ -273,6 +405,66 @@
           </p>
         </div>
 
+        <h3>El primer episodio, a mano</h3>
+        <p>
+          Antes de mirar ninguna línea de código, hagamos juntos el primer episodio con lápiz y papel: así
+          reconocerás la fila <code>ep=1</code> de la salida en cuanto aparezca. Partimos de $V = 0{,}5$ en los cinco
+          estados interiores y $0$ en los dos terminales, con $\alpha = 0{,}1$ y $\gamma = 1$. Con la semilla
+          del script, el paseo sale así:
+        </p>
+        <p style="text-align:center; font-size:1.15rem; color:var(--accent-text); font-weight:600;">
+          C → B → C → D → E → D → C → B → A → fin izquierdo
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Pasos</th><th>Transiciones</th><th>Error TD $\delta_t$</th><th>Qué cambia</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>1 a 8</td>
+                <td>C→B, B→C, C→D, D→E, E→D, D→C, C→B, B→A</td>
+                <td>$0 + 1\cdot 0{,}5 - 0{,}5 = 0$</td>
+                <td>nada</td>
+              </tr>
+              <tr>
+                <td>9</td>
+                <td>A → fin izquierdo</td>
+                <td>$0 + 1\cdot 0 - 0{,}5 = -0{,}5$</td>
+                <td>$V(A) \leftarrow 0{,}5 + 0{,}1\cdot(-0{,}5) = \mathbf{0{,}45}$</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Nueve pasos de paseo y un solo número movido. Los ocho primeros errores TD valen <em>exactamente</em>
+          cero, y no por casualidad: todas las recompensas del interior son $0$ y todos los estados interiores
+          valen todavía lo mismo, $0{,}5$, así que el objetivo TD coincide con la estimación vieja. Solo el
+          último paso trae información nueva, porque el terminal vale $0$ y no $0{,}5$.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 TD solo aprende donde hay sorpresa</div>
+          <p>
+            Y en este paseo la primera sorpresa solo puede aparecer pegada a un estado terminal, que es el
+            único sitio por donde entra un número <em>real</em> en lugar de una estimación. A partir de ahí, la información va
+            filtrándose hacia atrás un estado por episodio (más o menos): por eso la fila <code>ep=10</code>
+            ya tiene los cinco valores movidos, y la <code>ep=100</code> está casi pegada a la verdad.
+          </p>
+        </div>
+
+        <p>
+          Compáralo con lo que habría hecho Monte Carlo con ese mismo episodio y ese mismo
+          $\alpha = 0{,}1$ (el script usa $\alpha$ más pequeños para MC, $0{,}04$ / $0{,}02$ / $0{,}01$, por
+          las razones que veremos luego; aquí igualamos el paso solo para poder comparar). Como el episodio
+          terminó por la izquierda, $G_t = 0$ para todos sus estados, y MC empuja hacia abajo <em>los cinco</em>:
+          $V(A) = 0{,}450$, $V(B) = 0{,}405$, $V(C) = 0{,}365$, $V(D) = 0{,}405$, $V(E) = 0{,}450$. Mira ese
+          último: el valor verdadero de E es $0{,}833$, el más alto del pasillo, y Monte Carlo acaba de
+          bajarlo hasta $0{,}450$ <em>solo</em> porque el paseo, que pasó una vez por E, acabó saliendo por
+          el lado contrario. Eso es la varianza de Monte Carlo, en un número.
+        </p>
+
+        <h3>Y ahora, los cien episodios</h3>
         <p>
           El código de abajo hace dos cosas. Primero, deja correr TD(0) y guarda una «foto» de sus valores
           estimados tras 0, 1, 10 y 100 episodios, para ver cómo se aproximan a la verdad. Segundo, promedia
@@ -480,17 +672,40 @@ if __name__ == "__main__":
           se va curvando hasta pegarse a la línea de valores verdaderos. En la derecha, las curvas
           <strong>azules</strong> (TD) caen antes y se estabilizan más bajo que las <strong>rojas</strong>
           (Monte Carlo): con el mismo esfuerzo, TD estima mejor. Es la reducción de varianza del bootstrapping
-          en acción. Fíjate también en que un $\alpha$ grande aprende rápido pero se queda con más ruido
-          residual, mientras que uno pequeño converge más lento pero más fino.
+          en acción.
+        </p>
+        <p>
+          Fíjate ahora en el papel de $\alpha$, que tiene dos caras y ambas se ven en las curvas. Con
+          $\alpha$ grande el error cae en picado los primeros episodios pero se estanca antes, en un suelo
+          de ruido más alto. Con $\alpha$ pequeño el suelo final es más bajo… <em>si le das tiempo</em>.
+          Compruébalo en los números que imprime el programa: para TD la cosa es limpia y monótona
+          ($0{,}072$ con $\alpha = 0{,}15$; $0{,}057$ con $0{,}10$; $0{,}036$ con $0{,}05$), pero para Monte
+          Carlo el mejor <strong>no</strong> es el más pequeño: $\alpha = 0{,}02$ da $0{,}088$ mientras que
+          $\alpha = 0{,}01$ se queda en $0{,}101$. ¿Por qué? Porque a los 100 episodios $\alpha = 0{,}01$
+          todavía no ha terminado de salir de la inicialización en $0{,}5$: su problema no es el ruido, es la
+          inercia. La lección: «$\alpha$ pequeño es más fino» solo vale <em>en el límite</em>; a horizonte
+          finito hay un $\alpha$ óptimo intermedio. Y fíjate en que TD y MC ni siquiera comparten los rangos
+          de $\alpha$: a MC le van valores mucho más pequeños, precisamente porque su objetivo tiene mucha
+          más varianza.
         </p>
 
         <div class="callout intuition">
           <div class="callout-title">🧪 Experimenta</div>
           <p>
             Cambia la inicialización de $V$ en <code>valores_iniciales</code> de $0{,}5$ a $0$ y vuelve a
-            ejecutar. ¿Qué le pasa a las primeras estimaciones? (Pista: $0{,}5$ es el valor verdadero de C
-            y una media razonable, así que ayuda mucho al principio.) Prueba también a subir $\alpha$ de TD
-            a $0{,}5$: ganarás velocidad inicial a costa de una curva de error mucho más ruidosa.
+            ejecutar. La ayuda que nos estábamos dando era mayor de lo que parece: el error RMS tras el
+            primer episodio salta de $0{,}22$ a $0{,}54$, en el episodio 10 va por $0{,}43$ en vez de
+            $0{,}13$ y a los 100 episodios <em>todavía</em> no ha alcanzado del todo a la otra curva
+            ($0{,}066$ frente a $0{,}057$). Y es que $0{,}5$ no es un número neutro: es el valor verdadero
+            de C y la media exacta de los cinco.
+          </p>
+          <p>
+            Prueba también a subir el $\alpha$ de TD de $0{,}10$ a $0{,}50$, y fíjate en que lo que ganas
+            no es lo que promete la intuición. La ventaja inicial es pequeña y dura poquísimo (error
+            $0{,}19$ tras el primer episodio frente a $0{,}22$; en el episodio 10 ya va perdiendo,
+            $0{,}14$ frente a $0{,}13$), mientras que el suelo final se queda en $0{,}16$ en lugar de
+            $0{,}057$. Un paso demasiado grande no cambia la dirección del aprendizaje: cambia el tamaño
+            del charco alrededor de la respuesta en el que la estimación se queda chapoteando.
           </p>
         </div>
 
@@ -509,14 +724,120 @@ if __name__ == "__main__":
 
 <span class="comment"># 3) ejecuta el ejemplo</span>
 <span class="prompt">$</span> python code/07-td-aprendizaje/td_random_walk.py
-<span class="comment"># Imprime los valores estimados por TD y el error RMS final,
-# y abre una ventana con las dos gráficas.</span></pre>
+<span class="comment">Valores estimados por TD(0) (alpha=0.1) frente a los verdaderos:
+   estado         A      B      C      D      E
+   verdad     0.167  0.333  0.500  0.667  0.833
+   ep=0       0.500  0.500  0.500  0.500  0.500
+   ep=1       0.450  0.500  0.500  0.500  0.500
+   ep=10      0.292  0.433  0.494  0.542  0.640
+   ep=100     0.092  0.257  0.441  0.591  0.797
+
+Error RMS final (media de 100 tiradas, 100 episodios):
+   TD(0)  alpha=0.15  -&gt;  RMS = 0.0716
+   TD(0)  alpha=0.10  -&gt;  RMS = 0.0567
+   TD(0)  alpha=0.05  -&gt;  RMS = 0.0357
+   MC     alpha=0.04  -&gt;  RMS = 0.1161
+   MC     alpha=0.02  -&gt;  RMS = 0.0881
+   MC     alpha=0.01  -&gt;  RMS = 0.1010</span>
+<span class="comment"># (y se abre una ventana con las dos gráficas)</span></pre>
         </div>
+        <p>
+          Dos cosas de esa salida merecen una mirada. La primera, la fila <code>ep=1</code>: tras un
+          episodio entero solo ha cambiado un número, el de A, exactamente como acabamos de calcular a mano.
+          La segunda, los errores RMS finales: el <em>peor</em> de los TD ($0{,}072$) sigue siendo mejor que
+          el <em>mejor</em> de los MC ($0{,}088$), y eso que a Monte Carlo le hemos dado los $\alpha$ que más
+          le convienen.
+        </p>
         <p class="pyodide-banner">
           💡 Este ejemplo usa solo <code>numpy</code> y <code>matplotlib</code>, así que corre entero en el
           navegador con <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>. A partir del
           capítulo 12, los ejemplos con <code>torch</code> o <code>gymnasium</code> serán solo de terminal.
         </p>
+
+        <h2 id="a-que-converge">¿Y a qué converge TD? El experimento de los ocho episodios</h2>
+        <p>
+          Hemos repetido que TD aprende «más rápido». Pero hay una pregunta anterior, y más interesante,
+          que casi nunca se hace: si a TD y a Monte Carlo les damos <em>exactamente los mismos</em> datos y
+          les dejamos exprimirlos hasta el final, ¿acaban los dos en el mismo sitio? La respuesta es
+          <strong>no</strong>, y entender por qué es entender qué está haciendo el bootstrapping por dentro.
+        </p>
+        <p>
+          Sutton y Barto lo enseñan con un lote minúsculo: un mundo de dos estados, $A$ y $B$, con
+          $\gamma = 1$, y ocho episodios ya registrados. Esto es <em>todo</em> lo que hemos observado:
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Episodios</th><th>Lo que se observó</th><th>Retorno desde el primer estado</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td>$A$, recompensa $0$ → $B$, recompensa $0$ → fin</td><td>$0$</td></tr>
+              <tr><td>2 a 7 (seis veces)</td><td>$B$, recompensa $1$ → fin</td><td>$1$</td></tr>
+              <tr><td>8</td><td>$B$, recompensa $0$ → fin</td><td>$0$</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Sobre $V(B)$ no hay discusión: $B$ se ha visitado ocho veces y en seis de ellas se cobró un $1$,
+          así que los dos métodos responden $V(B) = 6/8 = 0{,}75$. La pregunta buena es
+          <strong>¿cuánto vale $A$?</strong> $A$ se ha visitado una sola vez, y aquel episodio terminó con
+          retorno $0$.
+        </p>
+        <ul>
+          <li><strong>Monte Carlo responde $V(A) = 0$.</strong> Solo tiene un retorno para $A$ y ese retorno
+            fue $0$; su media es $0$. Y no es una torpeza: es exactamente la respuesta que
+            <em>minimiza el error cuadrático sobre los datos de entrenamiento</em>. Sobre lo que ya pasó,
+            nadie puede hacerlo mejor.</li>
+          <li><strong>TD responde $V(A) = 0{,}75$.</strong> Porque TD no mira el retorno, mira la
+            <em>estructura</em>: de $A$ se pasó a $B$ cobrando $0$, luego $V(A) = 0 + \gamma\,V(B) = 0{,}75$.
+            El único episodio que pasó por $A$ acabó mal, sí, pero eso ya está contado dentro del $6/8$
+            de $B$; TD se niega a castigar a $A$ dos veces por lo mismo.</li>
+        </ul>
+        <p>
+          ¿Quién tiene razón? Sobre los datos ya vistos, Monte Carlo. Sobre lo que pasará mañana, TD, casi
+          seguro. Y es que TD está haciendo, sin decirlo, algo mucho más ambicioso que promediar: está
+          <strong>construyendo el MDP más verosímil compatible con los datos</strong> —desde $A$ se va a $B$
+          el 100 % de las veces cobrando $0$; desde $B$ se cobra $1$ el 75 % de las veces— y resolviéndolo
+          como si fuera el de verdad. Eso tiene nombre: la <strong>estimación de certeza equivalente</strong>
+          (se calcula el modelo y luego se actúa con la certeza de que ese modelo es el correcto).
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ «Hasta el final» significa por lotes</div>
+          <p>
+            Esas dos respuestas son las del caso <strong>por lotes</strong> (<em>batch</em>): repasar los
+            mismos ocho episodios una y otra vez, acumulando los incrementos y aplicándolos, hasta que $V$
+            deja de moverse. Es la única forma limpia de preguntar «¿a qué respuesta apunta cada método?»
+            sin que la respuesta dependa del orden de los datos ni del tamaño del paso.
+          </p>
+          <p>
+            TD(0) <em>en línea</em> sobre ese mismo lote solo se <em>acerca</em> a $0{,}75$. Repitiendo los
+            ocho episodios hasta que $V$ deja de moverse, con $\alpha = 0{,}1$ salen
+            $V(A) = V(B) = 0{,}740$: con paso constante las últimas transiciones de cada pasada pesan un
+            poco más que las primeras, y la última de todas es el episodio que no cobró nada. Con
+            $\alpha = 0{,}01$ esa desviación se encoge a $0{,}7499$ y con $\alpha \to 0$ desaparece. La
+            igualdad exacta es la del caso por lotes; la dirección, la misma siempre.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La diferencia de fondo entre TD y MC</div>
+          <p>
+            <strong>Monte Carlo minimiza el error sobre los datos que ya viste. TD estima el modelo de
+            Markov que mejor los explica y lo resuelve.</strong> Esa es la razón profunda de que TD aprenda
+            más rápido: no se limita a promediar lo ocurrido, reutiliza cada transición para todos los
+            estados que llevan hasta ella.
+          </p>
+          <p>
+            Y viene con su letra pequeña, que conviene conocer: si el entorno <em>no</em> es realmente
+            markoviano —si el estado que le has dado al agente se deja fuera información que importa; la
+            <a href="03-mdp.html#propiedad-markov">propiedad de Markov</a> del capítulo 3—, ese modelo que
+            TD construye es el modelo equivocado, y entonces TD puede perder frente a Monte Carlo, que no
+            supone nada sobre la estructura del mundo. Es el único punto en el que el método «lento» tiene
+            ventaja, y no es un punto menor: casi siempre que un agente falla de forma inexplicable, el
+            sospechoso es el estado, no el algoritmo.
+          </p>
+        </div>
 
         <h2 id="cierre">De la predicción al control</h2>
         <p>
@@ -544,6 +865,9 @@ if __name__ == "__main__":
             <li><strong>Sesgo vs. varianza</strong>: MC es insesgado pero de alta varianza; TD es sesgado
               (por el bootstrapping) pero de baja varianza, y suele aprender más rápido, como muestra el
               paseo aleatorio.</li>
+            <li>Con datos <strong>finitos</strong>, TD y MC no convergen a la misma respuesta: MC minimiza
+              el error sobre los episodios que ya has visto; TD construye el MDP más verosímil compatible
+              con ellos y lo resuelve (<em>certeza equivalente</em>).</li>
             <li>TD(0) resuelve la <strong>predicción</strong>; en el capítulo <a href="08-sarsa.html">8</a>
               usaremos la misma idea sobre $Q(s,a)$ para el <strong>control</strong>.</li>
           </ul>

@@ -12,6 +12,9 @@ todas las piezas del capitulo:
   * VARIAS EPOCAS de SGD por lote, dividiendo el lote en MINIBATCHES.
   * Perdida total = perdida_politica(clip) + c1*perdida_valor - c2*entropia,
     con recorte de la norma del gradiente para mayor estabilidad.
+  * Los dos diagnosticos que se miran siempre al depurar un PPO: la KL
+    aproximada entre la politica vieja y la nueva, y la fraccion de
+    transiciones recortadas (el "clipfrac").
 
 Este ejemplo necesita PyTorch y Gymnasium, demasiado pesados para el navegador:
 se ejecuta en tu terminal.
@@ -21,8 +24,9 @@ Como ejecutarlo:
     python code/16-ppo/ppo_torch.py
 
 CartPole se considera "resuelto" cuando la recompensa media (= numero de pasos
-que el poste aguanta en pie) supera ~475 sobre 500 posibles. PPO suele resolverlo
-en unas decenas de miles de pasos.
+que el poste aguanta en pie) supera ~475 sobre 500 posibles. La recompensa se
+dispara en unas decenas de miles de pasos y el entorno queda resuelto en torno a
+los cien mil.
 """
 
 import numpy as np
@@ -166,6 +170,7 @@ def entrena():
 
         # ---------- 3) Optimizacion: EPOCAS x MINIBATCHES ----------
         indices = np.arange(TAM_LOTE)
+        kls, recortadas = [], []                   # diagnosticos del lote
         for _ in range(EPOCAS):
             np.random.shuffle(indices)
             for arranque in range(0, TAM_LOTE, TAM_MINIBATCH):
@@ -175,6 +180,13 @@ def entrena():
                     obs[mb], acciones[mb])
                 log_ratio = nueva_logp - logprobs[mb]
                 ratio = log_ratio.exp()            # r_t(theta)
+
+                # --- Diagnosticos (no entran en la perdida) ---
+                # (r-1) - log r es el estimador barato de KL(vieja||nueva):
+                # insesgado y, a diferencia del ingenuo -log r, nunca negativo.
+                with torch.no_grad():
+                    kls.append((((ratio - 1) - log_ratio).mean()).item())
+                    recortadas.append(((ratio - 1).abs() > CLIP_EPS).float().mean().item())
 
                 # Ventajas normalizadas por minibatch (media 0, desviacion 1).
                 mb_adv = ventajas[mb]
@@ -200,7 +212,8 @@ def entrena():
 
         media = np.mean(ventana) if ventana else float("nan")
         print(f"Iter {it:3d} | pasos {paso_global:6d} | "
-              f"recompensa media (ult. 20) = {media:6.1f}")
+              f"recompensa media (ult. 20) = {media:6.1f} | "
+              f"KL ~ {np.mean(kls):.4f} | recortadas = {100 * np.mean(recortadas):4.1f}%")
 
         if len(ventana) >= 20 and media >= OBJETIVO_RESUELTO:
             print(f"\n¡Resuelto! Recompensa media (ult. 20) = {media:.1f} "

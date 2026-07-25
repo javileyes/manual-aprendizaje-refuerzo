@@ -52,7 +52,7 @@
           <li>El <em>argmax</em> obliga a una política <strong>determinista</strong>. Hay problemas
           (juegos con faroles, entornos parcialmente observables) donde la mejor estrategia es
           <strong>estocástica</strong> a propósito.</li>
-          <li>Con acciones <strong>continuas</strong> (un volante que gira $-1.0$ a $+1.0$), el
+          <li>Con acciones <strong>continuas</strong> (un volante que gira de $-1{,}0$ a $+1{,}0$), el
           $\max_a Q(s,a)$ se convierte en un problema de optimización dentro de cada paso. Incómodo.</li>
           <li>Un cambio minúsculo en un valor de $Q$ puede <strong>saltar</strong> la acción elegida
           de golpe, lo que hace el aprendizaje inestable.</li>
@@ -62,7 +62,8 @@
           tres cosas: representa $\pi_\theta(a\mid s)$ como una función suave de $\theta$ (típicamente
           una red neuronal o, como veremos, una <em>softmax</em> lineal) y mueve $\theta$ poquito a
           poco. La política puede ser tan estocástica como haga falta y extenderse a acciones
-          continuas casi sin cambios (lo veremos en el <a href="17-control-continuo.html">capítulo 17</a>).
+          continuas casi sin cambios: basta cambiar la softmax por una gaussiana, y eso lo veremos en el
+          <a href="17-control-continuo.html#la-politica-gaussiana">capítulo 17</a>.
         </p>
 
         <div class="callout intuition">
@@ -86,9 +87,9 @@
             </defs>
             <text x="20" y="40" fill="#718096" font-size="13" font-family="sans-serif" font-weight="700">MÉTODOS DE VALOR</text>
             <rect x="20" y="55" width="110" height="46" rx="10" fill="#0ea5e9" />
-            <text x="75" y="83" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">estado $s$</text>
+            <text x="75" y="83" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">estado <tspan font-style="italic">s</tspan></text>
             <rect x="200" y="55" width="150" height="46" rx="10" fill="#0ea5e9" opacity=".85" />
-            <text x="275" y="83" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">valores $Q(s,a)$</text>
+            <text x="275" y="83" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">valores <tspan font-style="italic">Q</tspan>(<tspan font-style="italic">s</tspan>,<tspan font-style="italic">a</tspan>)</text>
             <rect x="420" y="55" width="140" height="46" rx="10" fill="#334155" />
             <text x="490" y="83" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">argmax → acción</text>
             <path d="M130,78 L198,78" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow)" />
@@ -96,9 +97,9 @@
 
             <text x="20" y="165" fill="#718096" font-size="13" font-family="sans-serif" font-weight="700">GRADIENTE DE POLÍTICA</text>
             <rect x="20" y="180" width="110" height="46" rx="10" fill="#4f46e5" />
-            <text x="75" y="208" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">estado $s$</text>
+            <text x="75" y="208" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">estado <tspan font-style="italic">s</tspan></text>
             <rect x="200" y="180" width="180" height="46" rx="10" fill="#4f46e5" opacity=".85" />
-            <text x="290" y="208" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">política $\pi_\theta(a\mid s)$</text>
+            <text x="290" y="208" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">política <tspan font-style="italic">&#960;</tspan><tspan font-size="10" dy="3">&#952;</tspan><tspan font-size="15" dy="-3">(</tspan><tspan font-style="italic">a</tspan>|<tspan font-style="italic">s</tspan>)</text>
             <rect x="450" y="180" width="150" height="46" rx="10" fill="#334155" />
             <text x="525" y="208" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">muestrea → acción</text>
             <path d="M130,203 L198,203" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow)" />
@@ -154,6 +155,18 @@
             — justo la línea <code>np.outer(phi, one_hot_a - p)</code> del código de más abajo.
           </p>
         </div>
+
+        <p>
+          No hace falta creérselo: sale en tres renglones. Toma logaritmos en la softmax separando
+          numerador y denominador, $\log\pi_\theta(a\mid s)=h(s,a)-\log\sum_b e^{\,h(s,b)}$, y deriva
+          respecto de $w_{a'}$. El primer término solo sobrevive cuando $a'=a$, y entonces
+          $\nabla_{w_{a'}}h(s,a)=\phi(s)$: ahí está el $\mathbb{1}[a'=a]$. El segundo es la derivada de
+          un logaritmo, $\dfrac{e^{\,h(s,a')}}{\sum_b e^{\,h(s,b)}}\,\phi(s)$, que no es otra cosa que
+          $\pi_\theta(a'\mid s)\,\phi(s)$: ahí está lo que se resta. Y fíjate en lo que pasa al sumar
+          sobre todas las acciones: $\sum_{a'}\big(\mathbb{1}[a'=a]-\pi_\theta(a'\mid s)\big)=1-1=0$.
+          Lo que gana en preferencia la acción elegida es exactamente lo que pierden entre todas las
+          demás: la actualización <strong>reparte</strong> preferencia, no la crea de la nada.
+        </p>
 
         <h2 id="objetivo">El objetivo: maximizar el retorno esperado</h2>
         <p>
@@ -219,19 +232,50 @@
         <p>
           ¡El modelo del entorno ha desaparecido! No necesitamos conocer $P$ para calcular el
           gradiente: basta con poder muestrear trayectorias y evaluar $\nabla_\theta\log\pi_\theta$.
-          Reordenando por causalidad (una recompensa no puede depender de acciones futuras) se llega a
-          la forma canónica del teorema, con la función de valor $Q^\pi$ ponderando cada decisión:
+          Juntando las dos últimas expresiones ya tenemos algo que se puede estimar muestreando
+          episodios:
         </p>
+        <p>$$\nabla_\theta J=\mathbb{E}_{\tau\sim\pi_\theta}\!\left[\Big(\sum_{t=0}^{T-1}\nabla_\theta\log\pi_\theta(A_t\mid S_t)\Big)\Big(\sum_{k=0}^{T-1}\gamma^{k}R_{k+1}\Big)\right]$$</p>
+        <p>
+          Solo que es un estimador tosco: cada decisión recibe como peso el retorno de <em>todo</em> el
+          episodio, incluidas las recompensas que ya se habían cobrado <strong>antes</strong> de
+          tomarla. Tres pasos lo afinan hasta la forma canónica del teorema:
+        </p>
+        <ol>
+          <li><strong>El pasado no puntúa.</strong> Para $k&lt;t$, la recompensa $R_{k+1}$ ya está
+          cobrada cuando elegimos $A_t$. Condicionando en todo lo ocurrido hasta llegar a $S_t$, esa
+          recompensa sale fuera como una constante y lo que queda dentro es
+          $\mathbb{E}_{a\sim\pi_\theta}\big[\nabla_\theta\log\pi_\theta(a\mid S_t)\big]=0$ —el mismo
+          cálculo de esperanza cero que haremos dentro de un rato con la línea base—. Todos los
+          términos anteriores a $t$ se desvanecen.</li>
+          <li><strong>La cola se factoriza.</strong> Lo que sobrevive es
+          $\sum_{k\ge t}\gamma^{k}R_{k+1}=\gamma^{t}G_t$: el retorno visto desde $t$, con su
+          $\gamma^{t}$ delante. Ahí está el factor de descuento que reaparecerá en la actualización.</li>
+          <li><strong>Promediar la cola es $Q^\pi$.</strong> Condicionando en el par que acabamos de
+          visitar, $\mathbb{E}[G_t\mid S_t,A_t]=Q^{\pi}(S_t,A_t)$, que es la definición misma del
+          valor-acción.</li>
+        </ol>
 
         <div class="callout math">
           <div class="callout-title">➗ Teorema del gradiente de política</div>
-          <p>$$\nabla_\theta J(\theta)=\mathbb{E}_{\pi_\theta}\!\big[\nabla_\theta\log\pi_\theta(a\mid s)\,Q^{\pi}(s,a)\big]$$</p>
+          <p>$$\nabla_\theta J(\theta)=\mathbb{E}_{\pi_\theta}\!\left[\sum_{t=0}^{T-1}\gamma^{t}\,\nabla_\theta\log\pi_\theta(A_t\mid S_t)\;Q^{\pi}(S_t,A_t)\right]$$</p>
           <p class="math-note">
-            $Q^\pi(s,a)$ es el valor-acción de la <a href="04-retornos-y-valor.html">función de
+            $Q^\pi(S_t,A_t)$ es el valor-acción de la <a href="04-retornos-y-valor.html">función de
             valor</a> bajo la política actual. Leído despacio: para cada acción visitada, empuja
-            $\log\pi_\theta(a\mid s)$ en su dirección de crecimiento con un <strong>peso igual a lo
+            $\log\pi_\theta(A_t\mid S_t)$ en su dirección de crecimiento con un <strong>peso igual a lo
             buena que fue esa acción</strong>. Acciones con $Q$ alto se vuelven más probables; con $Q$
             bajo (o negativo), menos. Eso es literalmente «sube la probabilidad de lo que salió bien».
+          </p>
+          <p class="math-note">
+            Ese $\gamma^{t}$ no es cosmético: dice que una decisión tomada tarde en el episodio pesa
+            menos en el objetivo, porque lo que decidimos maximizar fue el retorno <em>desde el
+            principio</em>. Verás el teorema escrito muy a menudo sin él, absorbido en la
+            <strong>distribución descontada de estados</strong>
+            $d^{\pi}_\gamma(s)=\sum_t\gamma^{t}\Pr(S_t=s)$, que es como se enuncia en los libros. Y en
+            la práctica casi todo el mundo lo omite también en el código: la actualización queda algo
+            sesgada respecto del objetivo descontado, pero suele funcionar mejor. Nuestro ejemplo de
+            NumPy sí lo incluye (<code>gamma ** t</code>); el de PyTorch, como casi todas las
+            implementaciones que te vas a encontrar, no.
           </p>
         </div>
 
@@ -253,6 +297,15 @@
           insesgada de $Q^\pi$. Es puro <a href="06-monte-carlo.html">Monte Carlo</a>: jugamos el
           episodio hasta el final, medimos qué pasó y aprendemos de ello.
         </p>
+        <p>
+          Mira la derivación de hace un momento y verás que eso es, literalmente, quedarse en el paso 2
+          y no dar el 3. El único paso que <em>promedia</em> era el último, el que convertía $G_t$ en
+          $Q^\pi$; si te saltas el promedio y usas el retorno tal cual lo has observado, tienes
+          REINFORCE. Dicho de otra forma: <strong>REINFORCE no es una aproximación del teorema; es el
+          teorema antes de promediar</strong>. Y eso explica de golpe sus dos caras: es insesgado
+          (porque el promedio de $G_t$ <em>es</em> $Q^\pi$) y es ruidoso (porque una sola muestra no es
+          un promedio).
+        </p>
 
         <div class="callout math">
           <div class="callout-title">➗ La actualización de REINFORCE</div>
@@ -262,6 +315,34 @@
             retorno observado a partir del instante $t$; el factor $\gamma^{t}$ procede de derivar el
             objetivo descontado (en la práctica se omite a menudo). Como $\mathbb{E}[G_t\mid S_t,A_t]=Q^\pi(S_t,A_t)$,
             esta actualización es, <strong>en promedio</strong>, el gradiente verdadero: por eso funciona.
+          </p>
+        </div>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Un paso de REINFORCE, a mano</div>
+          <p>
+            Nada de esto es misterioso si le pones números. Estamos en un estado $s$ con tres acciones
+            y la política todavía no sabe nada: las tres preferencias valen $h=(0,\,0,\,0)$, así que
+            $\pi_\theta(\cdot\mid s)=(1/3,\,1/3,\,1/3)$. Muestreamos y sale la <strong>acción 3</strong>.
+            Jugamos hasta el final y el retorno desde aquí resulta ser $G_t=+2$. Tomamos $\alpha=0{,}1$,
+            estamos en $t=0$ (así que $\gamma^{t}=1$) y $\phi(s)$ es el <em>one-hot</em> de $s$, o sea un
+            $1$ en la componente de este estado. El score de la softmax es la resta de siempre:
+          </p>
+          <p>$$\mathbf{e}_3-\pi_\theta(\cdot\mid s)=\Big(-\tfrac13,\;-\tfrac13,\;+\tfrac23\Big)$$</p>
+          <p>
+            Las preferencias se mueven $\Delta h=\alpha\,G_t\,(\mathbf{e}_3-\pi_\theta)$, es decir
+            $h=(-0{,}067;\;-0{,}067;\;+0{,}133)$. Y pasando otra vez por la softmax:
+          </p>
+          <p>$$\pi_\theta(\cdot\mid s)=(0{,}310;\;0{,}310;\;0{,}379)$$</p>
+          <p class="math-note">
+            Eso es <em>todo</em> el algoritmo. La acción que salió bien sube del $33{,}3\,\%$ al
+            $37{,}9\,\%$ y las otras dos bajan al $31{,}0\,\%$ cada una: los $2{,}3$ puntos que pierde
+            cada una son, sumados, exactamente los $4{,}6$ que ha ganado la elegida. Nadie ha
+            calculado un $Q$, nadie ha hecho un <em>argmax</em> y ninguna probabilidad se ha ido a cero.
+            Ahora fíjate en el detalle del que depende todo: si $G_t$ hubiera sido $-2$ en vez de $+2$,
+            los signos se dan la vuelta y la acción tomada <strong>bajaría</strong>. Lo que decide la
+            dirección no es que la acción fuera buena, sino el <em>signo</em> del número que multiplica
+            al score. Guárdatelo, porque de eso va exactamente la sección siguiente.
           </p>
         </div>
 
@@ -540,7 +621,7 @@ if __name__ == "__main__":
         </div>
 
         <p>
-          En la consola verás el retorno medio subir (por ejemplo, de unos $-23$ a rondar $-6.5$) y,
+          En la consola verás el retorno medio subir (de unos $-23$ a rondar $-6{,}5$) y,
           al final, que la política voraz encuentra el camino de $6$ pasos. La curva de la gráfica sube
           rápido y luego se estabiliza cerca del óptimo. Fíjate también en la <strong>banda clara</strong>
           de retornos por episodio: incluso con la política ya aprendida, salta arriba y abajo. Esa
@@ -551,11 +632,29 @@ if __name__ == "__main__":
           <div class="callout-title">🧪 Experimenta</div>
           <p>
             Pon <code>beta=0.0</code> para <strong>desactivar la línea base</strong> y vuelve a
-            ejecutar. La curva media seguirá subiendo (sigue siendo insesgado), pero la verás más
-            temblorosa y tardará más en asentarse: acabas de <em>ver</em> para qué sirve el baseline.
-            Prueba también a subir <code>alpha</code> a $0.1$: puede que aprenda más rápido… o que la
-            política «colapse» hacia una esquina y deje de encontrar la meta. Bienvenido a la
-            sensibilidad del gradiente de política.
+            ejecutar. Con la semilla por defecto no notarás gran cosa: el retorno final sale parecido,
+            incluso un pelín mejor ($-6{,}2$ frente a $-6{,}5$). Cambia ahora <code>semilla</code> a
+            $4$ y ejecuta las dos versiones. Sin línea base la política se derrumba: se queda clavada
+            en el tope de $60$ pasos y no vuelve a encontrar la meta. Con <code>beta=0.10</code>, esa
+            misma semilla aprende sin despeinarse y acaba en $-6{,}4$. Sobre $20$ semillas, REINFORCE
+            con línea base converge en las $20$ (media final $-6{,}45$, desviación $0{,}15$); sin ella
+            se hunde en $4$ de las $20$ y la media se va a $-17{,}1$.
+          </p>
+          <p>
+            La moraleja no es que el baseline suavice la curva típica, sino que <strong>evita los
+            desastres</strong>, y aquí se ve muy bien por qué: en este gridworld <em>todas</em> las
+            recompensas son negativas, así que sin línea base cada actualización empuja
+            <strong>hacia abajo</strong> la probabilidad de la acción que acabas de tomar, sea buena o
+            mala. Las probabilidades solo se reordenan por la diferencia entre dos números negativos, y
+            basta una racha mala para que la política se apague en una esquina. Restar $\hat V_w(s)$
+            centra la señal en cero: las acciones mejores de lo esperado suben de verdad.
+          </p>
+          <p>
+            Prueba también a subir <code>alpha</code> a <code>0.1</code>: con la semilla por defecto
+            aprende bastante más rápido (a los $100$ episodios ya va por $-6{,}3$ en vez de $-10{,}4$),
+            pero repítelo con otras semillas y verás el precio: de $20$ semillas, $10$ colapsan hacia
+            una esquina y dejan de encontrar la meta. Bienvenido a la sensibilidad del gradiente de
+            política.
           </p>
         </div>
 
@@ -587,9 +686,22 @@ Pasos de la politica aprendida (voraz): 6.</span></pre>
           <strong>red neuronal</strong> que transforma cualquier estado continuo en probabilidades de
           acción, y todo el aparato del gradiente sigue igual. Para verlo, aquí tienes REINFORCE con
           PyTorch sobre <strong>CartPole-v1</strong> de Gymnasium (el clásico del poste sobre un carro).
-          La política es un pequeño MLP; como línea base usamos la <strong>normalización de los
-          retornos</strong> del episodio (restarles su media y dividir por su desviación), un truco de
-          varianza muy habitual.
+          La política es un pequeño MLP y, como reductor de varianza, usamos la
+          <strong>normalización de los retornos</strong> del episodio: les restamos su media y los
+          dividimos por su desviación típica.
+        </p>
+        <p>
+          Y aquí hay una letra pequeña que conviene leer, porque casi nadie la cuenta: eso
+          <strong>no es una línea base</strong> en el sentido estricto del teorema que acabamos de
+          demostrar. La media se calcula con los mismos $G_t$ que va a multiplicar, así que está
+          correlacionada con ellos e introduce un sesgo pequeño; y dividir por la desviación no resta
+          nada, <strong>reescala el gradiente entero</strong> (funciona más bien como una tasa de
+          aprendizaje adaptativa, que impide que un episodio muy largo dé un paso gigantesco). Es un
+          truco de ingeniería que va muy bien en la práctica y que verás en casi todas las
+          implementaciones, pero no es el teorema. El baseline honesto es el $\hat V_w(s)$ del ejemplo
+          en NumPy de más arriba —que solo mira el estado, no el retorno que va a multiplicar— y su
+          versión aprendida en serio, el crítico, llega en el
+          <a href="15-actor-critico.html">capítulo 15</a>.
         </p>
 
         <div class="callout warn">
@@ -620,10 +732,14 @@ acciones (empujar el carro a izquierda o derecha). Muestreamos la accion de esa
 distribucion categorica, jugamos el episodio completo y actualizamos la red por
 ascenso de gradiente de la funcion objetivo J(theta) = E[G_0].
 
-Como baseline para reducir la varianza usamos la normalizacion de los retornos
-del episodio (les restamos su media y dividimos por su desviacion). Restar una
-media es un baseline valido: no cambia la direccion esperada del gradiente
-(no introduce sesgo) pero si reduce mucho su varianza.
+Para reducir la varianza usamos la normalizacion de los retornos del episodio
+(les restamos su media y los dividimos por su desviacion tipica). OJO: esto NO
+es una linea base en el sentido estricto del teorema. La media se calcula con
+los mismos G_t que multiplica, asi que esta correlacionada con ellos e
+introduce un sesgo pequeno; y dividir por la desviacion no resta nada,
+reescala el gradiente entero (actua como una tasa de aprendizaje adaptativa).
+Es un truco de ingenieria muy habitual, no el teorema: el baseline honesto es
+el V_w(s) del ejemplo en NumPy de este mismo capitulo.
 
 Este ejemplo necesita PyTorch y Gymnasium, demasiado pesados para el navegador:
 se ejecuta en tu terminal.
@@ -699,9 +815,9 @@ def entrena(n_episodios=600, gamma=0.99, lr=1e-2, semilla=0):
             recompensas.append(r)
             terminado = term or trunc
 
-        # --- Retornos y baseline (normalizacion) ---
+        # --- Retornos y normalizacion (reductor de varianza, no baseline) ---
         G = retornos_descontados(recompensas, gamma)
-        G = (G - G.mean()) / (G.std() + 1e-8)     # baseline que reduce varianza
+        G = (G - G.mean()) / (G.std() + 1e-8)     # centra y reescala; ver docstring
 
         # --- Perdida de policy gradient: -sum_t log pi(a_t|s_t) * ventaja_t ---
         log_probs = torch.stack(log_probs)
@@ -738,9 +854,13 @@ if __name__ == "__main__":
         <p>
           Al entrenar, la recompensa media <strong>crece con claridad</strong> (de unas pocas decenas
           de pasos a varios cientos), pero lo hace <strong>a trompicones</strong>: sube, se desploma,
-          vuelve a subir. Esa gráfica en dientes de sierra es la firma inconfundible de REINFORCE. Con
-          otras semillas verás trayectorias distintas; no te sorprendas si no llega a «resolver»
-          CartPole del todo: el método es correcto, pero su varianza lo hace caprichoso.
+          vuelve a subir. Esa gráfica en dientes de sierra es la firma inconfundible de REINFORCE, y en
+          la traza de abajo se ve en dos líneas seguidas: en el episodio $520$ el poste aguanta $458$
+          pasos y en el $540$ se cae a los $18$; la media de los últimos $50$ episodios pasa de $365$ a
+          $332$ y sigue desmoronándose hasta $176$ cuarenta episodios más tarde. Con otras semillas
+          verás trayectorias distintas; no te sorprendas si no
+          llega a «resolver» CartPole del todo (aquí, tras $600$ episodios, se queda en una media de
+          $264$): el método es correcto, pero su varianza lo hace caprichoso.
         </p>
 
         <div class="terminal">
@@ -751,10 +871,17 @@ if __name__ == "__main__":
 <span class="comment"># entrena la politica sobre CartPole-v1</span>
 <span class="prompt">$</span> python code/14-policy-gradient-reinforce/reinforce_torch.py
 <span class="comment">Episodio   20 | recompensa =   62.0 | media (ult. 50) =   40.6
+Episodio   40 | recompensa =   48.0 | media (ult. 50) =   64.6
+Episodio   60 | recompensa =   38.0 | media (ult. 50) =   87.8
 Episodio   80 | recompensa =  214.0 | media (ult. 50) =  109.3
 Episodio  100 | recompensa =  154.0 | media (ult. 50) =  176.4
 ...
-Episodio  520 | recompensa =  458.0 | media (ult. 50) =  365.2</span></pre>
+Episodio  500 | recompensa =  349.0 | media (ult. 50) =  264.1
+Episodio  520 | recompensa =  458.0 | media (ult. 50) =  365.2
+Episodio  540 | recompensa =   18.0 | media (ult. 50) =  331.9
+Episodio  560 | recompensa =  157.0 | media (ult. 50) =  203.8
+Episodio  580 | recompensa =  395.0 | media (ult. 50) =  175.5
+Episodio  600 | recompensa =  194.0 | media (ult. 50) =  264.2</span></pre>
         </div>
 
         <h2 id="hacia-actor-critico">El talón de Aquiles: la varianza</h2>
@@ -765,6 +892,30 @@ Episodio  520 | recompensa =  458.0 | media (ult. 50) =  365.2</span></pre>
           su alta varianza lo hace poco práctico tal cual: necesita muchísimos episodios y no
           aprovecha información hasta que el episodio termina.
         </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ ¿Y por qué no un <em>replay buffer</em>?</div>
+          <p>
+            Si vienes de <a href="12-dqn.html">DQN</a> la pregunta es inevitable: si REINFORCE necesita
+            tantísimos episodios, ¿por qué no guardarlos en un buffer y reutilizarlos, como hacíamos allí?
+            Porque el teorema del gradiente de política es una esperanza <strong>bajo $\pi_\theta$</strong>:
+            bajo la política que estás optimizando <em>ahora mismo</em>. En cuanto actualizas $\theta$, los
+            episodios guardados los generó otra política y esa esperanza ya no es la que querías. Por eso
+            el gradiente de política es <strong>on-policy</strong>: cada lote de experiencia se usa una vez
+            y se tira.
+          </p>
+          <p>
+            DQN podía permitirse el buffer porque es <strong>off-policy</strong>: su objetivo,
+            $r+\gamma\max_{a'}Q(s',a')$, no pregunta quién eligió la acción, solo mira el estado, la
+            recompensa y el estado siguiente. Reutilizar datos viejos en gradiente de política <em>sí</em>
+            se puede, pero hay que pagar una corrección: el cociente de <a href="06-monte-carlo.html">muestreo
+            por importancia</a> del capítulo 6. Y ese cociente, en su versión de un solo paso
+            $r_t(\theta)=\pi_\theta(a_t\mid s_t)/\pi_{\theta_{\text{old}}}(a_t\mid s_t)$, es exactamente el
+            <em>ratio</em> sobre el que se construye <a href="16-ppo.html">PPO</a> en el capítulo 16. Guarda
+            la pregunta: la respuesta completa llega allí.
+          </p>
+        </div>
+
         <p>
           Ya has visto el primer antídoto —la línea base— y has intuido el segundo: si en lugar de
           esperar al retorno completo $G_t$ dejamos que un <strong>crítico aprendido</strong> estime el
@@ -782,7 +933,7 @@ Episodio  520 | recompensa =  458.0 | media (ult. 50) =  365.2</span></pre>
             ascenso de gradiente, sin pasar por una función de valor ni por un <em>argmax</em>. Admite
             políticas <strong>estocásticas</strong> y acciones <strong>continuas</strong>.</li>
             <li>El <strong>teorema del gradiente de política</strong> dice que
-            $\nabla_\theta J=\mathbb{E}_{\pi_\theta}[\nabla_\theta\log\pi_\theta(a\mid s)\,Q^\pi(s,a)]$,
+            $\nabla_\theta J=\mathbb{E}_{\pi_\theta}\big[\sum_t\gamma^{t}\,\nabla_\theta\log\pi_\theta(A_t\mid S_t)\,Q^\pi(S_t,A_t)\big]$,
             gracias al <strong>truco del log-derivada</strong> que hace <em>desaparecer</em> el modelo
             del entorno.</li>
             <li><strong>REINFORCE</strong> estima $Q^\pi(s,a)$ con el retorno muestreado $G_t$ (Monte
@@ -790,6 +941,10 @@ Episodio  520 | recompensa =  458.0 | media (ult. 50) =  365.2</span></pre>
             <li>Una <strong>línea base</strong> $b(s)$, idealmente $V^\pi(s)$, reduce la varianza
             <strong>sin introducir sesgo</strong>, porque el término que restamos tiene esperanza cero.
             Aparece así la <strong>ventaja</strong> $A^\pi(s,a)=Q^\pi(s,a)-V^\pi(s)$.</li>
+            <li>Es un método <strong>on-policy</strong>: la esperanza del teorema es bajo la política
+            actual, así que cada episodio se usa una vez y se tira. Reutilizar experiencia vieja obliga
+            a corregir con un cociente de muestreo por importancia — el <em>ratio</em> de
+            <a href="16-ppo.html">PPO</a>.</li>
             <li>La política <strong>softmax lineal</strong> tiene un score muy limpio:
             $\nabla_{w_{a'}}\log\pi_\theta(a\mid s)=(\mathbb{1}[a'=a]-\pi_\theta(a'\mid s))\,\phi(s)$.</li>
           </ul>

@@ -26,6 +26,13 @@ el paso de aprendizaje del critico.
 Que veras al ejecutarlo:
   * Por consola, el retorno medio por iteracion sube (se hace menos negativo)
     hasta acercarse al optimo (el camino mas corto = 8 pasos, retorno -8).
+  * Dos diagnosticos en cada linea: "recortadas" es la fraccion de transiciones
+    que han caido en la zona plana del recorte (el clipfrac que mira todo el
+    mundo al depurar un PPO) y "KL ~" es la divergencia aproximada entre la
+    politica vieja y la nueva. Si "recortadas" fuese 0 %, el recorte no estaria
+    haciendo nada.
+  * Al final, el maximo |r-1| de todo el entrenamiento: cuanto se ha llegado a
+    alejar la politica nueva de la que recogio los datos.
   * Una grafica con el retorno por iteracion y su media movil, claramente
     creciente hacia la linea del optimo.
 
@@ -124,8 +131,8 @@ def entropia_por_fila(p, logp):
     return -(p * logp).sum(axis=1)
 
 
-def entrena(n_iteraciones=160, episodios_por_iter=8, epocas=6,
-            lr_pi=0.20, lr_v=0.30, gamma=0.99, lam=0.95,
+def entrena(n_iteraciones=160, episodios_por_iter=8, epocas=20,
+            lr_pi=0.50, lr_v=0.30, gamma=0.99, lam=0.95,
             eps=0.2, c2=0.01, semilla=0):
     """Bucle de PPO. Devuelve (historial_de_retornos, theta)."""
     rng = np.random.default_rng(semilla)
@@ -133,6 +140,7 @@ def entrena(n_iteraciones=160, episodios_por_iter=8, epocas=6,
     w = np.zeros(N_ESTADOS)                       # critico V_w(s)
     identidad = np.eye(N_ACCIONES)                # filas = one-hot de cada accion
     historial = np.zeros(n_iteraciones)
+    max_desvio = 0.0                              # max |r_t - 1| de todo el entreno
 
     for it in range(n_iteraciones):
         # ---------- 1) Recogida: varios episodios completos ----------
@@ -163,6 +171,12 @@ def entrena(n_iteraciones=160, episodios_por_iter=8, epocas=6,
             logp_a = logp[np.arange(len(b_a)), b_a]
             ratio = np.exp(logp_a - b_logp)       # r_t(theta)
 
+            # --- Diagnosticos (no afectan al aprendizaje, pero son los dos
+            #     numeros que se miran al depurar un PPO de verdad) ---
+            recortadas = np.mean(np.abs(ratio - 1.0) > eps)              # "clipfrac"
+            kl_aprox = np.mean((ratio - 1.0) - np.log(ratio + 1e-12))    # KL(vieja||nueva)
+            max_desvio = max(max_desvio, float(np.abs(ratio - 1.0).max()))
+
             # --- Gradiente del objetivo recortado ---
             # d/dtheta [r_t A_t] = A_t * r_t * grad_log_pi.  El recorte anula el
             # gradiente solo cuando empujar mas ya no aporta (region plana):
@@ -190,10 +204,14 @@ def entrena(n_iteraciones=160, episodios_por_iter=8, epocas=6,
             np.add.at(grad_critico, b_s, err)
             w -= lr_v * grad_critico / len(b_s)            # DESCENSO de gradiente
 
+        # Los diagnosticos que imprimimos son los de la ULTIMA epoca, cuando la
+        # politica ya se ha alejado todo lo que se iba a alejar de la vieja.
         if (it + 1) % 20 == 0:
             print(f"Iteracion {it + 1:3d} | retorno medio = {historial[it]:7.2f}"
-                  f"   (optimo = {OPTIMO})")
+                  f" | recortadas = {100 * recortadas:5.1f}%"
+                  f" | KL ~ {kl_aprox:.4f}   (optimo = {OPTIMO})")
 
+    print(f"\nMaximo |r-1| de todo el entrenamiento: {max_desvio:.2f}")
     return historial, theta
 
 

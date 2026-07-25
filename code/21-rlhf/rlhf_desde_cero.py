@@ -22,10 +22,13 @@ pero sobre un "bandido" de K respuestas candidatas a un mismo prompt:
 
 La moraleja (y la gráfica): si quitamos la penalización KL (beta -> 0) la
 política COLAPSA sobre el argmax de la recompensa APRENDIDA. Como ese máximo
-está sobrestimado (sesgo de maximización, igual que en Q-learning), la
-recompensa REAL sube, alcanza un pico y luego CAE: es la sobre-optimización
-("reward hacking"). La KL mantiene la política cerca del modelo base y evita el
-colapso.
+suele estar sobrestimado (sesgo de maximización, igual que en Q-learning), a
+partir de cierta KL seguir optimizando ya no compra recompensa REAL. En el
+mundo de la semilla 0 la recompensa real incluso CAE; por eso el programa
+repite el experimento entero en 20 mundos distintos y dibuja la media con su
+banda: promediando, la caída no está garantizada (la mediana de la caída es
+prácticamente cero), pero el ESTANCAMIENTO sí. Eso es la sobre-optimización
+("reward hacking"), y beta es el mando que decide cuánto te acercas al filo.
 
 Cómo ejecutarlo:
     pip install -r requirements.txt
@@ -127,26 +130,75 @@ def optimiza_politica_ascenso(theta, ref, beta, lr=0.5, n_iter=400):
     return softmax(phi), hist_recompensa, hist_kl
 
 
-def main():
-    rng = np.random.default_rng(0)
+BETAS = np.logspace(np.log10(4.0), np.log10(0.02), 60)   # de mucho freno a ninguno
+N_MUNDOS = 20                                            # semillas 0..19
 
-    # --- 1) El mundo: K respuestas candidatas con una recompensa real oculta ---
-    K = 28                                     # número de "respuestas" al prompt
+
+def simula_mundo(semilla, K=28, n_pares=220):
+    """Ejecuta el pipeline entero de RLHF en UN mundo (una semilla).
+
+    Mundo = una recompensa oculta r*, unas preferencias sintéticas, el
+    r_theta ajustado sobre ellas y el barrido de beta. Devolvemos un dict para
+    poder repetirlo en muchas semillas y no sacar conclusiones de una sola
+    ejecución (la regla de oro del capítulo 22).
+    """
+    rng = np.random.default_rng(semilla)
+
+    # 1) El mundo: K respuestas candidatas con una recompensa real oculta.
     r_true = rng.normal(0.0, 0.8, size=K)      # utilidad REAL para el humano (oculta)
     r_true -= r_true.mean()
     ref = np.ones(K) / K                       # modelo base: reparte por igual
     log_ref = np.log(ref)
 
-    # --- 2) Preferencias sintéticas y modelo de recompensa (Bradley-Terry) ---
+    # 2) Preferencias sintéticas y modelo de recompensa (Bradley-Terry).
     # Pocas comparaciones: el modelo aprende r* bien, pero con ERROR de estimación,
     # justo el ingrediente que hace posible la sobre-optimización.
-    ganadores, perdedores = genera_preferencias(r_true, n_pares=220, rng=rng)
+    ganadores, perdedores = genera_preferencias(r_true, n_pares=n_pares, rng=rng)
     theta, hist_perdida = entrena_modelo_recompensa(ganadores, perdedores, K)
 
+    # 3) Barrido de beta: recompensa real vs. aprendida en función de la KL.
+    kls, r_real, r_aprend = [], [], []
+    for b in BETAS:
+        pi_b = politica_optima_kl(theta, log_ref, b)
+        kls.append(kl(pi_b, ref))
+        r_real.append(float(pi_b @ r_true))
+        r_aprend.append(float(pi_b @ theta))
+
+    return dict(r_true=r_true, ref=ref, log_ref=log_ref, theta=theta,
+                n_comparaciones=len(ganadores), hist_perdida=hist_perdida,
+                kls=np.array(kls), r_real=np.array(r_real),
+                r_aprend=np.array(r_aprend))
+
+
+def promedia_mundos(mundos):
+    """Pone los mundos en una rejilla común de KL y devuelve las curvas apiladas.
+
+    Cada mundo llega a una KL máxima distinta, así que interpolamos sobre la
+    rejilla más ancha que TODOS cubren: así promediamos sin extrapolar nada.
+    Por la izquierda añadimos a mano el punto exacto de KL = 0 (beta -> infinito:
+    la política ES la referencia), que conocemos sin simularlo.
+    """
+    kl_max = min(m["kls"][-1] for m in mundos)
+    rejilla = np.linspace(0.0, kl_max, 60)
+
+    def curva(m, y, y_en_cero):
+        return np.interp(rejilla, np.r_[0.0, m["kls"]], np.r_[y_en_cero, y])
+
+    real = np.array([curva(m, m["r_real"], m["ref"] @ m["r_true"]) for m in mundos])
+    aprend = np.array([curva(m, m["r_aprend"], m["ref"] @ m["theta"]) for m in mundos])
+    return rejilla, real, aprend
+
+
+def main():
+    mundos = [simula_mundo(s) for s in range(N_MUNDOS)]
+    m0 = mundos[0]                             # el mundo que miramos con lupa
+    r_true, ref, log_ref, theta = m0["r_true"], m0["ref"], m0["log_ref"], m0["theta"]
+    K = len(r_true)
+
     corr = float(np.corrcoef(r_true, theta)[0, 1])
-    print("=== Modelo de recompensa (Bradley-Terry) ===")
-    print(f"Comparaciones usadas          : {len(ganadores)}")
-    print(f"Pérdida BT inicial -> final   : {hist_perdida[0]:.4f} -> {hist_perdida[-1]:.4f}")
+    print("=== Modelo de recompensa (Bradley-Terry), mundo 0 ===")
+    print(f"Comparaciones usadas          : {m0['n_comparaciones']}")
+    print(f"Pérdida BT inicial -> final   : {m0['hist_perdida'][0]:.4f} -> {m0['hist_perdida'][-1]:.4f}")
     print(f"Correlación r_theta vs r*     : {corr:.3f}")
     mejor_real = int(np.argmax(r_true))
     mejor_estim = int(np.argmax(theta))
@@ -154,9 +206,9 @@ def main():
     print(f"Mejor respuesta ESTIMADA       : #{mejor_estim}  "
           f"(r_theta = {theta[mejor_estim]:+.2f}, pero r* = {r_true[mejor_estim]:+.2f})")
 
-    # --- 3) Optimización de la política con penalización KL (análogo de PPO) ---
+    # --- Optimización de la política con penalización KL (análogo de PPO) ---
     beta_demo = 0.5
-    pi_ascenso, hist_rec, hist_kl = optimiza_politica_ascenso(theta, ref, beta_demo)
+    pi_ascenso, _, _ = optimiza_politica_ascenso(theta, ref, beta_demo)
     pi_cerrada = politica_optima_kl(theta, log_ref, beta_demo)
     print(f"\n=== Política KL-regularizada (beta = {beta_demo}) ===")
     print(f"Diferencia máx. ascenso vs solución cerrada : {np.max(np.abs(pi_ascenso - pi_cerrada)):.2e}")
@@ -164,28 +216,35 @@ def main():
           f"{ref @ r_true:+.3f} -> {pi_ascenso @ r_true:+.3f}")
     print(f"Divergencia KL(pi_beta || pi_ref)            : {kl(pi_ascenso, ref):.3f}")
 
-    # --- 4) Barrido de beta: recompensa real vs. aprendida en función de la KL ---
-    betas = np.logspace(np.log10(4.0), np.log10(0.02), 60)
-    kls, r_real, r_aprend = [], [], []
-    for b in betas:
-        pi_b = politica_optima_kl(theta, log_ref, b)
-        kls.append(kl(pi_b, ref))
-        r_real.append(pi_b @ r_true)
-        r_aprend.append(pi_b @ theta)
-    kls, r_real, r_aprend = map(np.array, (kls, r_real, r_aprend))
-
-    i_pico = int(np.argmax(r_real))            # dónde la recompensa REAL es máxima
-    beta_pico = betas[i_pico]
+    # --- Sobre-optimización en el mundo 0 (UNA sola semilla) ---
+    i_pico = int(np.argmax(m0["r_real"]))      # dónde la recompensa REAL es máxima
+    beta_pico = BETAS[i_pico]
     pi_pico = politica_optima_kl(theta, log_ref, beta_pico)
-    pi_codicioso = politica_optima_kl(theta, log_ref, betas[-1])   # beta -> 0: colapso
+    pi_codicioso = politica_optima_kl(theta, log_ref, BETAS[-1])   # beta -> 0: colapso
 
-    print("\n=== Sobre-optimización (reward hacking) ===")
+    print("\n=== Sobre-optimización en el mundo 0 (una sola semilla) ===")
     print(f"E[r*] con el modelo base (ref)          : {ref @ r_true:+.3f}")
-    print(f"E[r*] con KL óptima (beta ~ {beta_pico:.2f})     : {pi_pico @ r_true:+.3f}")
+    print(f"E[r*] en el pico (beta ~ {beta_pico:.2f})          : {pi_pico @ r_true:+.3f}")
     print(f"E[r*] sin freno KL (beta -> 0, colapso) : {pi_codicioso @ r_true:+.3f}")
     print(f"El óptimo REAL alcanzable                : {r_true.max():+.3f}")
 
-    # --- 5) Gráfica: ajuste del modelo + sobre-optimización + colapso ---
+    # --- ...y lo mismo en 20 mundos: ¿es una ley o es la semilla? ---
+    rejilla, real, aprend = promedia_mundos(mundos)
+    media, desv = real.mean(axis=0), real.std(axis=0)
+    caidas = np.array([m["r_real"].max() - m["r_real"][-1] for m in mundos])
+    medio = len(rejilla) // 2
+    print(f"\n=== ...y ahora en {N_MUNDOS} mundos (semillas 0..{N_MUNDOS - 1}) ===")
+    print(f"Caída pico -> sin freno, por mundo   : mediana {np.median(caidas):.3f}, "
+          f"media {caidas.mean():.3f}")
+    print(f"Mundos que caen más de 0,05          : {(caidas > 0.05).sum()} de {N_MUNDOS}")
+    print(f"E[r*] MEDIA, KL 0 -> {rejilla[medio]:.2f} -> {rejilla[-1]:.2f}    : "
+          f"{media[0]:+.3f} -> {media[medio]:+.3f} -> {media[-1]:+.3f}")
+    print(f"r_theta MEDIA en el mismo recorrido  : "
+          f"{aprend.mean(axis=0)[0]:+.3f} -> {aprend.mean(axis=0)[medio]:+.3f} "
+          f"-> {aprend.mean(axis=0)[-1]:+.3f}")
+    print(f"Desviación entre mundos al final     : {desv[-1]:.3f}")
+
+    # --- Gráfica: ajuste del modelo + sobre-optimización + colapso ---
     IND, CIAN, VERDE, AMBAR, ROJO, GRIS = (
         "#4f46e5", "#0ea5e9", "#059669", "#d97706", "#dc2626", "#94a3b8")
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(13.5, 4.4))
@@ -200,22 +259,26 @@ def main():
     ax1.grid(alpha=0.25)
 
     # (B) Sobre-optimización: al aumentar la KL, la recompensa aprendida sube
-    #     sin freno, pero la REAL sube, hace pico y colapsa.
-    ax2.plot(kls, r_aprend, color=AMBAR, lw=2, label="recompensa APRENDIDA (lo que optimizamos)")
-    ax2.plot(kls, r_real, color=IND, lw=2, label="recompensa REAL (lo que importa)")
-    ax2.axvline(kls[i_pico], color=VERDE, ls="--", lw=1.2)
-    ax2.scatter([kls[i_pico]], [r_real[i_pico]], color=VERDE, s=60, zorder=4,
-                label=f"KL óptima (beta ~ {beta_pico:.2f})")
+    #     sin freno; la REAL se estanca y, según el mundo, además cae.
+    ax2.plot(rejilla, aprend.mean(axis=0), color=AMBAR, lw=2,
+             label=f"APRENDIDA, media de {N_MUNDOS} mundos")
+    ax2.fill_between(rejilla, media - desv, media + desv, color=IND, alpha=0.18,
+                     label="REAL, ±1 desviación entre mundos")
+    ax2.plot(rejilla, media, color=IND, lw=2.2, label=f"REAL, media de {N_MUNDOS} mundos")
+    ax2.plot(m0["kls"], m0["r_real"], color=IND, lw=1.2, ls="--", alpha=0.75,
+             label="REAL, mundo 0 (una sola semilla)")
+    ax2.scatter([m0["kls"][i_pico]], [m0["r_real"][i_pico]], color=VERDE, s=55, zorder=4,
+                label=f"pico del mundo 0 (beta ~ {beta_pico:.2f})")
     ax2.set_xlabel("KL(pi || pi_ref)   (más optimización -->)")
     ax2.set_ylabel("Recompensa esperada")
-    ax2.set_title("2) Sobre-optimización:\nla recompensa REAL colapsa")
-    ax2.legend(loc="lower right", fontsize=8.5)
+    ax2.set_title("2) Sobre-optimización: la recompensa REAL\nse estanca (y a veces cae)")
+    ax2.legend(loc="upper left", fontsize=7.5)
     ax2.grid(alpha=0.25)
 
-    # (C) Las políticas: sin KL, todo el peso cae en UNA respuesta (colapso).
+    # (C) Las políticas del mundo 0: sin KL, todo el peso cae en UNA respuesta.
     x = np.arange(K)
     ax3.bar(x - 0.27, ref, width=0.27, color=GRIS, label="pi_ref (modelo base)")
-    ax3.bar(x, pi_pico, width=0.27, color=IND, label=f"pi_beta (KL óptima)")
+    ax3.bar(x, pi_pico, width=0.27, color=IND, label="pi_beta (KL del pico)")
     ax3.bar(x + 0.27, pi_codicioso, width=0.27, color=ROJO, label="pi sin KL (colapso)")
     ax3.set_xlabel("Respuesta candidata  y")
     ax3.set_ylabel("Probabilidad  pi(y)")

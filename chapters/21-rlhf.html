@@ -85,8 +85,8 @@
               </marker>
             </defs>
             <rect x="20" y="70" width="180" height="60" rx="12" fill="#0ea5e9" />
-            <text x="110" y="95" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">1 · Modelo base</text>
-            <text x="110" y="115" text-anchor="middle" fill="#e0f2fe" font-size="12" font-family="sans-serif">SFT (referencia)</text>
+            <text x="110" y="95" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">Modelo base (SFT)</text>
+            <text x="110" y="115" text-anchor="middle" fill="#e0f2fe" font-size="12" font-family="sans-serif">la referencia π<tspan font-size="9" dy="3">ref</tspan></text>
 
             <rect x="270" y="70" width="180" height="60" rx="12" fill="#4f46e5" />
             <text x="360" y="95" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">2 · Recompensa</text>
@@ -98,10 +98,10 @@
 
             <path d="M200,100 L268,100" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow)" />
             <path d="M450,100 L518,100" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow)" />
-            <text x="360" y="165" text-anchor="middle" fill="#718096" font-size="12" font-family="sans-serif">comparaciones humanas y₁ ≻ y₂</text>
+            <text x="360" y="165" text-anchor="middle" fill="#718096" font-size="12" font-family="sans-serif">Etapa 1 · comparaciones humanas y₁ ≻ y₂</text>
             <path d="M360,150 L360,132" fill="none" stroke="#a855f7" stroke-width="2" marker-end="url(#arrow)" />
             <path d="M610,150 C610,175 110,175 110,132" fill="none" stroke="#94a3b8" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrow)" />
-            <text x="360" y="192" text-anchor="middle" fill="#94a3b8" font-size="11" font-family="sans-serif">la KL ata la política 3 al modelo base 1</text>
+            <text x="360" y="192" text-anchor="middle" fill="#94a3b8" font-size="11" font-family="sans-serif">la KL ata la etapa 3 al modelo base</text>
           </svg>
           <figcaption>Las tres etapas de RLHF. Este capítulo se centra en la 2 (modelo de recompensa) y la 3 (optimización con PPO y freno KL), que es donde vive el aprendizaje por refuerzo.</figcaption>
         </figure>
@@ -141,6 +141,34 @@
         </div>
 
         <p>
+          Merece la pena ponerle números a esa sigmoide, porque es lo que revela en qué
+          <strong>unidades</strong> mide el modelo. Toma la diferencia de recompensa entre dos
+          respuestas y mira qué probabilidad de preferencia predice:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>$r(x,y_1) - r(x,y_2)$</th><th>$P(y_1 \succ y_2 \mid x)$</th><th>Cómo se lee</th></tr></thead>
+            <tbody>
+              <tr><td>$0$</td><td>$0{,}50$</td><td>indistinguibles: el humano tira una moneda</td></tr>
+              <tr><td>$0{,}5$</td><td>$0{,}62$</td><td>preferencia leve, unas 3 de cada 5 veces</td></tr>
+              <tr><td>$1$</td><td>$0{,}73$</td><td>preferencia clara</td></tr>
+              <tr><td>$2$</td><td>$0{,}88$</td><td>casi siempre gana la primera</td></tr>
+              <tr><td>$3$</td><td>$0{,}95$</td><td>discrepar es raro</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Léelo al revés y aparece lo importante: las unidades de $r$ <strong>no son notas del 0 al
+          10</strong>, son <em>log-odds</em> de preferencia. Que una respuesta valga $+1{,}58$ —el
+          número que va a imprimir el programa de más abajo— no significa «un notable alto»,
+          significa que frente a una respuesta de recompensa $0$ ganaría el $83\,\%$ de las
+          comparaciones. Y de ahí sale una consecuencia que sorprende la primera vez: el modelo de
+          recompensa no aprende «lo buena que es» cada respuesta, aprende <strong>la escala de
+          nuestro desacuerdo</strong>. Si los etiquetadores coincidieran siempre, las diferencias
+          crecerían sin límite; si comparasen a cara o cruz, se irían todas a cero.
+        </p>
+
+        <p>
           Con este modelo, aprender la recompensa es un problema de <strong>máxima verosimilitud</strong>.
           Tenemos un dataset $\mathcal{D}$ de comparaciones $(x, y_w, y_l)$, donde $y_w$ es la respuesta
           <em>ganadora</em> (la preferida) e $y_l$ la <em>perdedora</em>. Buscamos los parámetros
@@ -157,6 +185,28 @@
             media sobre el dataset. Es exactamente una <strong>regresión logística</strong> sobre la
             diferencia de recompensas: empuja $r_\theta(x,y_w)$ por encima de $r_\theta(x,y_l)$ tanto
             como digan los datos, sin pasarse. Se entrena por descenso de gradiente, como cualquier red.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 ¿Y qué red es $r_\theta$, exactamente?</div>
+          <p>
+            Al leer «una red que puntúa texto» uno se imagina un modelo aparte, entrenado desde cero.
+            No lo es. En la práctica $r_\theta$ <strong>es el propio modelo SFT</strong> al que se le
+            quita la capa final —la que predice el token siguiente, con un logit por cada palabra del
+            vocabulario— y se le enchufa en su lugar una <strong>cabeza escalar</strong>: una capa
+            lineal que devuelve <em>un solo número</em>. Se le pasa el prompt y la respuesta enteros y
+            se lee ese número en la última posición. Tiene todo el sentido del mundo: para juzgar si
+            una respuesta es buena hay que entender el texto, y de eso el modelo ya sabía.
+          </p>
+          <p>
+            Y un detalle práctico que aparece en todas las implementaciones. Como Bradley-Terry solo
+            fija $r_\theta$ <em>salvo una constante aditiva</em>, el cero está donde le apetezca:
+            nada impide que un modelo perfectamente entrenado dé recompensas centradas en $-4$. Por
+            eso, antes de arrancar el RL, se <strong>normalizan</strong> las recompensas —como mínimo
+            restándoles la media sobre un lote de prompts— para que ese desplazamiento arbitrario no
+            se cuele en las ventajas de PPO. Nuestro programa hace la versión de juguete de eso
+            mismo: <code>theta -= theta.mean()</code> en cada paso.
           </p>
         </div>
 
@@ -177,7 +227,13 @@
           $\pi_\phi(y \mid x)$ —el modelo de lenguaje que estamos afinando, con parámetros $\phi$—
           que genere respuestas de recompensa alta. Pero con una salvaguarda crucial: que no se
           aleje demasiado del modelo de referencia $\pi_{\text{ref}}$ (el SFT congelado). Ese anclaje
-          se impone con la divergencia de Kullback-Leibler.
+          se impone con la divergencia de Kullback-Leibler. (Ojo al cambio de letras. Hasta aquí la
+          política era siempre $\pi_\theta$ y el crítico, cuando lo había, $V_w$ o $Q_\phi$. En RLHF
+          las dos redes que aprenden son otras —la recompensa y la política— y la notación de los
+          artículos originales reserva $\theta$ para <strong>el modelo de recompensa</strong> y
+          $\phi$ para <strong>la política</strong>. La seguimos para que puedas leerlos sin traducir,
+          pero fíjate en que ese $\phi$ no tiene nada que ver con el crítico $Q_\phi$ del
+          <a href="17-control-continuo.html">capítulo 17</a>.)
         </p>
 
         <div class="callout math">
@@ -203,6 +259,35 @@
           que se resta token a token) y PPO da un paso seguro de mejora con su <em>clipping</em>.
         </p>
 
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Así se ve el <em>reward hacking</em> en un LLM de verdad</div>
+          <p>
+            Esto no es un fenómeno de laboratorio. Cuando se afloja el freno KL en un modelo de
+            lenguaje real aparecen casi siempre los mismos cuatro tics, y los cuatro tienen la misma
+            explicación: el modelo de recompensa los premiaba <em>un poco</em>, así que la política
+            los explota <em>mucho</em>.
+          </p>
+          <ul>
+            <li><strong>Sesgo de longitud.</strong> Las respuestas se alargan sin parar. Puestos a
+            comparar, el etiquetador tiende a preferir la respuesta más completa, y «más completa»
+            correlaciona con «más larga»; $r_\theta$ aprende la correlación y la política la explota
+            a base de párrafos de relleno.</li>
+            <li><strong>Sicofancia.</strong> El modelo te da la razón. Estar de acuerdo con quien
+            pregunta gana comparaciones, aunque quien pregunta esté equivocado.</li>
+            <li><strong>Formato.</strong> Viñetas, negritas y epígrafes donde bastaba una frase: el
+            envoltorio que puntuaba alto, aplicado indiscriminadamente a todo.</li>
+            <li><strong>Tics de apertura.</strong> «¡Buena pregunta!», «Claro, encantado de
+            ayudarte»: fórmulas que subían la nota un pelo y acaban encabezando todas las
+            respuestas.</li>
+          </ul>
+          <p>
+            <strong>Ninguno de los cuatro es un fallo del algoritmo.</strong> Los cuatro son la
+            política haciendo exactamente lo que le pedimos: maximizar $r_\theta$. El fallo está en
+            la distancia entre $r_\theta$ y lo que de verdad queríamos, y el único mando que tenemos
+            para no recorrer esa distancia entera es $\beta$.
+          </p>
+        </div>
+
         <div class="callout key">
           <div class="callout-title">🔑 La solución tiene forma cerrada</div>
           <p>
@@ -219,6 +304,34 @@
           </p>
         </div>
 
+        <p>
+          No hace falta creerse esa fórmula: sale en tres líneas, y el camino es tan bonito como el
+          resultado. Fija un <em>prompt</em> $x$ y abrevia $r_\theta(x,\cdot)$ como $r$. Saca $-\beta$
+          como factor común y mete la recompensa <em>dentro</em> del logaritmo, aprovechando que
+          $\frac{r(y)}{\beta} = \log e^{r(y)/\beta}$:
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ La forma cerrada, en tres líneas</div>
+          <p>$$\mathbb{E}_{\pi}\big[r\big] - \beta\,\mathrm{KL}(\pi\,\|\,\pi_{\text{ref}}) \;=\; -\beta\sum_y \pi(y)\,\log\frac{\pi(y)}{\pi_{\text{ref}}(y)\,e^{r(y)/\beta}}$$</p>
+          <p>
+            Lo de dentro del logaritmo casi es una distribución: solo le falta normalizarse. Divide y
+            multiplica por $Z(x) = \sum_{y'}\pi_{\text{ref}}(y')\,e^{r(y')/\beta}$ y bautiza
+            $\pi^\star = \pi_{\text{ref}}\,e^{r/\beta}/Z(x)$:
+          </p>
+          <p>$$=\; -\beta\sum_y \pi(y)\,\log\frac{\pi(y)}{Z(x)\,\pi^\star(y)} \;=\; -\beta\,\mathrm{KL}\big(\pi\,\|\,\pi^\star\big) \;+\; \beta\log Z(x)$$</p>
+          <p class="math-note">
+            Y ya está. El segundo sumando no depende de $\pi$, y el primero es $-\beta$ por una
+            divergencia KL, que nunca es negativa y vale $0$ <em>exactamente</em> cuando
+            $\pi = \pi^\star$. Así que el objetivo de RLHF, disfrazado, no es más que «acércate todo
+            lo que puedas a la referencia reponderada». De propina nos hemos enterado de que el valor
+            óptimo del objetivo es $\beta\log Z(x)$: un <strong>log-sum-exp</strong>, el mismo objeto
+            que salió en el <a href="20-maxent-empowerment.html#soft">capítulo 20</a> al hacer esta
+            misma cuenta con la entropía. No es casualidad, es el mismo teorema con otra referencia:
+            en máxima entropía la referencia implícita es la uniforme y la temperatura se llama
+            $\alpha$; en RLHF la referencia es el modelo SFT y la temperatura se llama $\beta$.
+          </p>
+        </div>
+
         <h2 id="algoritmo">El algoritmo, paso a paso</h2>
         <p>Resumido en pseudo-pasos, RLHF con PPO es:</p>
         <ol>
@@ -230,13 +343,32 @@
           <li><strong>Bucle de PPO.</strong> Repite:
             <ul>
               <li>Muestrea <em>prompts</em> $x$ y genera respuestas $y \sim \pi_\phi(\cdot\mid x)$.</li>
-              <li>Calcula la recompensa de cada token: $r_\theta(x,y)$ al final, menos
-              $\beta\,\log\frac{\pi_\phi(y\mid x)}{\pi_{\text{ref}}(y\mid x)}$ como penalización KL.</li>
+              <li>Calcula la recompensa de <strong>cada token</strong>: la penalización KL en todos
+              ellos y $r_\theta(x,y)$ solo en el último. La fórmula, justo debajo.</li>
               <li>Estima ventajas (GAE) y da un paso de <strong>PPO con clipping</strong> sobre $\phi$.</li>
             </ul>
           </li>
           <li><strong>Para</strong> cuando la recompensa deja de subir sin que la KL se dispare.</li>
         </ol>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La recompensa que ve PPO, token a token</div>
+          <p>$$R_t \;=\; -\,\beta\,\log\frac{\pi_\phi(y_t \mid x,\, y_{&lt;t})}{\pi_{\text{ref}}(y_t \mid x,\, y_{&lt;t})} \;+\; \underbrace{r_\theta(x,y)\,\mathbb{1}[t = T]}_{\text{solo en el último token}}$$</p>
+          <p class="math-note">
+            $y_t$ es el token $t$-ésimo de la respuesta, $y_{&lt;t}$ los que el modelo ya llevaba
+            escritos, $T$ la longitud total, y $\mathbb{1}[\cdot]$ vale $1$ si la condición se cumple
+            y $0$ si no. Dos preguntas razonables. <strong>¿Por qué esto «es» la KL</strong>, si la KL
+            era una esperanza con sumatorio sobre todas las respuestas posibles? Porque el
+            log-cociente evaluado en la respuesta que <em>ha generado la propia política</em> es un
+            estimador insesgado de esa esperanza con una sola muestra, y PPO ya trabaja con muestras.
+            <strong>¿Y por qué repartirla token a token</strong> en lugar de restarla entera al
+            final? Por dos motivos: porque la KL de la secuencia se descompone como suma de KL por
+            token (regla de la cadena de la probabilidad), así que repartirla es legítimo; y porque
+            así una recompensa que solo llegaba en el último token se convierte en una señal
+            <strong>densa</strong>. De hecho, salvo en el último paso, esa penalización es la única
+            señal por paso que tiene el agente.
+          </p>
+        </div>
 
         <h2 id="ejemplo">RLHF de juguete en Python</h2>
         <p>
@@ -264,8 +396,10 @@
           El programa (1) genera preferencias sintéticas según $r^\star$; (2) entrena el modelo de
           recompensa con la pérdida de Bradley-Terry; y (3) optimiza la política maximizando
           $r_\theta$ con el freno KL, tanto por ascenso de gradiente (el análogo de PPO) como con la
-          fórmula cerrada, para comprobar que coinciden. Las gráficas muestran el ajuste del modelo de
-          recompensa y, sobre todo, cómo la KL evita el colapso.
+          fórmula cerrada, para comprobar que coinciden. Y hace una cosa más, que el manual llevaba
+          veinte capítulos predicando: en vez de fiarse de una ejecución, repite el pipeline entero en
+          <strong>20 mundos</strong> distintos (semillas 0 a 19) y dibuja la media con su banda de
+          dispersión. Ya verás que la conclusión cambia.
         </p>
 
         <div class="code-example" data-packages="numpy,matplotlib">
@@ -301,10 +435,13 @@ pero sobre un "bandido" de K respuestas candidatas a un mismo prompt:
 
 La moraleja (y la gráfica): si quitamos la penalización KL (beta -&gt; 0) la
 política COLAPSA sobre el argmax de la recompensa APRENDIDA. Como ese máximo
-está sobrestimado (sesgo de maximización, igual que en Q-learning), la
-recompensa REAL sube, alcanza un pico y luego CAE: es la sobre-optimización
-("reward hacking"). La KL mantiene la política cerca del modelo base y evita el
-colapso.
+suele estar sobrestimado (sesgo de maximización, igual que en Q-learning), a
+partir de cierta KL seguir optimizando ya no compra recompensa REAL. En el
+mundo de la semilla 0 la recompensa real incluso CAE; por eso el programa
+repite el experimento entero en 20 mundos distintos y dibuja la media con su
+banda: promediando, la caída no está garantizada (la mediana de la caída es
+prácticamente cero), pero el ESTANCAMIENTO sí. Eso es la sobre-optimización
+("reward hacking"), y beta es el mando que decide cuánto te acercas al filo.
 
 Cómo ejecutarlo:
     pip install -r requirements.txt
@@ -406,26 +543,75 @@ def optimiza_politica_ascenso(theta, ref, beta, lr=0.5, n_iter=400):
     return softmax(phi), hist_recompensa, hist_kl
 
 
-def main():
-    rng = np.random.default_rng(0)
+BETAS = np.logspace(np.log10(4.0), np.log10(0.02), 60)   # de mucho freno a ninguno
+N_MUNDOS = 20                                            # semillas 0..19
 
-    # --- 1) El mundo: K respuestas candidatas con una recompensa real oculta ---
-    K = 28                                     # número de "respuestas" al prompt
+
+def simula_mundo(semilla, K=28, n_pares=220):
+    """Ejecuta el pipeline entero de RLHF en UN mundo (una semilla).
+
+    Mundo = una recompensa oculta r*, unas preferencias sintéticas, el
+    r_theta ajustado sobre ellas y el barrido de beta. Devolvemos un dict para
+    poder repetirlo en muchas semillas y no sacar conclusiones de una sola
+    ejecución (la regla de oro del capítulo 22).
+    """
+    rng = np.random.default_rng(semilla)
+
+    # 1) El mundo: K respuestas candidatas con una recompensa real oculta.
     r_true = rng.normal(0.0, 0.8, size=K)      # utilidad REAL para el humano (oculta)
     r_true -= r_true.mean()
     ref = np.ones(K) / K                       # modelo base: reparte por igual
     log_ref = np.log(ref)
 
-    # --- 2) Preferencias sintéticas y modelo de recompensa (Bradley-Terry) ---
+    # 2) Preferencias sintéticas y modelo de recompensa (Bradley-Terry).
     # Pocas comparaciones: el modelo aprende r* bien, pero con ERROR de estimación,
     # justo el ingrediente que hace posible la sobre-optimización.
-    ganadores, perdedores = genera_preferencias(r_true, n_pares=220, rng=rng)
+    ganadores, perdedores = genera_preferencias(r_true, n_pares=n_pares, rng=rng)
     theta, hist_perdida = entrena_modelo_recompensa(ganadores, perdedores, K)
 
+    # 3) Barrido de beta: recompensa real vs. aprendida en función de la KL.
+    kls, r_real, r_aprend = [], [], []
+    for b in BETAS:
+        pi_b = politica_optima_kl(theta, log_ref, b)
+        kls.append(kl(pi_b, ref))
+        r_real.append(float(pi_b @ r_true))
+        r_aprend.append(float(pi_b @ theta))
+
+    return dict(r_true=r_true, ref=ref, log_ref=log_ref, theta=theta,
+                n_comparaciones=len(ganadores), hist_perdida=hist_perdida,
+                kls=np.array(kls), r_real=np.array(r_real),
+                r_aprend=np.array(r_aprend))
+
+
+def promedia_mundos(mundos):
+    """Pone los mundos en una rejilla común de KL y devuelve las curvas apiladas.
+
+    Cada mundo llega a una KL máxima distinta, así que interpolamos sobre la
+    rejilla más ancha que TODOS cubren: así promediamos sin extrapolar nada.
+    Por la izquierda añadimos a mano el punto exacto de KL = 0 (beta -&gt; infinito:
+    la política ES la referencia), que conocemos sin simularlo.
+    """
+    kl_max = min(m["kls"][-1] for m in mundos)
+    rejilla = np.linspace(0.0, kl_max, 60)
+
+    def curva(m, y, y_en_cero):
+        return np.interp(rejilla, np.r_[0.0, m["kls"]], np.r_[y_en_cero, y])
+
+    real = np.array([curva(m, m["r_real"], m["ref"] @ m["r_true"]) for m in mundos])
+    aprend = np.array([curva(m, m["r_aprend"], m["ref"] @ m["theta"]) for m in mundos])
+    return rejilla, real, aprend
+
+
+def main():
+    mundos = [simula_mundo(s) for s in range(N_MUNDOS)]
+    m0 = mundos[0]                             # el mundo que miramos con lupa
+    r_true, ref, log_ref, theta = m0["r_true"], m0["ref"], m0["log_ref"], m0["theta"]
+    K = len(r_true)
+
     corr = float(np.corrcoef(r_true, theta)[0, 1])
-    print("=== Modelo de recompensa (Bradley-Terry) ===")
-    print(f"Comparaciones usadas          : {len(ganadores)}")
-    print(f"Pérdida BT inicial -&gt; final   : {hist_perdida[0]:.4f} -&gt; {hist_perdida[-1]:.4f}")
+    print("=== Modelo de recompensa (Bradley-Terry), mundo 0 ===")
+    print(f"Comparaciones usadas          : {m0['n_comparaciones']}")
+    print(f"Pérdida BT inicial -&gt; final   : {m0['hist_perdida'][0]:.4f} -&gt; {m0['hist_perdida'][-1]:.4f}")
     print(f"Correlación r_theta vs r*     : {corr:.3f}")
     mejor_real = int(np.argmax(r_true))
     mejor_estim = int(np.argmax(theta))
@@ -433,9 +619,9 @@ def main():
     print(f"Mejor respuesta ESTIMADA       : #{mejor_estim}  "
           f"(r_theta = {theta[mejor_estim]:+.2f}, pero r* = {r_true[mejor_estim]:+.2f})")
 
-    # --- 3) Optimización de la política con penalización KL (análogo de PPO) ---
+    # --- Optimización de la política con penalización KL (análogo de PPO) ---
     beta_demo = 0.5
-    pi_ascenso, hist_rec, hist_kl = optimiza_politica_ascenso(theta, ref, beta_demo)
+    pi_ascenso, _, _ = optimiza_politica_ascenso(theta, ref, beta_demo)
     pi_cerrada = politica_optima_kl(theta, log_ref, beta_demo)
     print(f"\n=== Política KL-regularizada (beta = {beta_demo}) ===")
     print(f"Diferencia máx. ascenso vs solución cerrada : {np.max(np.abs(pi_ascenso - pi_cerrada)):.2e}")
@@ -443,28 +629,35 @@ def main():
           f"{ref @ r_true:+.3f} -&gt; {pi_ascenso @ r_true:+.3f}")
     print(f"Divergencia KL(pi_beta || pi_ref)            : {kl(pi_ascenso, ref):.3f}")
 
-    # --- 4) Barrido de beta: recompensa real vs. aprendida en función de la KL ---
-    betas = np.logspace(np.log10(4.0), np.log10(0.02), 60)
-    kls, r_real, r_aprend = [], [], []
-    for b in betas:
-        pi_b = politica_optima_kl(theta, log_ref, b)
-        kls.append(kl(pi_b, ref))
-        r_real.append(pi_b @ r_true)
-        r_aprend.append(pi_b @ theta)
-    kls, r_real, r_aprend = map(np.array, (kls, r_real, r_aprend))
-
-    i_pico = int(np.argmax(r_real))            # dónde la recompensa REAL es máxima
-    beta_pico = betas[i_pico]
+    # --- Sobre-optimización en el mundo 0 (UNA sola semilla) ---
+    i_pico = int(np.argmax(m0["r_real"]))      # dónde la recompensa REAL es máxima
+    beta_pico = BETAS[i_pico]
     pi_pico = politica_optima_kl(theta, log_ref, beta_pico)
-    pi_codicioso = politica_optima_kl(theta, log_ref, betas[-1])   # beta -&gt; 0: colapso
+    pi_codicioso = politica_optima_kl(theta, log_ref, BETAS[-1])   # beta -&gt; 0: colapso
 
-    print("\n=== Sobre-optimización (reward hacking) ===")
+    print("\n=== Sobre-optimización en el mundo 0 (una sola semilla) ===")
     print(f"E[r*] con el modelo base (ref)          : {ref @ r_true:+.3f}")
-    print(f"E[r*] con KL óptima (beta ~ {beta_pico:.2f})     : {pi_pico @ r_true:+.3f}")
+    print(f"E[r*] en el pico (beta ~ {beta_pico:.2f})          : {pi_pico @ r_true:+.3f}")
     print(f"E[r*] sin freno KL (beta -&gt; 0, colapso) : {pi_codicioso @ r_true:+.3f}")
     print(f"El óptimo REAL alcanzable                : {r_true.max():+.3f}")
 
-    # --- 5) Gráfica: ajuste del modelo + sobre-optimización + colapso ---
+    # --- ...y lo mismo en 20 mundos: ¿es una ley o es la semilla? ---
+    rejilla, real, aprend = promedia_mundos(mundos)
+    media, desv = real.mean(axis=0), real.std(axis=0)
+    caidas = np.array([m["r_real"].max() - m["r_real"][-1] for m in mundos])
+    medio = len(rejilla) // 2
+    print(f"\n=== ...y ahora en {N_MUNDOS} mundos (semillas 0..{N_MUNDOS - 1}) ===")
+    print(f"Caída pico -&gt; sin freno, por mundo   : mediana {np.median(caidas):.3f}, "
+          f"media {caidas.mean():.3f}")
+    print(f"Mundos que caen más de 0,05          : {(caidas &gt; 0.05).sum()} de {N_MUNDOS}")
+    print(f"E[r*] MEDIA, KL 0 -&gt; {rejilla[medio]:.2f} -&gt; {rejilla[-1]:.2f}    : "
+          f"{media[0]:+.3f} -&gt; {media[medio]:+.3f} -&gt; {media[-1]:+.3f}")
+    print(f"r_theta MEDIA en el mismo recorrido  : "
+          f"{aprend.mean(axis=0)[0]:+.3f} -&gt; {aprend.mean(axis=0)[medio]:+.3f} "
+          f"-&gt; {aprend.mean(axis=0)[-1]:+.3f}")
+    print(f"Desviación entre mundos al final     : {desv[-1]:.3f}")
+
+    # --- Gráfica: ajuste del modelo + sobre-optimización + colapso ---
     IND, CIAN, VERDE, AMBAR, ROJO, GRIS = (
         "#4f46e5", "#0ea5e9", "#059669", "#d97706", "#dc2626", "#94a3b8")
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(13.5, 4.4))
@@ -479,22 +672,26 @@ def main():
     ax1.grid(alpha=0.25)
 
     # (B) Sobre-optimización: al aumentar la KL, la recompensa aprendida sube
-    #     sin freno, pero la REAL sube, hace pico y colapsa.
-    ax2.plot(kls, r_aprend, color=AMBAR, lw=2, label="recompensa APRENDIDA (lo que optimizamos)")
-    ax2.plot(kls, r_real, color=IND, lw=2, label="recompensa REAL (lo que importa)")
-    ax2.axvline(kls[i_pico], color=VERDE, ls="--", lw=1.2)
-    ax2.scatter([kls[i_pico]], [r_real[i_pico]], color=VERDE, s=60, zorder=4,
-                label=f"KL óptima (beta ~ {beta_pico:.2f})")
+    #     sin freno; la REAL se estanca y, según el mundo, además cae.
+    ax2.plot(rejilla, aprend.mean(axis=0), color=AMBAR, lw=2,
+             label=f"APRENDIDA, media de {N_MUNDOS} mundos")
+    ax2.fill_between(rejilla, media - desv, media + desv, color=IND, alpha=0.18,
+                     label="REAL, ±1 desviación entre mundos")
+    ax2.plot(rejilla, media, color=IND, lw=2.2, label=f"REAL, media de {N_MUNDOS} mundos")
+    ax2.plot(m0["kls"], m0["r_real"], color=IND, lw=1.2, ls="--", alpha=0.75,
+             label="REAL, mundo 0 (una sola semilla)")
+    ax2.scatter([m0["kls"][i_pico]], [m0["r_real"][i_pico]], color=VERDE, s=55, zorder=4,
+                label=f"pico del mundo 0 (beta ~ {beta_pico:.2f})")
     ax2.set_xlabel("KL(pi || pi_ref)   (más optimización --&gt;)")
     ax2.set_ylabel("Recompensa esperada")
-    ax2.set_title("2) Sobre-optimización:\nla recompensa REAL colapsa")
-    ax2.legend(loc="lower right", fontsize=8.5)
+    ax2.set_title("2) Sobre-optimización: la recompensa REAL\nse estanca (y a veces cae)")
+    ax2.legend(loc="upper left", fontsize=7.5)
     ax2.grid(alpha=0.25)
 
-    # (C) Las políticas: sin KL, todo el peso cae en UNA respuesta (colapso).
+    # (C) Las políticas del mundo 0: sin KL, todo el peso cae en UNA respuesta.
     x = np.arange(K)
     ax3.bar(x - 0.27, ref, width=0.27, color=GRIS, label="pi_ref (modelo base)")
-    ax3.bar(x, pi_pico, width=0.27, color=IND, label=f"pi_beta (KL óptima)")
+    ax3.bar(x, pi_pico, width=0.27, color=IND, label="pi_beta (KL del pico)")
     ax3.bar(x + 0.27, pi_codicioso, width=0.27, color=ROJO, label="pi sin KL (colapso)")
     ax3.set_xlabel("Respuesta candidata  y")
     ax3.set_ylabel("Probabilidad  pi(y)")
@@ -519,16 +716,38 @@ if __name__ == "__main__":
           con la recompensa real, pero <em>no perfectamente</em>: hay puntos claramente fuera de la
           diagonal. Datos finitos, errores reales.</li>
           <li><strong>Panel 2 (sobre-optimización).</strong> Al permitir más divergencia (más KL,
-          hacia la derecha), la recompensa <em>aprendida</em> —lo que optimizamos— sube sin freno.
-          Pero la recompensa <em>real</em> —lo que de verdad importa— sube, alcanza un pico y luego
-          <strong>colapsa</strong>. Ese punto óptimo es el $\beta$ que buscamos.</li>
+          hacia la derecha), la recompensa <em>aprendida</em> —lo que optimizamos— sube sin freno. La
+          recompensa <em>real</em> —lo que de verdad importa— deja de subir mucho antes. Ahí hay dos
+          curvas azules y conviene no confundirlas: la <em>discontinua</em> es un solo mundo, el de la
+          semilla 0, donde la caída es de manual ($+0{,}611$ en el pico frente a $+0{,}388$ al final);
+          la <em>gruesa con banda</em> es la media de los 20 mundos que el programa simula, y ahí lo
+          que se ve no es un desplome sino un <strong>estancamiento</strong>: la primera mitad del
+          presupuesto de KL compra $+0{,}90$ de recompensa real y la segunda mitad solo $+0{,}18$,
+          mientras la aprendida sigue subiendo tan contenta.</li>
           <li><strong>Panel 3 (colapso).</strong> Sin freno KL, toda la probabilidad se concentra en
-          <em>una sola</em> respuesta: la que el modelo de recompensa más sobrevalora. La política
-          KL-óptima, en cambio, reparte su apuesta entre varias respuestas buenas.</li>
+          <em>una sola</em> respuesta: la que el modelo de recompensa más sobrevalora. La política del
+          pico, en cambio, reparte su apuesta entre varias respuestas buenas.</li>
         </ul>
 
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Cuidado con lo que acabas de leer</div>
+          <p>
+            Con <strong>una sola semilla</strong> el panel 2 dibuja un pico y un desplome
+            espectaculares, y es tentador enunciar la ley «la recompensa real siempre colapsa». Por
+            eso el programa no se conforma con un mundo: repite el pipeline entero —recompensa
+            oculta, preferencias, modelo de recompensa y barrido de $\beta$— en 20 mundos distintos.
+            Y el resultado es bastante más modesto: la caída <em>mediana</em> respecto del propio
+            pico es de $0{,}001$, y solo <strong>6 de los 20</strong> mundos pierden más de
+            $0{,}05$. Catorce de veinte no caen: se estancan. Lo robusto, por tanto, no es «la
+            recompensa real colapsa», sino «a partir de cierta KL dejas de ganar y empiezas a
+            arriesgar». Que es exactamente el aviso del
+            <a href="22-panorama.html#regla-de-oro">capítulo 22</a> —nunca saques una conclusión de
+            una sola ejecución— y lo acabamos de pillar en nuestro propio ejemplo.
+          </p>
+        </div>
+
         <div class="callout intuition">
-          <div class="callout-title">🧪 Es el sesgo de maximización, otra vez</div>
+          <div class="callout-title">🧠 Es el sesgo de maximización, otra vez</div>
           <p>
             ¿Por qué colapsar sobre el máximo de $r_\theta$ es mala idea? Porque
             $\arg\max_y r_\theta(y)$ tiende a elegir una respuesta cuya recompensa está
@@ -538,6 +757,45 @@ if __name__ == "__main__":
             máximo sobre valores ruidosos captura el ruido positivo. En RLHF, ese ruido es una
             respuesta que suena bien para la recompensa pero no para el humano: <em>reward hacking</em>.
             El freno KL lo evita al no dejar que la política se juegue todo a una carta.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Si el diagnóstico anterior es correcto —la caída viene del <em>error de estimación</em>
+            del modelo de recompensa—, entonces debería poder comprarse con datos. Compruébalo:
+            cambia <code>n_pares=220</code> en la cabecera de <code>simula_mundo</code> y vuelve a
+            ejecutar.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th><code>n_pares</code></th><th>Correlación $r_\theta$ vs $r^\star$</th><th>Mundos (de 20) que pierden más de $0{,}05$</th></tr></thead>
+              <tbody>
+                <tr><td>60</td><td>$0{,}587$</td><td>4</td></tr>
+                <tr><td>220 <em>(por defecto)</em></td><td>$0{,}823$</td><td>6</td></tr>
+                <tr><td>1000</td><td>$0{,}908$</td><td>2</td></tr>
+                <tr><td>5000</td><td>$0{,}986$</td><td>0</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            De $220$ a $5000$ la tendencia es limpia: cuantas más comparaciones, mejor se parece
+            $r_\theta$ a $r^\star$ y menos mundos se sobre-optimizan, hasta que con $5000$ no cae
+            ninguno. La fila de $60$ rompe la tendencia, y merece la pena entender por qué: cuando el
+            modelo de recompensa es malísimo, lo que la política encuentra al colapsar es casi una
+            lotería y a veces le toca bien. La lección segura está en el tramo largo.
+          </p>
+          <p>
+            <strong>Segunda perilla, más interesante todavía.</strong> Sustituye en
+            <code>simula_mundo</code> la línea <code>ref = np.ones(K) / K</code> por
+            <code>ref = softmax(r_true / 2)</code>: el modelo base deja de ser un ignorante que
+            reparte por igual y pasa a ser un SFT decente, que de partida ya rinde $+0{,}212$ en vez
+            de $0$. El pico sube a $+0{,}687$ (frente a $+0{,}611$) y —esto es lo bonito— lo alcanza
+            gastando menos: mira dónde cae el punto verde del panel 2, en una KL de $1{,}04$ en lugar
+            de $1{,}45$. Traducido: <strong>cuanto mejor es el modelo de referencia, más lejos llegas
+            moviéndote menos</strong>. Por eso, en un RLHF de verdad, la etapa de SFT no es un
+            trámite previo: es media batalla.
           </p>
         </div>
 
@@ -558,8 +816,16 @@ if __name__ == "__main__":
 <span class="prompt">$</span> python code/21-rlhf/rlhf_desde_cero.py
 <span class="comment">Correlación r_theta vs r*     : 0.823
 Mejor respuesta ESTIMADA       : #5  (r_theta = +1.58, pero r* = +0.39)
-E[r*] con KL óptima (beta ~ 0.25)     : +0.611
-E[r*] sin freno KL (beta -> 0, colapso) : +0.388</span></pre>
+
+=== Sobre-optimización en el mundo 0 (una sola semilla) ===
+E[r*] en el pico (beta ~ 0.25)          : +0.611
+E[r*] sin freno KL (beta -> 0, colapso) : +0.388
+
+=== ...y ahora en 20 mundos (semillas 0..19) ===
+Caída pico -> sin freno, por mundo   : mediana 0.001, media 0.117
+Mundos que caen más de 0,05          : 6 de 20
+E[r*] MEDIA, KL 0 -> 1.35 -> 2.66    : +0.000 -> +0.902 -> +1.081
+r_theta MEDIA en el mismo recorrido  : +0.000 -> +2.020 -> +2.664</span></pre>
         </div>
         <p class="pyodide-banner">
           💡 Este ejemplo corre entero en el navegador (solo numpy y matplotlib). El RLHF de un LLM
@@ -593,6 +859,16 @@ E[r*] sin freno KL (beta -> 0, colapso) : +0.388</span></pre>
             las preferencias.
           </p>
         </div>
+        <p>
+          Hay un paso lógico que casi nunca se escribe y que conviene ver, porque sin él el truco
+          parece magia. En esa fórmula $\pi^\star$ es la política <em>óptima</em>, un objeto que no
+          tenemos. Lo que hace DPO es darle la vuelta a la lectura: en vez de «entreno $r_\theta$ y
+          después busco su $\pi^\star$», declara que <strong>cualquier</strong> política $\pi_\phi$
+          define implícitamente una recompensa —la de la fórmula de arriba, con $\pi_\phi$ en el
+          sitio de $\pi^\star$—. No es un cambio de nombre: es una
+          <strong>reparametrización</strong>. Estamos describiendo la misma familia de recompensas
+          con otras coordenadas, las de la política, y optimizando directamente en ellas.
+        </p>
         <p>Sustituyendo, la pérdida de DPO es una simple regresión logística sobre la política:</p>
         <div class="callout math">
           <div class="callout-title">➗ Pérdida de DPO</div>
@@ -603,6 +879,23 @@ E[r*] sin freno KL (beta -> 0, colapso) : +0.388</span></pre>
             implícita. Por su simplicidad y estabilidad, DPO se ha vuelto enormemente popular. A cambio,
             al no muestrear del modelo durante el entrenamiento, es <em>off-policy</em> y a veces
             generaliza peor que un PPO bien ajustado.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Un fallo conocido de DPO</div>
+          <p>
+            Vuelve a mirar la pérdida y pregúntate cuál es el camino <em>más barato</em> para
+            bajarla. Solo se pide que <strong>crezca la diferencia</strong> entre los dos
+            log-cocientes, y eso se consigue igual de bien subiendo el de la ganadora que hundiendo
+            el de la perdedora. En la práctica ocurre lo segundo: al entrenar con DPO se observa que
+            <em>bajan las dos</em> log-probabilidades, la de $y_w$ y la de $y_l$, solo que la de la
+            perdedora baja más deprisa. El modelo <strong>aprende a rechazar mejor de lo que aprende
+            a preferir</strong>, y si se le da cuerda acaba alejándose de las dos respuestas a la
+            vez —incluida la buena—. Por eso las recetas actuales añaden un término de máxima
+            verosimilitud sobre $y_w$ que sujete la log-probabilidad de la ganadora, o simplemente
+            vigilan $\log \pi_\phi(y_w \mid x)$ durante el entrenamiento: si baja, algo va mal por
+            mucho que la pérdida esté bajando.
           </p>
         </div>
 
@@ -628,6 +921,24 @@ E[r*] sin freno KL (beta -> 0, colapso) : +0.388</span></pre>
             y muy eficaz cuando la recompensa es barata de evaluar en lote.
           </p>
         </div>
+
+        <h3>RLAIF: cuando el que compara es otro modelo</h3>
+        <p>
+          Los tres métodos anteriores cambian <em>cómo</em> se optimiza, pero todos beben del mismo
+          pozo: comparaciones etiquetadas por personas. Y ese pozo es caro y lento. La idea de
+          <strong>RLAIF</strong> (<em>RL from AI Feedback</em>) es sustituir al etiquetador humano por
+          otro modelo de lenguaje al que se le pide que elija entre dos respuestas siguiendo un
+          documento de criterios escrito por humanos —una <em>constitución</em>, de ahí el nombre
+          <strong>Constitutional AI</strong> con el que Anthropic popularizó la técnica—. El humano
+          deja de anotar cada par y pasa a escribir las reglas.
+        </p>
+        <p>
+          A partir de ahí no cambia nada: esas comparaciones sintéticas entran en la misma pérdida de
+          Bradley-Terry y la política se afina igual. Por eso escala tan bien… y por eso el aviso del
+          principio vale doble. Un juez automático también tiene sus manías —longitud, formato,
+          coincidir con quien pregunta— y ahora esas manías se convierten en recompensa sin que
+          ninguna persona las haya visto pasar.
+        </p>
 
         <div class="table-wrap">
           <table>

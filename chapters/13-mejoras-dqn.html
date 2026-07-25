@@ -32,8 +32,9 @@
         <span class="chapter-eyebrow">Parte 2 · Capítulo 13</span>
         <h1>Mejoras de DQN</h1>
         <p class="lead">
-          El <a href="12-dqn.html">DQN</a> del capítulo anterior ya aprende a jugar mirando píxeles,
-          pero en la práctica es <strong>inestable y demasiado optimista</strong>. En este capítulo
+          El <a href="12-dqn.html">DQN</a> del capítulo anterior es el algoritmo que aprendió a jugar
+          a Atari mirando los píxeles, y ya lo has implementado dos veces. Pero, como viste en la
+          traza de CartPole, en la práctica es <strong>inestable y demasiado optimista</strong>. En este capítulo
           añadimos tres mejoras clásicas que lo transforman en un algoritmo robusto:
           <strong>Double DQN</strong> (contra la sobreestimación), <strong>Dueling</strong>
           (una arquitectura más lista) y <strong>Prioritized Experience Replay</strong>
@@ -61,6 +62,11 @@
         </p>
 
         <h2 id="sesgo">El sesgo de maximización</h2>
+        <p>
+          Ya te lo adelantamos en el <a href="09-q-learning.html#sesgo-max">capítulo 9</a>, cuando
+          Q-Learning se estrenó con su $\max$: dijimos que ese operador tenía un vicio y que lo
+          desarrollaríamos aquí. Pues aquí estamos.
+        </p>
         <p>
           Imagina que quieres saber cuánto vale la mejor de diez cajas, pero solo puedes estimar el
           valor de cada una con un ruido de medición. Si abres todas, miras tus estimaciones y te
@@ -134,8 +140,27 @@
           <p class="math-note">
             La red <em>online</em> $\theta$ señala la acción $a^\star = \arg\max_{a'} Q(s',a';\theta)$;
             la red <em>target</em> $\theta^-$ dice cuánto vale $Q(s',a^\star;\theta^-)$. Como las dos
-            redes cometen errores <strong>distintos</strong> y con ruidos poco correlacionados, es
-            improbable que ambas se equivoquen al alza en la misma acción. El optimismo se desinfla.
+            redes <strong>no son idénticas</strong>, es menos probable que ambas se equivoquen al alza
+            en la misma acción. El optimismo se desinfla.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Double DQN no es Double Q-learning</div>
+          <p>
+            Ese «menos probable» está medido con cuentagotas a propósito, porque aquí hay una letra
+            pequeña importante. En la versión <strong>tabular</strong>, Double Q-learning mantiene dos
+            tablas <em>de verdad</em> independientes: cada una se entrena con la mitad de las muestras,
+            así que sus errores no tienen nada que ver entre sí. En <strong>Double DQN</strong> no
+            pagamos una tercera red: reciclamos la <em>target</em> que ya teníamos. Y la
+            <em>target</em> no es independiente de la <em>online</em>; es la <em>online</em> de hace
+            unos miles de pasos.
+          </p>
+          <p>
+            La descorrelación, por tanto, es <strong>parcial</strong>, y la corrección también:
+            Double DQN recorta mucho la sobreestimación, no la borra, y en algunos entornos incluso se
+            pasa de frenada e <em>infra</em>estima. Es un compromiso deliberado —cero redes nuevas,
+            cero cómputo extra— y en Atari bastó para multiplicar la puntuación en varios juegos.
           </p>
         </div>
 
@@ -209,20 +234,20 @@
             </defs>
             <!-- estado -->
             <rect x="20" y="105" width="90" height="50" rx="10" fill="#0ea5e9" />
-            <text x="65" y="135" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">estado $s$</text>
+            <text x="65" y="135" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">estado <tspan font-style="italic">s</tspan></text>
             <!-- tronco -->
             <rect x="150" y="100" width="130" height="60" rx="10" fill="#6366f1" />
             <text x="215" y="126" text-anchor="middle" fill="#fff" font-size="13" font-family="sans-serif" font-weight="700">capas</text>
             <text x="215" y="144" text-anchor="middle" fill="#fff" font-size="13" font-family="sans-serif" font-weight="700">compartidas</text>
             <!-- rama V -->
             <rect x="330" y="40" width="150" height="48" rx="10" fill="#10b981" />
-            <text x="405" y="70" text-anchor="middle" fill="#fff" font-size="14" font-family="sans-serif" font-weight="700">valor  $V(s)$</text>
+            <text x="405" y="70" text-anchor="middle" fill="#fff" font-size="14" font-family="sans-serif" font-weight="700">valor  <tspan font-style="italic">V</tspan>(<tspan font-style="italic">s</tspan>)</text>
             <!-- rama A -->
             <rect x="330" y="172" width="150" height="48" rx="10" fill="#f59e0b" />
-            <text x="405" y="202" text-anchor="middle" fill="#fff" font-size="14" font-family="sans-serif" font-weight="700">ventaja  $A(s,a)$</text>
+            <text x="405" y="202" text-anchor="middle" fill="#fff" font-size="14" font-family="sans-serif" font-weight="700">ventaja  <tspan font-style="italic">A</tspan>(<tspan font-style="italic">s</tspan>,<tspan font-style="italic">a</tspan>)</text>
             <!-- Q -->
             <rect x="530" y="105" width="90" height="50" rx="10" fill="#4f46e5" />
-            <text x="575" y="135" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700">$Q(s,a)$</text>
+            <text x="575" y="135" text-anchor="middle" fill="#fff" font-size="15" font-family="sans-serif" font-weight="700"><tspan font-style="italic">Q</tspan>(<tspan font-style="italic">s</tspan>,<tspan font-style="italic">a</tspan>)</text>
             <!-- flechas -->
             <path d="M110,130 L148,130" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow13)" />
             <path d="M280,120 C305,120 305,66 328,64" fill="none" stroke="#10b981" stroke-width="2.5" marker-end="url(#arrow13)" />
@@ -301,11 +326,44 @@
           </p>
         </div>
 
+        <div class="callout intuition">
+          <div class="callout-title">🧠 De dónde sale ese $1/(N\,P(i))$</div>
+          <p>
+            No es una fórmula caída del cielo: es el <a href="06-monte-carlo.html#off-policy">muestreo
+            por importancia</a> del capítulo 6, en su versión más simple. Lo que queríamos calcular
+            era la media uniforme sobre la memoria, $\frac{1}{N}\sum_i f_i$. Lo que ahora podemos
+            calcular es una media bajo $P$. Y las dos coinciden si metemos el peso adecuado:
+          </p>
+          <p>$$\frac{1}{N}\sum_{i} f_i \;=\; \sum_i P(i)\,\underbrace{\frac{1}{N\,P(i)}}_{w_i}\,f_i \;=\; \mathbb{E}_{i \sim P}\big[w_i\, f_i\big]$$</p>
+          <p class="math-note">
+            Léelo así: <strong>una transición que sacas diez veces más a menudo de lo que le tocaría
+            entra con un peso diez veces menor</strong>, y la cuenta cuadra. El $\beta$ es lo que le
+            añadimos por encima, y es puro pragmatismo: al principio del entrenamiento los valores
+            están tan lejos de la verdad que el sesgo da igual y preferimos aprender rápido; al final,
+            cuando lo que importa es converger al sitio correcto, subimos $\beta$ a $1$ y pagamos la
+            corrección entera.
+          </p>
+        </div>
+
         <p>
           En la implementación eficiente, la memoria se organiza con una <em>sum-tree</em> que
           permite muestrear proporcionalmente en tiempo $O(\log N)$, y tras cada actualización se
           refrescan las prioridades de las transiciones usadas con su nuevo $|\delta|$.
         </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ ¿Y qué prioridad le pones a una transición recién llegada?</div>
+          <p>
+            Es la pregunta que a todo el mundo se le olvida al implementarlo, y tiene una respuesta
+            fija: <strong>la máxima que haya ahora mismo en la memoria</strong>, $p_i = \max_k p_k$.
+            El motivo es que una transición nueva todavía no tiene error TD calculado —no ha pasado
+            nunca por la red—, y si le asignaras un $0$, o incluso un valor pequeño, quedaría
+            enterrada para siempre: no se muestrearía, luego no se le calcularía $\delta$, luego su
+            prioridad seguiría siendo baja. El agente no aprendería nunca de lo que acaba de vivir.
+            Dándole la prioridad máxima garantizas que cada transición se visite <em>al menos una
+            vez</em>, y a partir de ahí ya se coloca en su sitio con su $|\delta|$ real.
+          </p>
+        </div>
 
         <h2 id="ejemplo">Ejemplo 1: el sesgo de maximización, en vivo</h2>
         <p>
@@ -317,6 +375,27 @@
           exploración es $\varepsilon$-greedy con $\varepsilon = 0{,}1$, un agente perfecto elegiría
           «izquierda» solo por exploración: un $\varepsilon/2 = 5\%$ de las veces.
         </p>
+        <p>
+          Antes de leer el código conviene una advertencia, porque el algoritmo que verás
+          <strong>no es exactamente el Double DQN</strong> de la fórmula de arriba. En una tabla no
+          hay red <em>online</em> ni red <em>target</em>: hay dos tablas de verdad independientes,
+          $Q_1$ y $Q_2$, y una moneda decide en cada transición cuál de las dos se actualiza.
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ Double Q-learning tabular (el del ejemplo)</div>
+          <p>$$Q_1(s,a) \;\leftarrow\; Q_1(s,a) + \alpha\Big[\,r + \gamma\, Q_2\big(s',\, \arg\max_{a'} Q_1(s',a')\big) - Q_1(s,a)\Big]$$</p>
+          <p class="math-note">
+            …y lo simétrico intercambiando los papeles cuando la moneda sale cruz. Fíjate en el
+            reparto: la tabla que <strong>se actualiza</strong> es la que <strong>elige</strong> la
+            acción, y la otra —entrenada con la otra mitad de las muestras, así que sus errores
+            <em>sí</em> son independientes— es la que le pone <strong>precio</strong>. Para actuar
+            usamos $\varepsilon$-greedy sobre $Q_1 + Q_2$, que es mejor estimación que cualquiera de
+            las dos por separado porque promedia el ruido de ambas. En el código lo reconocerás
+            enseguida: <code>c = rng.random(RUNS) &lt; 0.5</code> es la moneda,
+            <code>bootstrap_doble(Q1B, Q2B)</code> es el objetivo cruzado y
+            <code>eps_greedy(Q1A + Q2A)</code> la política de comportamiento.
+          </p>
+        </div>
         <p>
           Todo está <strong>vectorizado con numpy</strong> sobre $2000$ ejecuciones paralelas, así
           que corre en un par de segundos. Pulsa <strong>▶ Ejecutar</strong>.
@@ -458,30 +537,248 @@ plt.show()
 
         <p>
           Verás que <strong>Q-learning</strong> arranca eligiendo «izquierda» en una fracción muy
-          alta de episodios y, aunque va bajando, tarda muchísimo en acercarse al $5\%$ óptimo:
-          el máximo sobre las estimaciones ruidosas de $B$ lo mantiene engañado. <strong>Double
-          Q-learning</strong>, en cambio, baja hacia el $5\%$ mucho antes, porque separar la
-          selección de la evaluación desactiva el optimismo. La curva roja por encima de la azul
-          <em>es</em> el sesgo de maximización hecho gráfica.
+          alta de episodios —un $69{,}4\%$ en los diez primeros— y, aunque va bajando, se queda en el
+          $12{,}4\%$ al final: más del doble del $5\%$ óptimo. El máximo sobre las estimaciones
+          ruidosas de $B$ lo mantiene engañado. <strong>Double Q-learning</strong> arranca ya más bajo
+          ($49{,}2\%$, porque sus dos tablas se desempatan entre sí desde el principio) y termina en
+          el $7{,}1\%$, a un suspiro del óptimo. La curva roja por encima de la azul <em>es</em> el
+          sesgo de maximización hecho gráfica.
         </p>
 
         <div class="callout intuition">
           <div class="callout-title">🧪 Experimenta</div>
           <p>
             Sube <code>N_B</code> de $10$ a $50$: con más acciones ruidosas en $B$, el $\max$ tiene
-            más candidatos entre los que «elegir suerte» y el sesgo de Q-learning empeora. O sube
-            <code>SIGMA</code>: más ruido, más sobreestimación. ¿Cuánto le cuesta a Double
-            Q-learning en comparación?
+            más candidatos entre los que «elegir suerte». El resultado es demoledor: Q-learning
+            termina eligiendo «izquierda» un <strong>$79{,}8\%$</strong> de las veces, o sea que en
+            $300$ episodios <em>empeora</em> respecto a como empezó, mientras Double Q-learning se
+            planta en el $6{,}8\%$ igual de tranquilo. Prueba también a subir <code>SIGMA</code> de
+            $1{,}0$ a $3{,}0$: más ruido, más sobreestimación —Q-learning pasa del $12{,}4\%$ al
+            $19{,}1\%$—, y Double apenas se mueve, del $7{,}1\%$ al $8{,}1\%$.
           </p>
         </div>
 
-        <h2 id="pytorch">Ejemplo 2: Double + Dueling en CartPole (PyTorch)</h2>
+        <h2 id="ejemplo-per">Ejemplo 2: cuánto vale priorizar (Blind Cliffwalk)</h2>
+        <p>
+          De las tres mejoras, PER es la más fácil de contar y la más difícil de creer sin verla.
+          Schaul y sus coautores la presentaron con un entorno de juguete diseñado a propósito para
+          exagerar el efecto: el <strong>Blind Cliffwalk</strong>.
+        </p>
+        <p>
+          Es un pasillo de $n$ estados con <strong>dos</strong> acciones. En cada estado una de las
+          dos es la buena y avanza al siguiente; la otra termina el episodio con recompensa $0$. Solo
+          al salir del último estado por la puerta buena se cobra un $+1$. Y el agente no sabe cuál
+          es cuál —de ahí lo de <em>blind</em>—, así que una política aleatoria acierta la secuencia
+          entera con probabilidad $2^{-n}$.
+        </p>
+        <p>
+          Aquí está la gracia del montaje, y conviene no saltársela: llenamos la memoria con esa
+          política aleatoria <strong>hasta que un episodio llega al final</strong>. Cuando eso ocurre,
+          la memoria guarda del orden de $2^n$ transiciones y <strong>exactamente una</strong> lleva
+          recompensa; todo lo demás es paja. Después la congelamos y hacemos actualizaciones
+          tabulares de Q-learning —con $\alpha = 1$ y un entorno determinista, cada actualización es
+          exacta— eligiendo qué repetir de dos maneras: al azar, como el <em>replay</em> de
+          <a href="12-dqn.html#replay">DQN</a>, o siempre la de $|\delta|$ mayor.
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El oráculo no es PER: es su techo</div>
+          <p>
+            Recorrer la memoria entera en cada actualización para quedarse con el $|\delta|$ máximo
+            cuesta $O(N)$ por paso: impensable con un millón de transiciones. Por eso el PER de
+            verdad hace tres concesiones —muestreo <strong>estocástico</strong> proporcional a
+            $p_i^{\alpha}$ sobre una <em>sum-tree</em>, prioridades que solo se refrescan cuando la
+            transición sale sorteada, y pesos de importancia para deshacer el sesgo—. La curva del
+            oráculo te dice cuánto hay en juego; PER se queda a medio camino. En el 🧪 de más abajo
+            lo mides tú mismo.
+          </p>
+        </div>
+
+        <div class="code-example" data-packages="numpy,matplotlib">
+          <div class="code-header">
+            <span class="file-name">per_blind_cliffwalk.py</span>
+            <div class="code-actions">
+              <button class="btn-run">▶ Ejecutar</button>
+              <button class="btn-copy">Copiar</button>
+              <button class="btn-download"><span>Descargar .py</span></button>
+            </div>
+          </div>
+          <pre class="code-source"><code>"""
+per_blind_cliffwalk.py - Por que priorizar la experiencia cambia el orden de
+magnitud del aprendizaje (Schaul et al., 2015, "Prioritized Experience Replay").
+
+El entorno "Blind Cliffwalk" es un pasillo de n estados con DOS acciones. En cada
+estado una de las dos es la buena (se sortea al azar y el agente no la conoce: de
+ahi lo de "blind"). La buena avanza al estado siguiente; la mala termina el
+episodio con recompensa 0. Solo al salir del ultimo estado por la puerta buena se
+cobra +1. Una politica aleatoria acierta la secuencia entera con probabilidad
+2^-n: la memoria se llena de basura y contiene UNA sola transicion con recompensa.
+
+Con esa memoria congelada hacemos actualizaciones tabulares de Q-learning
+(alpha = 1, entorno determinista, asi que cada actualizacion es exacta) y
+comparamos tres formas de elegir que transicion repetir:
+
+  * uniforme    : al azar, como el replay buffer de DQN del capitulo 12.
+  * PER         : sorteo con probabilidad proporcional a p_i^ALPHA, con
+                  p_i = |error TD| + eps refrescado SOLO cuando la transicion
+                  sale sorteada (prioridades rancias incluidas, como en el
+                  articulo). Las nuevas entran con la prioridad maxima.
+  * oraculo     : siempre la de mayor |error TD| ahora mismo. Cuesta O(N) por
+                  actualizacion, es impracticable, y marca el techo teorico.
+
+Ejecucion en tu terminal:
+    python code/13-mejoras-dqn/per_blind_cliffwalk.py
+"""
+import numpy as np
+import matplotlib.pyplot as plt
+
+N_MIN, N_MAX = 4, 12   # longitudes del pasillo que barremos
+REPETICIONES = 5       # memorias distintas por longitud (el uniforme es ruidoso)
+ALPHA = 0.6            # exponente de priorizacion de PER
+EPS = 1e-6             # para que ninguna transicion tenga probabilidad cero
+TOL = 1e-3             # cuando consideramos que Q ha convergido a Q*
+MAX_ACTUALIZACIONES = 2_000_000
+
+# Modos que se miden. Escribe ("uniforme", "per", "oraculo") para medir tambien
+# el PER realista; tarda unos 10 segundos mas.
+MODOS = ("uniforme", "oraculo")
+
+
+def construir_memoria(n, rng):
+    """Politica aleatoria hasta que UN episodio llega al final y cobra el +1."""
+    buena = rng.integers(0, 2, size=n)   # accion correcta en cada estado
+    memoria = []
+    while True:
+        s = 0
+        while True:
+            a = int(rng.integers(0, 2))
+            if a != buena[s]:                     # accion mala -&gt; fin, r = 0
+                memoria.append((s, a, 0.0, -1, True))
+                break
+            if s == n - 1:                        # ultima puerta buena -&gt; fin, r = 1
+                memoria.append((s, a, 1.0, -1, True))
+                return buena, memoria
+            memoria.append((s, a, 0.0, s + 1, False))
+            s += 1
+
+
+def q_optima(n, buena, gamma):
+    """Q*(s, buena) = gamma^(pasos que faltan); Q*(s, mala) = 0."""
+    Q = np.zeros((n, 2))
+    for s in range(n):
+        Q[s, buena[s]] = gamma ** (n - 1 - s)
+    return Q
+
+
+def objetivo(Q, transicion, gamma):
+    s, a, r, s2, fin = transicion
+    return r if fin else r + gamma * Q[s2].max()
+
+
+def repetir(memoria, n, gamma, Qopt, modo, rng):
+    """Devuelve cuantas actualizaciones hacen falta para llegar a Q*."""
+    Q = np.zeros((n, 2))
+    M = len(memoria)
+    prioridad = np.ones(M)   # las transiciones nuevas entran con la maxima
+    for t in range(1, MAX_ACTUALIZACIONES + 1):
+        if modo == "uniforme":
+            i = int(rng.integers(0, M))
+        elif modo == "per":                    # sorteo proporcional a p^ALPHA
+            p = prioridad ** ALPHA
+            i = int(rng.choice(M, p=p / p.sum()))
+        else:                                  # oraculo: el |delta| mayor de todos
+            errores = [abs(objetivo(Q, tr, gamma) - Q[tr[0], tr[1]]) for tr in memoria]
+            i = int(np.argmax(errores))
+        s, a, *_ = memoria[i]
+        delta = objetivo(Q, memoria[i], gamma) - Q[s, a]
+        prioridad[i] = abs(delta) + EPS        # solo se refresca la que ha salido
+        Q[s, a] += delta                       # alpha = 1: actualizacion exacta
+        if np.abs(Q - Qopt).max() &lt; TOL:
+            return t
+    return MAX_ACTUALIZACIONES
+
+
+COLOR = {"uniforme": "#dc2626", "per": "#f59e0b", "oraculo": "#4f46e5"}
+ETIQUETA = {"uniforme": "replay uniforme",
+            "per": "PER realista (p^0,6, prioridades rancias)",
+            "oraculo": "oraculo gloton (techo teorico)"}
+
+ns = list(range(N_MIN, N_MAX + 1))
+resultado = {m: [] for m in MODOS}
+tam = []
+cabecera = "  n   |memoria|" + "".join(f"{m:&gt;12}" for m in MODOS)
+print(cabecera)
+print("  " + "-" * (len(cabecera) - 2))
+for n in ns:
+    gamma = 1.0 - 1.0 / n
+    acum = {m: [] for m in MODOS}
+    t_mem = []
+    for rep in range(REPETICIONES):
+        rng = np.random.default_rng(1000 * n + rep)
+        buena, memoria = construir_memoria(n, rng)
+        Qopt = q_optima(n, buena, gamma)
+        t_mem.append(len(memoria))
+        for m in MODOS:
+            acum[m].append(repetir(memoria, n, gamma, Qopt, m, rng))
+    tam.append(np.mean(t_mem))
+    for m in MODOS:
+        resultado[m].append(np.mean(acum[m]))
+    fila = "".join(f"{resultado[m][-1]:12.1f}" for m in MODOS)
+    print(f" {n:2d}   {tam[-1]:8.0f}{fila}")
+
+print()
+print(f"Con n = {ns[-1]}: " + ",  ".join(
+    f"{ETIQUETA[m].split(' (')[0]} {resultado[m][-1]:.0f}" for m in MODOS) + " actualizaciones.")
+print(f"Factor uniforme/oraculo con n = {ns[-1]}: "
+      f"x{resultado['uniforme'][-1] / resultado['oraculo'][-1]:.0f}")
+
+plt.figure(figsize=(7.5, 4.5))
+for m in MODOS:
+    plt.plot(ns, resultado[m], "o-", color=COLOR[m], lw=2, label=ETIQUETA[m])
+plt.yscale("log")
+plt.xlabel("n (longitud del pasillo)")
+plt.ylabel("actualizaciones hasta alcanzar Q*  (escala log)")
+plt.title("Blind Cliffwalk: coste de aprender segun como se muestrea")
+plt.legend()
+plt.grid(alpha=0.25, which="both")
+plt.tight_layout()
+plt.show()
+</code></pre>
+        </div>
+
+        <p>
+          Las dos columnas crecen de forma muy distinta. La de <strong>uniforme</strong> sigue al
+          tamaño de la memoria, que se duplica cada vez que alargas el pasillo un estado: de $47$
+          actualizaciones con $n=4$ a casi $22\,000$ con $n=12$. La de <strong>oráculo</strong> vale
+          <em>exactamente $n$</em>: actualiza primero la transición que cobra el $+1$, después la que
+          lleva a ella, después la anterior… y en $n$ pasos ha propagado el valor de punta a punta.
+          Con $n=12$ el factor entre las dos es de $1812$. No es que priorizar acelere un poco: es
+          que cambia el <strong>orden de crecimiento</strong> del problema, de exponencial a lineal.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Cambia la línea <code>MODOS = ("uniforme", "oraculo")</code> por
+            <code>MODOS = ("uniforme", "per", "oraculo")</code>: eso enciende un PER realista, con
+            sorteo proporcional a $p_i^{0{,}6}$ y prioridades que solo se refrescan cuando la
+            transición sale elegida. La ventaja se encoge muchísimo: con $n=12$ no baja a las $12$
+            actualizaciones del oráculo, sino a unas $9\,400$ —por debajo de las $21\,700$ del
+            uniforme, pero a años luz del techo—. Ese hueco es el precio de las prioridades rancias,
+            y es el mayor problema práctico de PER. (Tarda unos diez segundos más.)
+          </p>
+        </div>
+
+        <h2 id="pytorch">Ejemplo 3: Double + Dueling en CartPole (PyTorch)</h2>
         <p>
           Ahora llevamos dos de las mejoras a una red neuronal de verdad sobre
           <strong>CartPole-v1</strong>. Este ejemplo combina el <strong>objetivo de Double DQN</strong>
           (la <em>online</em> elige, la <em>target</em> evalúa) con la <strong>arquitectura
           dueling</strong> de dos ramas $V$ y $A$. Añadir PER encima sería el siguiente paso: solo
-          hay que cambiar el <em>replay buffer</em> uniforme por uno con prioridades.
+          hay que cambiar el <em>replay buffer</em> uniforme por uno con prioridades. Y trae una
+          bandera, <code>--sin-mejoras</code>, que apaga las dos y deja el DQN «a secas» del
+          <a href="12-dqn.html">capítulo 12</a> con los mismos hiperparámetros y la misma semilla:
+          la usaremos justo después para comparar de verdad, sin trampas.
         </p>
         <div class="callout warn">
           <div class="callout-title">⚠️ Este ejemplo se ejecuta en tu terminal</div>
@@ -518,11 +815,16 @@ navegador. Reune dos mejoras de DQN del capitulo 13:
 Anadir Prioritized Experience Replay (PER) es una extension natural: bastaria
 sustituir el ReplayBuffer uniforme por uno que muestree segun |error TD|.
 
+La bandera --sin-mejoras apaga las dos y deja el DQN 'a secas' del capitulo 12,
+con los mismos hiperparametros y la misma semilla: sirve para comparar de verdad.
+
 Requisitos:
     pip install torch gymnasium
 Ejecucion:
     python code/13-mejoras-dqn/double_dueling_torch.py
+    python code/13-mejoras-dqn/double_dueling_torch.py --sin-mejoras
 """
+import argparse
 import random
 from collections import deque, namedtuple
 
@@ -531,12 +833,6 @@ import gymnasium as gym
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-# --- Reproducibilidad ---
-SEED = 0
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
 
 Transicion = namedtuple("Transicion", ["s", "a", "r", "s2", "fin"])
 
@@ -563,33 +859,45 @@ class ReplayBuffer:
         return len(self.buf)
 
 
-class DuelingQNet(nn.Module):
-    """Red Dueling: Q(s,a) = V(s) + (A(s,a) - media_a A(s,a))."""
+class QNet(nn.Module):
+    """Red Q. Con dueling=True: Q(s,a) = V(s) + (A(s,a) - media_a A(s,a));
+    con dueling=False, una sola cabeza lineal como el DQN del capitulo 12."""
 
-    def __init__(self, n_obs, n_acc, oculto=128):
+    def __init__(self, n_obs, n_acc, oculto=128, dueling=True):
         super().__init__()
+        self.dueling = dueling
         self.cuerpo = nn.Sequential(
             nn.Linear(n_obs, oculto), nn.ReLU(),
             nn.Linear(oculto, oculto), nn.ReLU(),
         )
-        self.valor = nn.Linear(oculto, 1)        # rama V(s)   -&gt; escalar
-        self.ventaja = nn.Linear(oculto, n_acc)  # rama A(s,a) -&gt; una por accion
+        if dueling:
+            self.valor = nn.Linear(oculto, 1)        # rama V(s)   -&gt; escalar
+            self.ventaja = nn.Linear(oculto, n_acc)  # rama A(s,a) -&gt; una por accion
+        else:
+            self.salida = nn.Linear(oculto, n_acc)   # cabeza unica: Q(s,a) directo
 
     def forward(self, x):
         h = self.cuerpo(x)
-        v = self.valor(h)                        # (batch, 1)
-        a = self.ventaja(h)                      # (batch, n_acc)
+        if not self.dueling:
+            return self.salida(h)
+        v = self.valor(h)                            # (batch, 1)
+        a = self.ventaja(h)                          # (batch, n_acc)
         # restar la media de la ventaja fija la ambiguedad V/A y estabiliza
         return v + (a - a.mean(dim=1, keepdim=True))
 
 
-def entrenar(episodios=400):
+def entrenar(episodios=400, doble=True, dueling=True, semilla=0):
+    random.seed(semilla)
+    np.random.seed(semilla)
+    torch.manual_seed(semilla)
+
     env = gym.make("CartPole-v1")
+    env.action_space.seed(semilla)   # las acciones al azar tambien han de ser reproducibles
     n_obs = env.observation_space.shape[0]
     n_acc = env.action_space.n
 
-    online = DuelingQNet(n_obs, n_acc)
-    target = DuelingQNet(n_obs, n_acc)
+    online = QNet(n_obs, n_acc, dueling=dueling)
+    target = QNet(n_obs, n_acc, dueling=dueling)
     target.load_state_dict(online.state_dict())
     opt = torch.optim.Adam(online.parameters(), lr=1e-3)
 
@@ -601,9 +909,13 @@ def entrenar(episodios=400):
     INICIO_APRENDER = 1000   # transiciones minimas antes de entrenar
     pasos = 0
     historial = deque(maxlen=20)
+    todos = []
+
+    etiqueta = f"Double={doble}  Dueling={dueling}  semilla={semilla}"
+    print(f"Entrenando {episodios} episodios de CartPole-v1  ({etiqueta})")
 
     for ep in range(1, episodios + 1):
-        s, _ = env.reset(seed=SEED + ep)
+        s, _ = env.reset(seed=semilla + ep)
         total, done = 0.0, False
         while not done:
             eps = EPS_FIN + (EPS_INI - EPS_FIN) * np.exp(-pasos / EPS_DECAY)
@@ -627,9 +939,13 @@ def entrenar(episodios=400):
                 bs, ba, br, bs2, bfin = buffer.sample(BATCH)
                 q_sa = online(bs).gather(1, ba)                 # Q(s,a) actual
                 with torch.no_grad():
-                    # DOUBLE DQN: online elige la accion, target la evalua
-                    a_star = online(bs2).argmax(dim=1, keepdim=True)
-                    q_next = target(bs2).gather(1, a_star)
+                    if doble:
+                        # DOUBLE DQN: online elige la accion, target la evalua
+                        a_star = online(bs2).argmax(dim=1, keepdim=True)
+                        q_next = target(bs2).gather(1, a_star)
+                    else:
+                        # DQN clasico: la target elige Y evalua (el max de siempre)
+                        q_next = target(bs2).max(dim=1, keepdim=True).values
                     y = br + GAMMA * (1.0 - bfin) * q_next
                 perdida = F.smooth_l1_loss(q_sa, y)
                 opt.zero_grad()
@@ -641,16 +957,27 @@ def entrenar(episodios=400):
                 target.load_state_dict(online.state_dict())
 
         historial.append(total)
+        todos.append(total)
         if ep % 20 == 0:
             media = np.mean(historial)
             print(f"Episodio {ep:3d} | recompensa media (ult. 20) = {media:6.1f} | eps = {eps:.3f}")
 
     env.close()
-    print("Listo. CartPole-v1 se considera resuelto con recompensa media &gt;= 475.")
+    ult100 = float(np.mean(todos[-100:]))
+    peor20 = min(np.mean(todos[i:i + 20]) for i in range(len(todos) // 2, len(todos) - 19))
+    print(f"Media de los ultimos 100 episodios : {ult100:6.1f}")
+    print(f"Peor ventana de 20 (2a mitad)      : {peor20:6.1f}")
+    return ult100, peor20
 
 
 if __name__ == "__main__":
-    entrenar()
+    p = argparse.ArgumentParser(description="Double + Dueling DQN sobre CartPole-v1")
+    p.add_argument("--sin-mejoras", action="store_true",
+                   help="apaga Double y Dueling: el DQN 'a secas' del capitulo 12")
+    p.add_argument("--semilla", type=int, default=0)
+    args = p.parse_args()
+    entrenar(doble=not args.sin_mejoras, dueling=not args.sin_mejoras,
+             semilla=args.semilla)
 </code></pre>
         </div>
 
@@ -658,15 +985,16 @@ if __name__ == "__main__":
           Fíjate en el bloque de aprendizaje: <code>a_star = online(bs2).argmax(...)</code> usa la
           red <em>online</em> para <strong>elegir</strong>, y <code>target(bs2).gather(1, a_star)</code>
           usa la <em>target</em> para <strong>evaluar</strong>. Eso es Double DQN, exactamente la
-          fórmula del recuadro morado. Y en <code>DuelingQNet.forward</code>, la línea
-          <code>v + (a - a.mean(...))</code> es la combinación dueling con media cero. Dos mejoras,
-          apenas un puñado de líneas.
+          fórmula del recuadro morado; la rama <code>else</code> de al lado, con
+          <code>target(bs2).max(...)</code>, es el DQN de toda la vida. Y en <code>QNet.forward</code>,
+          la línea <code>v + (a - a.mean(...))</code> es la combinación dueling con media cero. Dos
+          mejoras, apenas un puñado de líneas.
         </p>
 
         <h2 id="terminal">Ejecutarlo en tu terminal</h2>
         <p>
-          El primer ejemplo también corre fuera del navegador; el segundo <em>solo</em> corre aquí.
-          Descarga los archivos (o cópialos) y lánzalos así:
+          Los dos primeros ejemplos también corren fuera del navegador; el tercero <em>solo</em>
+          corre aquí. Descarga los archivos (o cópialos) y lánzalos así:
         </p>
         <div class="terminal">
           <div class="term-bar"><span class="r"></span><span class="y"></span><span class="g"></span></div>
@@ -681,16 +1009,96 @@ Q-learning        -> % 'izquierda': inicio= 69.4%  final=12.4%
 Double Q-learning -> % 'izquierda': inicio= 49.2%  final= 7.1%
 Optimo (eps/2)    -> 5.0%</span>
 
-<span class="comment"># 3) Double + Dueling sobre CartPole (torch, unos minutos en CPU)</span>
+<span class="comment"># 3) el Blind Cliffwalk de PER (numpy, ~1 s, abre una gráfica)</span>
+<span class="prompt">$</span> python code/13-mejoras-dqn/per_blind_cliffwalk.py
+<span class="comment">  n   |memoria|    uniforme     oraculo
+  -------------------------------------
+  4         28        47.4         4.0
+  5         60       113.8         5.0
+  6         62       114.4         6.0
+  7        219       386.2         7.0
+  8        295       510.6         8.0
+  9        829      1266.4         9.0
+ 10       2228      5463.2        10.0
+ 11       6224      9079.8        11.0
+ 12       8061     21746.6        12.0
+
+Con n = 12: replay uniforme 21747,  oraculo gloton 12 actualizaciones.
+Factor uniforme/oraculo con n = 12: x1812</span>
+
+<span class="comment"># 4) Double + Dueling sobre CartPole (torch, unos minutos en CPU)</span>
 <span class="prompt">$</span> python code/13-mejoras-dqn/double_dueling_torch.py
-<span class="comment"># La recompensa media sube desde ~20 hasta acercarse a 500
-# (el tope de CartPole-v1) en unos cientos de episodios.</span></pre>
+<span class="comment">Entrenando 400 episodios de CartPole-v1  (Double=True  Dueling=True  semilla=0)
+Episodio  20 | recompensa media (ult. 20) =   22.3 | eps = 0.865
+Episodio  40 | recompensa media (ult. 20) =   22.6 | eps = 0.747
+Episodio  60 | recompensa media (ult. 20) =   20.7 | eps = 0.653
+Episodio  80 | recompensa media (ult. 20) =   21.5 | eps = 0.569
+Episodio 100 | recompensa media (ult. 20) =   17.1 | eps = 0.510
+Episodio 120 | recompensa media (ult. 20) =   41.4 | eps = 0.392
+Episodio 140 | recompensa media (ult. 20) =   90.2 | eps = 0.224
+Episodio 160 | recompensa media (ult. 20) =  169.3 | eps = 0.086
+Episodio 180 | recompensa media (ult. 20) =  106.0 | eps = 0.052
+Episodio 200 | recompensa media (ult. 20) =  100.2 | eps = 0.037
+Episodio 220 | recompensa media (ult. 20) =  110.2 | eps = 0.028
+Episodio 240 | recompensa media (ult. 20) =   63.4 | eps = 0.025
+Episodio 260 | recompensa media (ult. 20) =   70.3 | eps = 0.023
+Episodio 280 | recompensa media (ult. 20) =   93.7 | eps = 0.022
+Episodio 300 | recompensa media (ult. 20) =  120.3 | eps = 0.021
+Episodio 320 | recompensa media (ult. 20) =  155.8 | eps = 0.020
+Episodio 340 | recompensa media (ult. 20) =  116.2 | eps = 0.020
+Episodio 360 | recompensa media (ult. 20) =  110.5 | eps = 0.020
+Episodio 380 | recompensa media (ult. 20) =  116.7 | eps = 0.020
+Episodio 400 | recompensa media (ult. 20) =  153.1 | eps = 0.020
+Media de los ultimos 100 episodios :  130.4
+Peor ventana de 20 (2a mitad)      :   59.6</span>
+
+<span class="comment"># 5) el mismo programa SIN las mejoras, para comparar</span>
+<span class="prompt">$</span> python code/13-mejoras-dqn/double_dueling_torch.py --sin-mejoras</pre>
         </div>
         <p class="pyodide-banner">
           💡 Como en todo el manual, los ejemplos con <code>torch</code> o <code>gymnasium</code>
           son demasiado pesados para el navegador: el intérprete de Pyodide no los incluye. Por eso
-          el segundo ejemplo se entrega como archivo <code>.py</code> listo para tu terminal.
+          el tercer ejemplo se entrega como archivo <code>.py</code> listo para tu terminal. Esa
+          traza sale clavada si lo lanzas con la misma semilla y las mismas versiones —el script fija
+          las cuatro fuentes de azar, incluida <code>env.action_space.seed(...)</code>, que es la que
+          todo el mundo olvida—. Pero <em>cambia la semilla y los números bailan muchísimo</em>: eso
+          no es un defecto del ejemplo, es lo que vas a leer justo debajo.
         </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Honestidad experimental: una curva no demuestra nada</div>
+          <p>
+            Sería muy cómodo poner esta traza al lado de la del <a href="12-dqn.html">capítulo 12</a>
+            y decirte «¿ves cómo ahora sube más?». No vale: aquel programa es <em>otro</em>, con
+            lotes de $128$ en vez de $64$, otra caída de $\varepsilon$ y el doble de episodios.
+            Comparar dos gráficas de dos scripts distintos es la trampa más común del RL aplicado.
+            Para comparar de verdad hay que mover <strong>una sola cosa</strong>, y para eso está la
+            bandera <code>--sin-mejoras</code>: mismo programa, mismos hiperparámetros, misma
+            semilla, con y sin Double+Dueling.
+          </p>
+          <p>
+            Lo hemos hecho con cinco semillas ($0$ a $4$). La media de los últimos $100$ episodios
+            sale <strong>$158{,}0$ con las mejoras y $126{,}6$ sin ellas</strong>, y las mejoras
+            ganan en $4$ de las $5$. Suena redondo… hasta que miras la dispersión: entre semillas los
+            resultados van de $130$ a $199$ con mejoras y de $104$ a $159$ sin ellas, así que
+            <em>la variación entre semillas es del tamaño de la diferencia que queríamos medir</em>.
+            Y con la segunda métrica —la peor ventana de $20$ episodios de la segunda mitad, que mide
+            estabilidad más que rendimiento— la ventaja se deshace: $91{,}8$ frente a $80{,}4$, pero
+            ganando solo en $2$ de las $5$ semillas. La lectura honesta es que <strong>aquí las
+            mejoras apuntan en la buena dirección, pero cinco semillas no bastan para demostrarlo</strong>.
+          </p>
+          <p>
+            Y que el efecto sea tan pequeño tiene todo el sentido. El sesgo de maximización crece con el <strong>número de
+            acciones</strong> y con el <strong>ruido</strong> de las estimaciones: CartPole tiene dos
+            acciones y una dinámica limpia y determinista. Dueling, por su parte, paga cuando hay
+            muchos estados en los que da igual lo que hagas; aquí casi siempre importa. Double DQN y
+            Dueling se midieron en los $57$ juegos de Atari, con hasta $18$ acciones, píxeles y
+            $50$ millones de fotogramas — ahí sí. La moraleja vale para todo el manual: un solo
+            entorno de juguete y un puñado de semillas no demuestran nada, ni a favor ni en contra. La
+            evidencia limpia de que el sesgo existe y de que Double lo corrige es la del
+            <a href="#ejemplo">ejemplo 1</a>, donde el efecto está aislado.
+          </p>
+        </div>
 
         <h2 id="rainbow">Las piezas juntas: hacia Rainbow</h2>
         <p>
@@ -712,6 +1120,44 @@ Optimo (eps/2)    -> 5.0%</span>
           </table>
         </div>
 
+        <h3 id="otras-piezas">Las otras tres piezas, en un párrafo cada una</h3>
+        <p>
+          <strong>Multi-step ($n$-pasos).</strong> Es la que más cerca te pilla: el objetivo, en lugar
+          de usar <em>una</em> recompensa real y estimar todo lo demás, usa $n$ recompensas reales y
+          estima a partir de ahí.
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ El objetivo de $n$ pasos, en DQN</div>
+          <p>$$y \;=\; \sum_{k=0}^{n-1} \gamma^k R_{t+k+1} \;+\; \gamma^n \max_{a'} Q(S_{t+n}, a'; \theta^-)$$</p>
+          <p class="math-note">
+            Es <em>exactamente</em> el retorno de $n$ pasos del
+            <a href="10-td-lambda.html#n-pasos">capítulo 10</a>, con el $\max$ de Q-learning al final.
+            Llevarlo a DQN es inmediato: mantienes una cola de las últimas $n$ transiciones y, en vez
+            de guardar $(s,a,r,s')$, guardas $(s_t, a_t, \sum_k \gamma^k r_{t+k+1}, s_{t+n})$. Con
+            $n$ entre $3$ y $5$ la recompensa se propaga hacia atrás $n$ veces más rápido. La letra
+            pequeña: las $n-1$ acciones intermedias las eligió una política vieja, así que el objetivo
+            deja de ser off-policy limpio; con $n$ pequeño el beneficio compensa de sobra y casi nadie
+            corrige nada.
+          </p>
+        </div>
+        <p>
+          <strong>Distributional (C51).</strong> Un mismo valor medio puede esconder «siempre $10$» o
+          «la mitad de las veces $0$ y la mitad $20$». C51 deja de aprender la <em>media</em> del
+          retorno y aprende su <strong>distribución</strong> completa, discretizada en $51$ átomos
+          entre un mínimo y un máximo fijados a mano. La pérdida ya no es un error cuadrático sino una
+          entropía cruzada entre distribuciones, y la política sigue saliendo del $\arg\max$ de la
+          media. Que ayude tanto sorprende: aprender más de lo que necesitas resulta ser una señal de
+          entrenamiento mucho más rica.
+        </p>
+        <p>
+          <strong>Noisy Nets.</strong> Sustituye la exploración $\varepsilon$-greedy —que es la misma
+          en todos los estados y decae según un calendario que fijas tú— por ruido <em>aprendible</em>
+          en los pesos: cada capa lineal pasa a ser $y = (\mu_w + \sigma_w \odot \epsilon)x + \dots$,
+          con $\mu$ y $\sigma$ entrenados por gradiente. La red decide sola dónde le conviene seguir
+          dudando y dónde ya no, y el $\sigma$ se apaga por su cuenta en las zonas que domina.
+          Adiós al calendario de $\varepsilon$.
+        </p>
+
         <div class="callout key">
           <div class="callout-title">🔑 Resumen del capítulo</div>
           <ul>
@@ -726,6 +1172,11 @@ Optimo (eps/2)    -> 5.0%</span>
             $p_i \approx |\delta_i|$, y corrige el sesgo resultante con pesos de importancia
             $w_i = (N\,P(i))^{-\beta}$.</li>
             <li>Son mejoras <strong>ortogonales</strong>: combinadas dan agentes como <em>Rainbow</em>.</li>
+            <li>Y una advertencia de método: <strong>su efecto depende del problema</strong>. En
+            CartPole, con dos acciones y dinámica limpia, la ganancia es tan pequeña que cinco
+            semillas no llegan a distinguirla del ruido; el sitio donde se midieron —y donde brillan—
+            es Atari, con muchas acciones, píxeles y millones de fotogramas. Compara siempre
+            cambiando una sola cosa, y desconfía de una única curva.</li>
           </ul>
         </div>
 

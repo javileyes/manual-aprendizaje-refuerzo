@@ -63,6 +63,18 @@
           un valor $Q$ por cada acción</strong>. En vez de escribir en una casilla, ahora
           <em>ajustamos $\theta$</em> con descenso de gradiente para que la red prediga mejor.
         </p>
+        <p>
+          Dos cambios de notación antes de seguir, para que no te despisten. El primero: en el
+          <a href="11-aproximacion-funciones.html">capítulo 11</a> los parámetros del aproximador se
+          llamaban $\mathbf{w}$ y a partir de aquí los llamaremos $\theta$. Es exactamente lo mismo —un
+          vector de números que ajustamos—; la costumbre es reservar $\mathbf{w}$ para los pesos de un
+          modelo lineal y $\theta$ para los de una red, y así lo haremos de aquí en adelante (cuando en
+          el <a href="15-actor-critico.html">capítulo 15</a> convivan un actor y un crítico volverás a
+          ver las dos letras, una para cada uno). El segundo: donde antes escribíamos una transición como $(S_t, A_t, R_{t+1}, S_{t+1})$, a partir
+          de ahora la abreviaremos $(s, a, r, s')$. No es pereza. En cuanto las transiciones se guardan
+          en una memoria y se barajan, el índice temporal $t$ deja de significar nada: lo único que
+          importa de cada tupla es que $s'$ vino después de $s$.
+        </p>
 
         <div class="callout intuition">
           <div class="callout-title">🧠 Intuición</div>
@@ -100,6 +112,46 @@
           gatillo: la retroalimentación se realimenta y el valor se dispara.
         </p>
 
+        <div class="callout math">
+          <div class="callout-title">🔢 La divergencia, con una calculadora</div>
+          <p>
+            No hace falta una red profunda para verlo explotar. Coge el aproximador más pequeño del
+            mundo: dos estados, $s_1 \to s_2$, una sola acción, todas las recompensas a <strong>cero</strong>
+            y <strong>un único peso</strong> $\theta$, con $\hat q(s_1) = \theta$ y
+            $\hat q(s_2) = 2\theta$. Ojo a esa segunda igualdad: es justo lo que hace un aproximador, atar
+            el valor de dos estados distintos al mismo parámetro. Con $\gamma = 0{,}99$ y
+            $\alpha = 0{,}1$, el objetivo de la transición $s_1 \to s_2$ es
+            $y = 0 + 0{,}99 \cdot 2\theta = 1{,}98\,\theta$ y la actualización queda:
+          </p>
+          <p>$$\theta \leftarrow \theta + \alpha\,(1{,}98\,\theta - \theta) = \big[1 + \alpha(2\gamma - 1)\big]\theta = 1{,}098\,\theta$$</p>
+          <p>
+            Empieza en $\theta = 1$ y ve multiplicando: $1{,}098 \to 1{,}206 \to 1{,}324 \to 1{,}453 \to
+            1{,}596 \dots$ El valor crece un $9{,}8\,\%$ por paso, para siempre, <strong>en un problema
+            donde todas las recompensas valen cero</strong>. Ahí tienes la
+            <a href="11-aproximacion-funciones.html#triada">tríada mortal</a> con nombres y apellidos:
+            <em>bootstrapping</em> (el objetivo $y$ se calcula con la propia estimación),
+            <em>aproximación</em> (un solo peso para dos estados) y <em>off-policy</em> (solo
+            actualizamos $s_1$; si visitáramos los dos estados con la frecuencia que dicta la política
+            que estamos evaluando, $s_2$ tiraría hacia abajo y no habría explosión). Quita cualquiera de
+            las tres y la explosión desaparece.
+          </p>
+          <p>
+            Ahora congela la diana: haz $y = 0{,}99 \cdot 2\theta^{-}$ con $\theta^{-} = 1$ fija. La
+            actualización pasa a ser $\theta \leftarrow \theta + 0{,}1\,(1{,}98 - \theta)$, que es una
+            regresión normal y corriente hacia el número $1{,}98$: $1{,}098 \to 1{,}186 \to 1{,}266 \to
+            1{,}337 \dots$ Se acabó la explosión.
+          </p>
+          <p class="math-note">
+            Y el matiz honesto, que casi nadie cuenta: al sincronizar, $\theta^{-}$ pasa a valer lo que
+            valga $\theta$ en ese momento —camino de $1{,}98$— y la diana sube con él. Si $\theta^{-}$
+            llega a $1{,}98$, el nuevo objetivo es $0{,}99 \cdot 2 \cdot 1{,}98 = 3{,}92$ y el proceso
+            vuelve a empezar desde más arriba. La red objetivo <strong>no elimina</strong> la tríada mortal:
+            convierte un bucle de realimentación por <em>paso</em> en uno por <em>periodo de
+            sincronización</em>, que es mucho más lento y da tiempo a que las recompensas reales —aquí
+            no hay ninguna, pero en un problema de verdad sí— tiren del valor hacia donde toca.
+          </p>
+        </div>
+
         <div class="callout warn">
           <div class="callout-title">⚠️ La «tríada mortal»</div>
           <p>
@@ -136,7 +188,10 @@
           $y = r + \gamma \max_{a'} Q(s',a';\theta^{-})$. Mientras entrenamos $\theta$ paso a paso,
           $\theta^{-}$ permanece <strong>fija</strong>; solo cada $C$ pasos la sincronizamos copiando
           $\theta^{-} \leftarrow \theta$. Así el objetivo cambia a saltos, despacio, y el entrenamiento
-          se parece mucho más a una regresión estable con una diana quieta.
+          se parece mucho más a una regresión estable con una diana quieta. (Hay una variante suave, la
+          actualización de Polyak $\theta^{-} \leftarrow \tau\theta + (1-\tau)\theta^{-}$ con $\tau$
+          pequeña en <em>cada</em> paso, que arrastra la diana en lugar de teletransportarla; la usarás
+          en el <a href="17-control-continuo.html#ddpg">capítulo 17</a>.)
         </p>
 
         <figure class="figure">
@@ -246,6 +301,23 @@
           </p>
         </div>
 
+        <div class="callout intuition">
+          <div class="callout-title">🧠 «Semi-gradiente» no significa «gradiente de mentira»</div>
+          <p>
+            En el <a href="11-aproximacion-funciones.html#semi-gradiente">capítulo 11</a> dijimos que el
+            semi-gradiente no es el gradiente de ninguna función, porque el objetivo se mueve con
+            $\theta$. Aquí eso deja de ser cierto <strong>a trozos</strong>, y merece la pena verlo:
+            mientras $\theta^{-}$ está congelada, $y$ es literalmente una constante. Minimizar
+            $L(\theta)$ es entonces una regresión supervisada honesta —un montón de pares
+            (entrada, etiqueta fija)— y el gradiente de arriba es el <em>exacto</em>, no medio.
+          </p>
+          <p>
+            Lo que pasa es que cada $C$ pasos la diana da un salto y empieza otra regresión distinta.
+            Ahí está, en una frase, la razón de ser de la red objetivo: <strong>trocear un problema
+            semi-gradiente inestable en una sucesión de regresiones estables</strong>.
+          </p>
+        </div>
+
         <div class="callout warn">
           <div class="callout-title">⚠️ Un final por tiempo no es un final de verdad</div>
           <p>
@@ -254,6 +326,12 @@
             $(1-\text{fin})$ que multiplica a $\gamma \max_{a'} Q(s',a';\theta^{-})$ solo vale $0$ en un
             final <em>auténtico</em>. Guardar mal ese indicador es uno de los errores más comunes al
             implementar DQN. En los dos ejemplos distinguimos «terminado» de «truncado».
+          </p>
+          <p>
+            Ese factor es la vieja regla $V(\text{terminal}) = 0$ del
+            <a href="07-td-aprendizaje.html#algoritmo">capítulo 7</a> escrita en forma de multiplicación,
+            para poder aplicarla a todo un minibatch de golpe. La reconocerás disfrazada en el código:
+            <code>(1.0 - D)</code> en el ejemplo de NumPy y <code>(1.0 - term)</code> en el de PyTorch.
           </p>
         </div>
 
@@ -266,6 +344,28 @@
           <li>Da un paso de descenso de gradiente sobre $\big(y - Q(s,a;\theta)\big)^2$ para actualizar $\theta$.</li>
           <li>Cada $C$ pasos, sincroniza $\theta^{-} \leftarrow \theta$. Reduce $\varepsilon$ poco a poco. Vuelve al paso 2.</li>
         </ol>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Cómo se baja la $\varepsilon$ (y cómo no)</div>
+          <p>
+            «Reduce $\varepsilon$ poco a poco» esconde una decisión que se equivoca a menudo: el
+            calendario debe ir anclado a <strong>pasos de entorno</strong>, no a episodios. La razón es
+            que la duración de un episodio depende de lo bien que lo esté haciendo el agente: en
+            CartPole se pasa de $20$ pasos a $500$, así que contar episodios significa que un agente
+            malo consume su exploración veinticinco veces más deprisa que uno bueno. Es una
+            realimentación entre rendimiento y exploración que nadie ha pedido.
+          </p>
+          <p>
+            Por eso los dos ejemplos de este capítulo usan esquemas distintos, y no por capricho: el de
+            NumPy baja $\varepsilon$ por episodios porque ahí el episodio está acotado a $100$ pasos y
+            el margen de error es pequeño (se pasa de $100$ pasos por episodio al principio a unos $25$
+            al final: un factor $4$, no $25$), mientras que el de PyTorch la baja por
+            <code>paso_global</code>, que es lo correcto en cuanto los episodios se estiran. Y una
+            última: al <strong>evaluar</strong> no bajes $\varepsilon$ a $0$; deja un residuo pequeño
+            (el DQN de Atari usa $0{,}05$). Un poco más abajo verás en la salida del primer ejemplo
+            exactamente por qué.
+          </p>
+        </div>
 
         <h2 id="ejemplo-numpy">Ejemplo 1: DQN desde cero, solo con NumPy</h2>
         <p>
@@ -535,11 +635,34 @@ plt.show()
         <div class="callout intuition">
           <div class="callout-title">🧪 Experimenta</div>
           <p>
-            Prueba a <strong>desactivar</strong> la red objetivo (haz que <code>q_obj</code> sea siempre
-            una referencia a <code>q</code> en vez de una copia periódica) o a reducir el buffer a una
-            capacidad minúscula (por ejemplo <code>CAP = BATCH</code>, casi sin barajar). Verás cómo la
-            curva se vuelve inestable o deja de aprender: acabas de comprobar, con tus manos, por qué
-            los dos trucos son necesarios.
+            <strong>Quita la red objetivo.</strong> Basta con tocar un número: pon <code>C = 1</code>.
+            Sincronizar en cada paso es exactamente lo mismo que no tener red objetivo —el objetivo se
+            calcula siempre con la red que estás entrenando— y sale la misma salida, cifra a cifra, que
+            si haces <code>q_obj = q</code>. Ejecuta y prepárate para la sorpresa: <em>no pasa nada</em>.
+            Con la semilla que trae el archivo el agente sigue aprendiendo, y la evaluación final sale
+            incluso mejor que la original: $50/50$ llegadas frente a $47/50$.
+          </p>
+          <p>
+            Antes de concluir que la red objetivo sobra, cambia la semilla: en
+            <code>np.random.default_rng(0)</code> prueba con $1$, $4$ y $5$. Con la red objetivo puesta,
+            las ocho primeras semillas aprenden todas (entre $36$ y $50$ llegadas de $50$). Sin ella, la
+            semilla $1$ se queda en $0/50$ —la política final no encuentra la meta ni una sola vez—, la
+            $4$ en $20/50$ y la $5$ en $31/50$.
+          </p>
+          <p>
+            <strong>Encoge el buffer.</strong> Pon <code>CAP = 32</code> para que apenas quede nada que
+            barajar… y baja también <code>WARMUP</code> a <code>32</code>: si no, el buffer nunca llega a
+            las $300$ transiciones y el programa <em>no entrena ni una sola vez</em> (verás $0/50$, pero
+            por el motivo equivocado). Otra vez la semilla $0$ aguanta ($49/50$); las semillas $6$ y $7$
+            se hunden del todo ($0/50$, todos los episodios agotando los $100$ pasos).
+          </p>
+          <p>
+            La moraleja no es la que uno espera. Promediando esas ocho semillas, las llegadas caen de
+            $47{,}6/50$ con los dos trucos a $37{,}6$ sin red objetivo y a $36{,}5$ con el buffer
+            minúsculo. Lo que compran el replay y la red objetivo en un juguete como este no es
+            <em>aprender mejor</em>, es <strong>aprender siempre</strong>. Y eso no se ve en una
+            ejecución: se ve en la dispersión entre semillas. Guárdate la costumbre, porque el
+            <a href="22-panorama.html">capítulo 22</a> está dedicado a ella.
           </p>
         </div>
 
@@ -557,6 +680,14 @@ plt.show()
 Recompensa media ultimos  10 episodios: -0.13
 Politica final (greedy): llega a la meta en 47/50 episodios (27 pasos de media).</span></pre>
         </div>
+        <p>
+          Fíjate en un detalle de esa última línea: la política final falla en <strong>3 de los 50</strong>
+          arranques. Si miras qué hacen esos tres episodios, el agente acaba <em>clavado</em> contra el
+          borde izquierdo, empujando contra la pared hasta que se agota el tiempo. Una política
+          determinista puede quedarse atrapada así para siempre, y es el motivo por el que el DQN de
+          Atari no evalúa con $\varepsilon = 0$ sino con $\varepsilon = 0{,}05$: un pelín de azar basta
+          para romper el bucle.
+        </p>
 
         <h2 id="ejemplo-torch">Ejemplo 2: DQN idiomático con PyTorch y Gymnasium</h2>
         <p>
@@ -801,6 +932,7 @@ Episodio  200 | recompensa  126.0 | media100   52.3 | epsilon 0.326
 Episodio  400 | recompensa  128.0 | media100  112.3 | epsilon 0.060
 Episodio  480 | recompensa  500.0 | media100  210.2 | epsilon 0.050
 Episodio  600 | recompensa  500.0 | media100  298.8 | epsilon 0.050
+Episodio  700 | recompensa  116.0 | media100  110.5 | epsilon 0.050
 Episodio  800 | recompensa  430.0 | media100  232.0 | epsilon 0.050
 
 Fin del entrenamiento (800 episodios). Mejor media de 100 episodios = 342.9.
@@ -811,9 +943,10 @@ Esa inestabilidad es justo lo que atacan Double DQN, Dueling y PER en el capitul
         <p class="pyodide-banner">
           💡 Los números exactos varían con tu máquina, la versión de las librerías y el azar; lo que
           importa es la <strong>tendencia</strong>: la recompensa sube desde $\sim 20$ hasta rozar el
-          máximo de $500$. Verás también que, cada tanto, la media se <strong>desploma</strong>: el DQN
-          «a secas» es inestable (sobreestima los valores), y ese es justo el problema que ataca el
-          <a href="13-mejoras-dqn.html">capítulo 13</a>.
+          máximo de $500$. Verás también que, cada tanto, la media se <strong>desploma</strong>: en la
+          traza de arriba pasa de $298{,}8$ en el episodio 600 a $110{,}5$ en el 700, y luego se
+          recupera. El DQN «a secas» es inestable (sobreestima los valores), y ese es justo el problema
+          que ataca el <a href="13-mejoras-dqn.html">capítulo 13</a>.
         </p>
 
         <h2 id="detalles">Detalles que marcan la diferencia</h2>
@@ -830,10 +963,73 @@ Esa inestabilidad es justo lo que atacan Double DQN, Dueling y PER en el capitul
             </tbody>
           </table>
         </div>
+        <h2 id="de-los-sensores-a-los-pixeles">De los sensores a los píxeles: el DQN de Atari</h2>
         <p>
-          El DQN original de DeepMind añadía además <strong>recorte de recompensas</strong> a
-          $[-1,1]$ y apilaba varios fotogramas para percibir movimiento, entre otros trucos propios de
-          Atari. La estructura, sin embargo, es exactamente la que acabas de implementar.
+          Los dos ejemplos de este capítulo trabajan con estados de dos y de cuatro números. El DQN que
+          abrió la era del <em>Deep RL</em> recibía <strong>una pantalla</strong>. El algoritmo es
+          idéntico —el mismo objetivo, el mismo buffer, la misma red objetivo—; lo único que cambia es
+          lo que se le mete por delante. Merece la pena mirar los cuatro pasos del preprocesado, porque
+          solo tres de ellos son ingeniería: el tercero es teoría pura.
+        </p>
+        <ol>
+          <li><strong>Gris y 84×84.</strong> La pantalla de una Atari 2600 son $210\times160$ píxeles en
+            color. Se pasa a escala de grises y se reescala a $84\times84$: la imagen baja de $100.800$
+            números a $7.056$ sin perder nada de lo que importa para jugar.</li>
+          <li><strong>Repetir la acción 4 fotogramas</strong> (<em>frame skip</em>) y quedarse con el
+            <strong>máximo píxel a píxel</strong> de los dos últimos. Lo primero abarata la simulación
+            por cuatro; lo segundo arregla una peculiaridad del hardware de la consola, que dibujaba
+            algunos sprites solo en fotogramas alternos —sin ese máximo, hay objetos que
+            <em>parpadean</em> y desaparecen de la observación.</li>
+          <li><strong>Apilar los 4 últimos fotogramas</strong>, de modo que la entrada de la red es un
+            tensor $4\times84\times84$.</li>
+          <li><strong>Recortar la recompensa</strong> a $[-1,1]$: un $+1$ si la puntuación sube, un $-1$
+            si baja, $0$ si no cambia. Así los mismos hiperparámetros valen para los 49 juegos, cuyos
+            marcadores van de decenas a decenas de miles. El precio es real: el agente deja de
+            distinguir un premio pequeño de uno enorme.</li>
+        </ol>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 El tercer paso no es eficiencia: es la propiedad de Markov</div>
+          <p>
+            Mira una sola imagen de <em>Pong</em> y dime hacia dónde va la pelota. No puedes: la
+            posición está en la foto, la velocidad no. Y sin la velocidad, la mejor acción no está
+            determinada por lo que ves, así que la política óptima <em>depende del pasado</em> y todas
+            las garantías del manual se caen. Lo que tienes delante no es un estado: es una
+            <strong>observación</strong>, y un problema donde la observación no basta para decidir es un
+            <strong>POMDP</strong>.
+          </p>
+          <p>
+            En el <a href="03-mdp.html#propiedad-markov">capítulo 3</a> lo dejamos dicho: un mundo que
+            «cambia» suele ser un mundo fijo con estado oculto, y la solución pasa por meter en el
+            estado lo que falta. Apilar cuatro fotogramas es exactamente eso, en su versión más barata:
+            un trozo de historia empaquetado dentro de la observación hasta que vuelve a ser (casi) un
+            estado de Markov. No es un truco de implementación; es la condición sin la cual nada de lo
+            que hemos escrito en este capítulo tiene sentido.
+          </p>
+        </div>
+
+        <p>
+          Y así queda la escala real de aquel DQN, frente a los juguetes que acabas de correr:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Pieza</th><th>DQN de Atari (Nature, 2015)</th><th>Nuestro <code>dqn_desde_cero.py</code></th></tr></thead>
+            <tbody>
+              <tr><td>Entrada</td><td>4 fotogramas en gris de $84\times84$</td><td>2 números</td></tr>
+              <tr><td>Red</td><td>Conv 32 filtros $8\times8$ paso 4 → Conv 64 de $4\times4$ paso 2 → Conv 64 de $3\times3$ paso 1 → densa de 512 → una salida por acción</td><td>densa de 64 → 4 salidas</td></tr>
+              <tr><td>Replay buffer</td><td>1.000.000 de transiciones</td><td>5.000</td></tr>
+              <tr><td>Minibatch</td><td>32</td><td>32</td></tr>
+              <tr><td>Sincronización $\theta^{-} \leftarrow \theta$</td><td>cada 10.000 actualizaciones (y se actualiza una vez cada 4 pasos del agente)</td><td>cada 300 pasos</td></tr>
+              <tr><td>$\varepsilon$</td><td>de $1$ a $0{,}1$ en el primer millón de pasos; $0{,}05$ al evaluar</td><td>de $1$ a $0{,}05$ en 140 episodios</td></tr>
+              <tr><td>Optimizador</td><td>RMSProp, tasa $0{,}00025$</td><td>Adam, tasa $0{,}001$</td></tr>
+              <tr><td>Experiencia total</td><td>50 millones de fotogramas <em>por juego</em> (unos 38 días de partida)</td><td>9.671 pasos</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Tres o cuatro órdenes de magnitud de diferencia y ni una sola idea nueva. Esa es la mejor noticia del
+          capítulo: lo que separa tu script de un artículo de <em>Nature</em> es cómputo, paciencia y el
+          preprocesado de arriba, no un algoritmo distinto.
         </p>
 
         <div class="callout key">
@@ -842,7 +1038,11 @@ Esa inestabilidad es justo lo que atacan Double DQN, Dueling y PER en el capitul
             <li>DQN aproxima la función de acción-valor con una <strong>red neuronal</strong> $Q(s,a;\theta)$ y la entrena minimizando la pérdida $\big(y - Q(s,a;\theta)\big)^2$.</li>
             <li>El objetivo es $y = r + \gamma\,(1-\text{fin})\max_{a'} Q(s',a';\theta^{-})$, con la <strong>red objetivo</strong> $\theta^{-}$ congelada; se deriva como <strong>semi-gradiente</strong>.</li>
             <li>La <strong>repetición de experiencia</strong> baraja las transiciones (rompe la correlación); la <strong>red objetivo</strong> mantiene la diana quieta (evita perseguir la cola).</li>
-            <li>Con estos dos trucos, más $\varepsilon$-greedy decreciente, la «tríada mortal» se vuelve manejable y el aprendizaje converge.</li>
+            <li>Con estos dos trucos, más $\varepsilon$-greedy decreciente, la «tríada mortal» se vuelve
+              manejable: en la práctica DQN aprende de forma razonablemente estable. Pero no hay ningún
+              teorema detrás —en el propio CartPole la media de 100 episodios se desploma de $298{,}8$ a
+              $110{,}5$ entre los episodios 600 y 700— y es justo esa fragilidad la que ataca el
+              <a href="13-mejoras-dqn.html">capítulo 13</a>.</li>
           </ul>
         </div>
 

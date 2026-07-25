@@ -12,8 +12,9 @@ gridworld abierto donde hay MUCHOS caminos óptimos hasta la meta:
      La política óptima es un softmax sobre los valores:  pi(a|s) ∝ exp(Q(s,a)/alpha).
 
   2) EMPOWERMENT: cuántos estados futuros distintos puede alcanzar el agente
-     (aquí, un proxy: log2 del nº de estados alcanzables en k pasos). Formaliza
-     "mantener opciones abiertas": el centro tiene más futuro posible que una esquina.
+     (aquí, un proxy: log2 del nº de estados alcanzables en como mucho k pasos).
+     Formaliza "mantener opciones abiertas": el centro tiene más futuro posible
+     que una esquina.
 
 Ejecutar:
     python code/20-maxent-empowerment/maxent_empowerment.py
@@ -124,8 +125,19 @@ for a in range(nA):
     print(f"  {A_NAMES[a]:>10}: {pol_demo[s0, a]:.2f}")
 print("(dos caminos igual de cortos -> reparte entre 'abajo' y 'derecha')")
 
-# ---------- 2) Empowerment: nº de futuros alcanzables ----------
+# ---------- 2) ¿Por qué el retorno se hunde hasta -100? El agente no quiere terminar ----------
+# Miramos (5,6), la casilla justo encima de la meta: la acción 'abajo' (índice 1) entra en ella.
+print("\nDesde (5,6) -justo encima de la meta- probabilidad de ENTRAR en la meta:")
+for a in [0.10, 0.50, 0.70, 1.00]:
+    _, _, pol_a = soft_value_iteration(a)
+    print(f"  alpha={a:.2f}:  P(abajo | (5,6)) = {pol_a[idx(5, 6), 1]:.3f}")
+print(f"Umbral: por encima de alpha* = 1/ln(4) = {1 / np.log(4):.3f}, deambular paga más que terminar.")
+pol_unif = np.full((nS, nA), 1.0 / nA)
+print(f"(Para comparar: la política UNIFORME vale {evaluar_politica(pol_unif)[idx(0, 0)]:.2f}, no -100.)")
+
+# ---------- 3) Empowerment: nº de futuros alcanzables ----------
 def empowerment(k=4):
+    """log2 del nº de estados alcanzables desde s en COMO MUCHO k pasos."""
     emp = np.zeros(nS)
     for s in range(nS):
         alcanzables = {s}
@@ -139,7 +151,7 @@ def empowerment(k=4):
     return emp.reshape(H, W)
 
 EMP = empowerment(4)
-print(f"\nEmpowerment (log2 de estados alcanzables en 4 pasos):")
+print(f"\nEmpowerment (log2 de estados alcanzables en como mucho 4 pasos):")
 print(f"  esquina (0,0): {EMP[0, 0]:.2f}   centro ({H // 2},{W // 2}): {EMP[H // 2, W // 2]:.2f}")
 print("El centro 'abre' más posibilidades que una esquina, aunque la esquina no dé menos recompensa.")
 

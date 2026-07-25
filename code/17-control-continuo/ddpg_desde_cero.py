@@ -189,7 +189,8 @@ def actualiza(actor, critico, actor_obj, critico_obj, lote, gamma, lr_a, lr_c):
     # --- (a) Crítico: regresión hacia el objetivo TD y = r + gamma * Q'(s', mu'(s')) ---
     a2 = actor_obj.forward(s2)                         # acción objetivo
     q_obj = critico_obj.forward(np.hstack([s2, a2]))   # Q'(s', a2)
-    y = r + gamma * q_obj                              # sin término terminal: tarea continua
+    # d=0 siempre: este entorno nunca termina, solo se corta por tiempo -> siempre bootstrap.
+    y = r + gamma * q_obj
     q = critico.forward(np.hstack([s, a]))             # Q(s, a) actual
     grad_q = 2.0 * (q - y) / batch                     # dL/dQ del ECM
     critico.backward(grad_q)

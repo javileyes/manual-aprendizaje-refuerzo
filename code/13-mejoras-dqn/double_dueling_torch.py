@@ -16,11 +16,16 @@ navegador. Reune dos mejoras de DQN del capitulo 13:
 Anadir Prioritized Experience Replay (PER) es una extension natural: bastaria
 sustituir el ReplayBuffer uniforme por uno que muestree segun |error TD|.
 
+La bandera --sin-mejoras apaga las dos y deja el DQN 'a secas' del capitulo 12,
+con los mismos hiperparametros y la misma semilla: sirve para comparar de verdad.
+
 Requisitos:
     pip install torch gymnasium
 Ejecucion:
     python code/13-mejoras-dqn/double_dueling_torch.py
+    python code/13-mejoras-dqn/double_dueling_torch.py --sin-mejoras
 """
+import argparse
 import random
 from collections import deque, namedtuple
 
@@ -29,12 +34,6 @@ import gymnasium as gym
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-# --- Reproducibilidad ---
-SEED = 0
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
 
 Transicion = namedtuple("Transicion", ["s", "a", "r", "s2", "fin"])
 
@@ -61,33 +60,45 @@ class ReplayBuffer:
         return len(self.buf)
 
 
-class DuelingQNet(nn.Module):
-    """Red Dueling: Q(s,a) = V(s) + (A(s,a) - media_a A(s,a))."""
+class QNet(nn.Module):
+    """Red Q. Con dueling=True: Q(s,a) = V(s) + (A(s,a) - media_a A(s,a));
+    con dueling=False, una sola cabeza lineal como el DQN del capitulo 12."""
 
-    def __init__(self, n_obs, n_acc, oculto=128):
+    def __init__(self, n_obs, n_acc, oculto=128, dueling=True):
         super().__init__()
+        self.dueling = dueling
         self.cuerpo = nn.Sequential(
             nn.Linear(n_obs, oculto), nn.ReLU(),
             nn.Linear(oculto, oculto), nn.ReLU(),
         )
-        self.valor = nn.Linear(oculto, 1)        # rama V(s)   -> escalar
-        self.ventaja = nn.Linear(oculto, n_acc)  # rama A(s,a) -> una por accion
+        if dueling:
+            self.valor = nn.Linear(oculto, 1)        # rama V(s)   -> escalar
+            self.ventaja = nn.Linear(oculto, n_acc)  # rama A(s,a) -> una por accion
+        else:
+            self.salida = nn.Linear(oculto, n_acc)   # cabeza unica: Q(s,a) directo
 
     def forward(self, x):
         h = self.cuerpo(x)
-        v = self.valor(h)                        # (batch, 1)
-        a = self.ventaja(h)                      # (batch, n_acc)
+        if not self.dueling:
+            return self.salida(h)
+        v = self.valor(h)                            # (batch, 1)
+        a = self.ventaja(h)                          # (batch, n_acc)
         # restar la media de la ventaja fija la ambiguedad V/A y estabiliza
         return v + (a - a.mean(dim=1, keepdim=True))
 
 
-def entrenar(episodios=400):
+def entrenar(episodios=400, doble=True, dueling=True, semilla=0):
+    random.seed(semilla)
+    np.random.seed(semilla)
+    torch.manual_seed(semilla)
+
     env = gym.make("CartPole-v1")
+    env.action_space.seed(semilla)   # las acciones al azar tambien han de ser reproducibles
     n_obs = env.observation_space.shape[0]
     n_acc = env.action_space.n
 
-    online = DuelingQNet(n_obs, n_acc)
-    target = DuelingQNet(n_obs, n_acc)
+    online = QNet(n_obs, n_acc, dueling=dueling)
+    target = QNet(n_obs, n_acc, dueling=dueling)
     target.load_state_dict(online.state_dict())
     opt = torch.optim.Adam(online.parameters(), lr=1e-3)
 
@@ -99,9 +110,13 @@ def entrenar(episodios=400):
     INICIO_APRENDER = 1000   # transiciones minimas antes de entrenar
     pasos = 0
     historial = deque(maxlen=20)
+    todos = []
+
+    etiqueta = f"Double={doble}  Dueling={dueling}  semilla={semilla}"
+    print(f"Entrenando {episodios} episodios de CartPole-v1  ({etiqueta})")
 
     for ep in range(1, episodios + 1):
-        s, _ = env.reset(seed=SEED + ep)
+        s, _ = env.reset(seed=semilla + ep)
         total, done = 0.0, False
         while not done:
             eps = EPS_FIN + (EPS_INI - EPS_FIN) * np.exp(-pasos / EPS_DECAY)
@@ -125,9 +140,13 @@ def entrenar(episodios=400):
                 bs, ba, br, bs2, bfin = buffer.sample(BATCH)
                 q_sa = online(bs).gather(1, ba)                 # Q(s,a) actual
                 with torch.no_grad():
-                    # DOUBLE DQN: online elige la accion, target la evalua
-                    a_star = online(bs2).argmax(dim=1, keepdim=True)
-                    q_next = target(bs2).gather(1, a_star)
+                    if doble:
+                        # DOUBLE DQN: online elige la accion, target la evalua
+                        a_star = online(bs2).argmax(dim=1, keepdim=True)
+                        q_next = target(bs2).gather(1, a_star)
+                    else:
+                        # DQN clasico: la target elige Y evalua (el max de siempre)
+                        q_next = target(bs2).max(dim=1, keepdim=True).values
                     y = br + GAMMA * (1.0 - bfin) * q_next
                 perdida = F.smooth_l1_loss(q_sa, y)
                 opt.zero_grad()
@@ -139,13 +158,24 @@ def entrenar(episodios=400):
                 target.load_state_dict(online.state_dict())
 
         historial.append(total)
+        todos.append(total)
         if ep % 20 == 0:
             media = np.mean(historial)
             print(f"Episodio {ep:3d} | recompensa media (ult. 20) = {media:6.1f} | eps = {eps:.3f}")
 
     env.close()
-    print("Listo. CartPole-v1 se considera resuelto con recompensa media >= 475.")
+    ult100 = float(np.mean(todos[-100:]))
+    peor20 = min(np.mean(todos[i:i + 20]) for i in range(len(todos) // 2, len(todos) - 19))
+    print(f"Media de los ultimos 100 episodios : {ult100:6.1f}")
+    print(f"Peor ventana de 20 (2a mitad)      : {peor20:6.1f}")
+    return ult100, peor20
 
 
 if __name__ == "__main__":
-    entrenar()
+    p = argparse.ArgumentParser(description="Double + Dueling DQN sobre CartPole-v1")
+    p.add_argument("--sin-mejoras", action="store_true",
+                   help="apaga Double y Dueling: el DQN 'a secas' del capitulo 12")
+    p.add_argument("--semilla", type=int, default=0)
+    args = p.parse_args()
+    entrenar(doble=not args.sin_mejoras, dueling=not args.sin_mejoras,
+             semilla=args.semilla)

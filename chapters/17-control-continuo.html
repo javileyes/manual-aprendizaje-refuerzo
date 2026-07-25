@@ -51,14 +51,64 @@
           recorrerlas una a una para encontrar el máximo.
         </p>
         <p>
-          En el <a href="14-policy-gradient-reinforce.html">gradiente de política</a> y en
-          <a href="16-ppo.html">PPO</a> ya esquivamos ese problema: la política producía
-          directamente una distribución (por ejemplo, una gaussiana sobre el par), sin necesitar
-          ningún <em>max</em>. Aquellos métodos eran <strong>on-policy</strong>: cada actualización
-          usaba datos recién recogidos con la política actual y luego los tiraba. Aquí buscamos algo
-          distinto: métodos <strong>off-policy</strong>, que reutilizan experiencia vieja guardada
-          en un <em>buffer de repetición</em> —como DQN— pero para acciones continuas. Ese es el
-          hueco que llenan DDPG, TD3 y SAC.
+          El <a href="14-policy-gradient-reinforce.html">gradiente de política</a> nos daba una vía de
+          escape: si la política <em>es</em> una distribución parametrizada, nunca hace falta ningún
+          $\max$. Pero seamos honestos con lo que hemos hecho hasta aquí: en el capítulo 14 y en
+          <a href="16-ppo.html">PPO</a> siempre usamos una <em>softmax</em> sobre un puñado de acciones
+          discretas. Prometimos que aquello «se extiende a acciones continuas casi sin cambios» y
+          nunca llegamos a escribir la extensión. Vamos a saldar esa deuda antes de nada, porque son
+          tres fórmulas y se tarda un minuto.
+        </p>
+
+        <h2 id="la-politica-gaussiana">Antes de nada: la política gaussiana</h2>
+        <p>
+          En el caso discreto, la red escupía un número por acción y la <em>softmax</em> los convertía
+          en probabilidades. En el caso continuo no hay «un número por acción» que valga: hay
+          infinitas. Lo que hace la red es producir los <strong>parámetros de una distribución</strong>
+          —típicamente una gaussiana— y de ahí se muestrea la acción.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La política gaussiana: log-densidad y entropía</div>
+          <p>$$\pi_\theta(a\mid s) \;=\; \mathcal{N}\big(a;\; \mu_\theta(s),\; \sigma_\theta(s)^2\big)$$</p>
+          <p>$$\log \pi_\theta(a\mid s) \;=\; -\sum_{i=1}^{n}\left[\,
+             \frac{\big(a_i - \mu_{\theta,i}(s)\big)^2}{2\,\sigma_{\theta,i}(s)^2}
+             \;+\; \log \sigma_{\theta,i}(s) \;+\; \tfrac{1}{2}\log 2\pi \,\right]$$</p>
+          <p>$$\mathcal{H}\big(\pi_\theta(\cdot\mid s)\big) \;=\; \sum_{i=1}^{n}\left[\,
+             \log \sigma_{\theta,i}(s) \;+\; \tfrac{1}{2}\log\big(2\pi e\big)\,\right]$$</p>
+          <p class="math-note">
+            $n$ es el número de dimensiones de la acción y las componentes se suponen independientes
+            (una gaussiana con covarianza diagonal), por eso todo son sumas de términos por
+            componente. La red devuelve $\mu_\theta(s)$ y, en la práctica,
+            $\log\sigma_\theta$ en vez de $\sigma_\theta$: así se garantiza $\sigma>0$ sin restringir
+            la salida. Es frecuente que $\sigma$ ni siquiera dependa del estado —un simple vector de
+            parámetros aprendidos—, aunque SAC sí la hace depender de $s$.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Con esas dos fórmulas, el capítulo 16 funciona palabra por palabra</div>
+          <p>
+            Mira lo que necesitaban REINFORCE, A2C y PPO de la política: el <strong>log</strong> de la
+            probabilidad de la acción tomada, y poco más. El ratio de <a href="16-ppo.html#ratio">PPO</a>
+            es $r_t = \exp\!\big(\log\pi_\theta(a_t\mid s_t) - \log\pi_{\theta_{\text{old}}}(a_t\mid s_t)\big)$:
+            con la fórmula de la log-densidad ya lo puedes calcular. El bono de entropía que empujaba
+            a explorar es la otra. Y el objetivo recortado, GAE y el resto del capítulo 16 <em>no se enteran
+            siquiera</em> de que la acción ha dejado de ser discreta. La única diferencia real es que
+            $\log\pi$ ya no es el logaritmo de una probabilidad (un número $\le 0$) sino el de una
+            <strong>densidad</strong>, que puede ser positivo: si $\sigma$ es muy pequeña, la densidad
+            en el pico es mayor que $1$. No te asustes cuando lo veas en tus trazas.
+          </p>
+        </div>
+
+        <p>
+          Entonces, si con una gaussiana ya sabemos hacer control continuo, ¿para qué tres algoritmos
+          más? Por una razón muy concreta: aquellos métodos eran <strong>on-policy</strong>. Cada
+          actualización usaba datos recién recogidos con la política actual y luego los tiraba a la
+          basura. Lo que buscamos aquí es lo otro: métodos <strong>off-policy</strong> que reutilizan
+          experiencia vieja guardada en un <em>buffer de repetición</em> —como DQN— pero con acciones
+          continuas. Cuando cada paso de entorno cuesta dinero o desgasta un robot, tirar los datos
+          deja de ser una opción. Ese es el hueco que llenan DDPG, TD3 y SAC.
         </p>
 
         <div class="callout intuition">
@@ -97,8 +147,8 @@
 
         <div class="callout math">
           <div class="callout-title">➗ Objetivo del crítico (regresión TD)</div>
-          <p>$$y \;=\; r \;+\; \gamma\, Q_{\phi'}\!\big(s',\, \mu_{\theta'}(s')\big), \qquad
-             L(\phi) \;=\; \mathbb{E}_{(s,a,r,s')\sim\mathcal{D}}\Big[\big(Q_\phi(s,a) - y\big)^2\Big]$$</p>
+          <p>$$y \;=\; r \;+\; \gamma\,(1-d)\, Q_{\phi'}\!\big(s',\, \mu_{\theta'}(s')\big), \qquad
+             L(\phi) \;=\; \mathbb{E}_{(s,a,r,s',d)\sim\mathcal{D}}\Big[\big(Q_\phi(s,a) - y\big)^2\Big]$$</p>
           <p class="math-note">
             $r$ es la recompensa, $\gamma\in[0,1]$ el descuento y $s'$ el estado siguiente.
             $\mathcal{D}$ es el <strong>buffer de repetición</strong> (experiencias pasadas).
@@ -106,6 +156,28 @@
             de $\phi$ y $\theta$ que estabilizan el blanco $y$ (como en DQN). Minimizamos el error
             cuadrático medio entre $Q_\phi(s,a)$ y el objetivo $y$. Fíjate: ningún $\max$; en su
             lugar, $\mu_{\theta'}(s')$.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Ese $(1-d)$ pequeñito: terminar no es lo mismo que truncar</div>
+          <p>
+            $d\in\{0,1\}$ marca si $s'$ es terminal, igual que el $(1-\text{fin})$ del
+            <a href="12-dqn.html#matematicas">capítulo 12</a>: si el episodio se acabó de verdad, el
+            futuro vale $0$ y el objetivo se reduce a $r$ a secas. Lo escribiremos en las cuatro
+            fórmulas de objetivo de este capítulo, porque es el detalle que más código roto ha
+            producido en la historia del control continuo.
+          </p>
+          <p>
+            Y aquí está la trampa: <strong>terminar no es lo mismo que truncar</strong>.
+            <em>Terminar</em> es que el poste se caiga o el robot se rompa: el mundo se acabó, $d=1$.
+            <em>Truncar</em> es que se agote el límite de 200 o 1000 pasos que le pone el simulador:
+            el futuro sigue existiendo perfectamente y <em>sí</em> debes hacer bootstrap, con $d=0$.
+            Confundirlos le enseña al crítico que el universo se desintegra a los 200 pasos, y eso
+            envenena el valor de <em>todos</em> los estados, no solo de los finales. Por eso en
+            <code>sac_torch.py</code> guardamos <code>float(term)</code> y nunca
+            <code>float(term or trunc)</code>. Y por eso el DDPG en numpy de más abajo, cuyo episodio
+            solo acaba por límite de tiempo, puede prescindir del factor: allí $d$ es siempre $0$.
           </p>
         </div>
 
@@ -142,6 +214,35 @@
             ese paisaje. Iteración a iteración, la acción del actor «trepa» hacia el máximo del
             crítico, sin haber tenido que probar infinitas acciones. En el ejemplo en numpy verás
             este encadenamiento explícito en una sola función.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 ¿Y por qué esto es un <em>teorema</em> y no una regla de la cadena?</div>
+          <p>
+            Es la pregunta correcta, porque la fórmula parece pura regla de la cadena de bachillerato.
+            Lo que la convierte en teorema es lo que <strong>no</strong> aparece en ella. Recuerda que
+            $J(\theta)$ no es solo «$Q$ evaluado en la acción del actor»: es el rendimiento del agente,
+            y $\theta$ influye en él por <em>dos</em> caminos. Uno, el evidente: qué acción eliges en
+            cada estado. Y dos, el traicionero: al cambiar la política cambian <strong>los estados que
+            visitas</strong>, y por tanto sobre qué estados se promedia. Ese segundo término es
+            horrible, porque exigiría derivar la distribución estacionaria del MDP respecto de
+            $\theta$.
+          </p>
+          <p>
+            Lo que Silver et al. demuestran es que ese término <strong>se cancela</strong>: el
+            gradiente de $J$ es exactamente la esperanza de arriba, con los estados dentro de la
+            esperanza y no derivándose. Y eso es justo lo que nos autoriza a sacar los estados de un
+            buffer lleno de experiencia vieja, recogida con políticas que ya no existen. Si el término
+            de la distribución de estados apareciera, muestrear $s\sim\mathcal{D}$ sería sencillamente
+            ilegal.
+          </p>
+          <p>
+            Con una letra pequeña honesta: el teorema se demuestra para la distribución de estados de
+            la política <em>actual</em>, y el buffer no la contiene. Rigurosamente <strong>hacemos
+            trampa</strong>, y esa trampa es parte de por qué DDPG es delicado. Funciona porque las
+            distribuciones de estados de políticas sucesivas se parecen bastante… hasta que dejan de
+            parecerse.
           </p>
         </div>
 
@@ -203,9 +304,9 @@
           <li>Inicializa el actor $\mu_\theta$ y el crítico $Q_\phi$. Crea copias objetivo
               $\theta' \leftarrow \theta$, $\phi' \leftarrow \phi$. Vacía el buffer $\mathcal{D}$.</li>
           <li>En cada paso, actúa con $a = \operatorname{clip}(\mu_\theta(s) + \epsilon)$, observa
-              $r$ y $s'$, y guarda $(s,a,r,s')$ en $\mathcal{D}$.</li>
+              $r$, $s'$ y si $s'$ es terminal, y guarda $(s,a,r,s',d)$ en $\mathcal{D}$.</li>
           <li>Muestrea un <em>minibatch</em> de $\mathcal{D}$ y calcula el objetivo
-              $y = r + \gamma\,Q_{\phi'}(s',\mu_{\theta'}(s'))$.</li>
+              $y = r + \gamma\,(1-d)\,Q_{\phi'}(s',\mu_{\theta'}(s'))$.</li>
           <li>Actualiza el crítico minimizando $(Q_\phi(s,a) - y)^2$.</li>
           <li>Actualiza el actor con el gradiente DPG:
               $\nabla_\theta J = \nabla_a Q_\phi\,\nabla_\theta \mu_\theta$.</li>
@@ -236,27 +337,79 @@
           En lugar de un crítico, TD3 entrena <strong>dos</strong>, $Q_{\phi_1}$ y $Q_{\phi_2}$, con
           pesos iniciales distintos. Para formar el objetivo TD toma el <strong>mínimo</strong> de
           los dos. La intuición: si un crítico sobreestima por casualidad, el otro probablemente no
-          lo haga tanto; quedarnos con el menor recorta el optimismo. Es el mismo espíritu que
-          <a href="13-mejoras-dqn.html">Double DQN</a>, llevado al caso continuo.
+          lo haga tanto; quedarnos con el menor recorta el optimismo.
+        </p>
+        <p>
+          Merece la pena ver de dónde sale ese optimismo, porque no viene de que los críticos sean
+          malos. Viene del $\max$, y aparece incluso con estimadores <em>perfectos</em>.
         </p>
 
         <div class="callout math">
+          <div class="callout-title">➗ Dos estimaciones perfectas, un máximo optimista</div>
+          <p>
+            Imagina un estado donde todas las acciones valen exactamente $0$, y dos críticos que lo
+            estiman <strong>sin ningún sesgo</strong>, solo con ruido:
+            $Q_1, Q_2 \sim \mathcal{N}(0,1)$ independientes. Entonces
+            $\mathbb{E}[Q_1] = \mathbb{E}[Q_2] = 0$, pero
+          </p>
+          <p>$$\mathbb{E}\big[\max(Q_1,Q_2)\big] \;=\; \frac{1}{\sqrt{\pi}} \;\approx\; +0{,}56,
+             \qquad
+             \mathbb{E}\big[\min(Q_1,Q_2)\big] \;\approx\; -0{,}56$$</p>
+          <p class="math-note">
+            Ninguno de los dos críticos está sesgado y, aun así, el máximo lo está: se lleva
+            $+0{,}56$ de regalo. El culpable no es el crítico, es el operador. Es el
+            <a href="13-mejoras-dqn.html#sesgo">sesgo de maximización</a> del capítulo 13, y en DDPG
+            hace más daño que en DQN porque el actor se entrena <em>precisamente</em> para encontrar
+            dónde el crítico se equivoca por arriba: es un buscador profesional de errores optimistas.
+            El valor inflado entra en el objetivo TD, el crítico aprende a inflarse todavía más y el
+            bucle se realimenta.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El mínimo no es «insesgado»: es pesimista a propósito</div>
+          <p>
+            En el mismo ejemplo, el mínimo se pasa $-0{,}56$ por el otro lado. TD3 no arregla el
+            sesgo, lo <strong>cambia de signo</strong>, y lo hace a sabiendas: un crítico pesimista
+            hace que el actor sea prudente y que el error no se realimente, mientras que uno optimista
+            entra en barrena. Es una asimetría de consecuencias, no de matemáticas.
+          </p>
+          <p>
+            Y ojo con la analogía: <a href="13-mejoras-dqn.html#double">Double DQN</a> hace algo
+            <em>distinto</em>. Allí no hay ningún mínimo; lo que se hace es <strong>desacoplar quién
+            elige de quién evalúa</strong> (una red escoge el argmax, la otra lo puntúa), y el
+            resultado pretende ser aproximadamente insesgado. TD3 comparte el diagnóstico —el $\max$
+            miente— pero no el remedio.
+          </p>
+        </div>
+
+        <div class="callout math">
           <div class="callout-title">➗ Objetivo con doble crítico recortado</div>
-          <p>$$y \;=\; r \;+\; \gamma\, \min_{i\in\{1,2\}} Q_{\phi'_i}\!\big(s',\, \tilde{a}\big),
-             \qquad \tilde{a} \;=\; \mu_{\theta'}(s') + \operatorname{clip}(\epsilon, -c, c)$$</p>
+          <p>$$y \;=\; r \;+\; \gamma\,(1-d)\, \min_{i\in\{1,2\}} Q_{\phi'_i}\!\big(s',\, \tilde{a}\big)$$</p>
+          <p>$$\tilde{a} \;=\; \operatorname{clip}\Big(\mu_{\theta'}(s')
+             + \operatorname{clip}(\epsilon, -c, c),\; a_{\min},\; a_{\max}\Big),
+             \qquad \epsilon \sim \mathcal{N}(0,\tilde\sigma^2)$$</p>
           <p class="math-note">
             $\min_{i} Q_{\phi'_i}$ toma el <strong>menor</strong> de los dos valores objetivo:
             así se combate la sobreestimación. $\tilde{a}$ es la acción objetivo con
-            <strong>suavizado</strong> (ver abajo): $\epsilon\sim\mathcal{N}(0,\tilde\sigma^2)$
-            recortado a $[-c,c]$. Ambos críticos se entrenan hacia <em>este mismo</em> objetivo $y$.
+            <strong>suavizado</strong> (ver abajo). Ambos críticos se entrenan hacia <em>este
+            mismo</em> objetivo $y$, y $(1-d)$ vuelve a apagar el futuro en los estados terminales.
+            Fíjate en que hay <strong>dos recortes anidados</strong> y cada uno hace un trabajo
+            distinto. El de dentro limita el ruido de suavizado a $\pm c$ (valores típicos: $c=0{,}5$
+            con $\tilde\sigma=0{,}2$), para que un $\epsilon$ desmandado no mande la acción objetivo a
+            la otra punta del espacio. El de fuera devuelve la acción al rango físico válido: no tiene
+            ningún sentido preguntarle al crítico cuánto vale aplicar un par de 3 N·m si el motor solo
+            llega a 2.
           </p>
         </div>
 
         <h3>2. Actualizaciones retardadas del actor</h3>
         <p>
           Un crítico ruidoso guía mal al actor. TD3 actualiza el crítico en cada paso, pero el actor
-          y las redes objetivo solo cada $d$ pasos (típicamente $d=2$). Así el actor «persigue» un
-          crítico que ya se ha asentado un poco, en vez de uno que tiembla.
+          y las redes objetivo solo cada $k$ pasos (típicamente $k=2$). Así el actor «persigue» un
+          crítico que ya se ha asentado un poco, en vez de uno que tiembla. <em>(En el artículo
+          original este retardo se llama $d$; aquí lo escribimos $k$ para no chocar con el indicador
+          de terminal.)</em>
         </p>
 
         <h3>3. Suavizado de la política objetivo</h3>
@@ -316,21 +469,56 @@
         <h3>Crítico «suave» y política óptima</h3>
         <p>
           El crítico de SAC estima un valor $Q$ que ya incluye el bonus de entropía de los pasos
-          futuros. Su objetivo TD hereda el doble crítico de TD3 —el $\min$— y le resta el término
-          de entropía del siguiente paso:
+          futuros. Su objetivo TD hereda el doble crítico de TD3 —el $\min$— y le <em>suma</em> el
+          bonus de entropía del siguiente paso, que escrito con la log-densidad es un
+          $-\alpha\log\pi$:
         </p>
 
         <div class="callout math">
           <div class="callout-title">➗ Objetivo del crítico suave</div>
-          <p>$$y \;=\; r \;+\; \gamma\Big(\, \min_{i\in\{1,2\}} Q_{\phi'_i}(s',a')
+          <p>$$y \;=\; r \;+\; \gamma\,(1-d)\Big(\, \min_{i\in\{1,2\}} Q_{\phi'_i}(s',a')
              \;-\; \alpha\,\log \pi_\theta(a'\mid s')\,\Big), \qquad a' \sim \pi_\theta(\cdot\mid s')$$</p>
           <p class="math-note">
             $a'$ se <strong>muestrea</strong> de la política actual en $s'$ (no es determinista).
             El término $-\alpha\log\pi_\theta(a'\mid s')$ es, en esperanza, el bonus de entropía:
             recompensa que la acción siguiente sea «incierta». Como en TD3, el $\min$ de los dos
-            críticos objetivo frena la sobreestimación.
+            críticos objetivo frena la sobreestimación. Y sigue ahí el $(1-d)$: en un estado terminal
+            no hay futuro que descontar, ni siquiera entropía futura.
           </p>
         </div>
+
+        <p>
+          Esa fórmula parece un apaño hasta que le pones nombre al paréntesis. Llamemos
+          <strong>valor suave</strong> a lo que hay dentro:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El valor suave $V_{\text{soft}}$</div>
+          <p>$$V_{\text{soft}}(s) \;=\; \mathbb{E}_{a\sim\pi}\Big[\, Q_{\text{soft}}(s,a)
+             \;-\; \alpha\log\pi(a\mid s)\,\Big]
+             \;=\; \mathbb{E}_{a\sim\pi}\big[Q_{\text{soft}}(s,a)\big]
+             \;+\; \alpha\,\mathcal{H}\big(\pi(\cdot\mid s)\big)$$</p>
+          <p>$$y \;=\; r \;+\; \gamma\,(1-d)\,V_{\text{soft}}(s')$$</p>
+          <p class="math-note">
+            La segunda igualdad es literal: $\mathbb{E}_{a\sim\pi}[-\log\pi(a\mid s)]$
+            <em>es</em> la definición de entropía. Y con eso, el objetivo del crítico es
+            <strong>el Bellman de toda la vida</strong>, $y = r + \gamma\,(1-d)\,V(s')$; lo único
+            que ha cambiado es que $V$ ahora incluye el bonus de entropía del propio estado. En el
+            código, esa esperanza se estima con <em>una sola muestra</em> $a'\sim\pi(\cdot\mid s')$:
+            por eso lo que ves escrito arriba es
+            $\min_i Q_{\phi'_i}(s',a') - \alpha\log\pi_\theta(a'\mid s')$ y no una integral. El $\min$
+            entre los dos críticos, en cambio, no forma parte de la teoría suave: es herencia de TD3,
+            un parche numérico pegado encima.
+          </p>
+        </div>
+
+        <p>
+          Este $V_{\text{soft}}$ no es una definición de conveniencia: es la pieza central de toda una
+          familia de métodos. En el <a href="20-maxent-empowerment.html#algoritmo">capítulo 20</a>
+          verás que $V_{\text{soft}}$ resulta ser un <em>log-sum-exp</em> disfrazado, y que ese
+          $-\alpha\log\pi$ que aquí parece un añadido es exactamente lo que queda al despejar la
+          política óptima de un Bellman «suavizado».
+        </p>
 
         <h3>El truco de reparametrización</h3>
         <p>
@@ -343,30 +531,73 @@
 
         <div class="callout math">
           <div class="callout-title">➗ Reparametrización y pérdida del actor</div>
-          <p>$$a_\theta(\epsilon, s) \;=\; \tanh\!\big(\mu_\theta(s) + \sigma_\theta(s)\odot\epsilon\big),
+          <p>$$u_\theta(\epsilon, s) \;=\; \mu_\theta(s) + \sigma_\theta(s)\odot\epsilon,
+             \qquad a_\theta(\epsilon,s) \;=\; a_{\max}\odot\tanh\!\big(u_\theta(\epsilon,s)\big),
              \qquad \epsilon \sim \mathcal{N}(0, I)$$</p>
           <p>$$J_\pi(\theta) \;=\; \mathbb{E}_{s\sim\mathcal{D},\,\epsilon}\Big[\,
              \alpha\,\log \pi_\theta\big(a_\theta(\epsilon,s)\mid s\big)
              \;-\; \min_{i\in\{1,2\}} Q_{\phi_i}\big(s, a_\theta(\epsilon,s)\big)\,\Big]$$</p>
           <p class="math-note">
             $\mu_\theta(s)$ y $\sigma_\theta(s)$ son la media y la desviación que produce el actor;
-            $\odot$ es el producto elemento a elemento. Al mover el azar a $\epsilon$ (que no depende
-            de $\theta$), el gradiente <strong>sí</strong> fluye por $\mu_\theta$ y $\sigma_\theta$.
-            El $\tanh$ «aplasta» la acción a un rango acotado (luego se reescala al rango real). La
-            pérdida $J_\pi$ empuja a maximizar $Q$ y, a la vez, la entropía (el término
-            $\alpha\log\pi$). Minimizarla es el ascenso de política de SAC.
+            $\odot$ es el producto elemento a elemento. Fíjate en la variable intermedia
+            <strong>$u$</strong>: es la muestra gaussiana <em>antes</em> de aplastarla, y nos va a
+            hacer falta enseguida. Al mover el azar a $\epsilon$ (que no depende de $\theta$), el
+            gradiente <strong>sí</strong> fluye por $\mu_\theta$ y $\sigma_\theta$. El $\tanh$
+            «aplasta» la acción a $(-1,1)$ y $a_{\max}$ la reescala al rango físico real (en el
+            péndulo, $\pm 2$ N·m). La pérdida $J_\pi$ empuja a maximizar $Q$ y, a la vez, la entropía
+            (el término $\alpha\log\pi$). Minimizarla es el ascenso de política de SAC.
+          </p>
+        </div>
+
+        <p>
+          Queda un cabo suelto, y es de los que se llevan por delante a mucha gente: en $J_\pi$
+          aparece $\log \pi_\theta(a\mid s)$, la log-densidad de la acción <em>ya aplastada</em>. Y
+          esa <strong>no</strong> es la log-densidad de la gaussiana. Al pasar $u$ por $\tanh$ y por
+          $a_{\max}$ estamos comprimiendo y estirando el eje, así que la densidad se deforma. La
+          fórmula del cambio de variable nos dice exactamente cuánto.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ De dónde sale la corrección del <em>tanh</em></div>
+          <p>
+            Si $a = g(u)$ con $g$ estrictamente creciente, la probabilidad de un intervalo se conserva
+            —$p_A(a)\,|da| = p_U(u)\,|du|$—, así que
+            $p_A(a) = p_U(u)\big|\tfrac{da}{du}\big|^{-1}$ y, tomando logaritmos:
+          </p>
+          <p>$$\log p_A(a) \;=\; \log p_U(u) \;-\; \log\Big|\tfrac{da}{du}\Big|$$</p>
+          <p>
+            Aquí $g(u) = a_{\max}\tanh(u)$, cuya derivada es
+            $a_{\max}\big(1-\tanh^2(u)\big)$. Componente a componente:
+          </p>
+          <p>$$\log \pi_\theta(a\mid s) \;=\; \sum_{i}\Big[\,
+             \log \mathcal{N}\big(u_i;\, \mu_{\theta,i}(s),\, \sigma_{\theta,i}(s)^2\big)
+             \;-\; \log\big(a_{\max,i}\,(1 - \tanh^2 u_i)\big)\,\Big]$$</p>
+          <p class="math-note">
+            La suma sobre $i$ sale de dos hechos: las componentes de la gaussiana son independientes
+            (la densidad conjunta es un producto y los logaritmos se suman) y el jacobiano del
+            aplastamiento es <strong>diagonal</strong> (cada acción solo depende de su propio $u_i$),
+            de modo que su determinante es el producto de las derivadas. Compara la fórmula con el
+            código de <code>sac_torch.py</code>: <code>dist.log_prob(u) - torch.log(self.escala * (1 -
+            y.pow(2)) + 1e-6)</code>. Están las dos piezas, la <code>escala</code> incluida; el
+            $10^{-6}$ es un salvavidas numérico para cuando $\tanh u$ se satura y el paréntesis se va
+            a cero.
           </p>
         </div>
 
         <div class="callout warn">
-          <div class="callout-title">⚠️ La corrección del <em>tanh</em> en la densidad</div>
+          <div class="callout-title">⚠️ Los dos errores clásicos de esta corrección</div>
           <p>
-            Como aplicamos $\tanh$ a una gaussiana, la densidad de la acción resultante <strong>no</strong>
-            es la de la gaussiana original: hay que corregirla con el jacobiano del cambio de
-            variable. En la práctica se resta un término
-            $\sum_i \log\!\big(1 - \tanh^2(u_i)\big)$ al log-verosímil de la gaussiana. Es un detalle
-            fácil de olvidar y que, omitido, hace que SAC no aprenda bien; en el código de PyTorch
-            está resuelto en la línea de la corrección.
+            <strong>Olvidarla entera.</strong> Sin el término del jacobiano, $\log\pi$ está mal, el
+            bonus de entropía está mal y SAC no aprende bien. Es el fallo más frecuente de las
+            reimplementaciones caseras.
+          </p>
+          <p>
+            <strong>Olvidar el $\log a_{\max}$.</strong> Este es más sutil, porque es una
+            <em>constante</em>: no depende de $\theta$, así que no cambia el gradiente del actor y da
+            la impresión de ser inofensivo. Pero sí desplaza el <em>valor</em> de $\log\pi$, y ese
+            valor se compara con la entropía objetivo $\mathcal{H}_0$ en la pérdida de la temperatura
+            (la fórmula de abajo). Omitirlo descalibra $\alpha$ en $\sum_i\log a_{\max,i}$ nats, y de
+            golpe tu SAC explora demasiado o demasiado poco sin que sepas por qué.
           </p>
         </div>
 
@@ -408,6 +639,31 @@
           TD3 (2018) → SAC (2018)— es una lección preciosa de ingeniería: cada método arregla un
           defecto concreto del anterior.
         </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 ¿PPO o SAC? La única decisión que vas a tomar de verdad</div>
+          <p>
+            Puestos a resolver un problema de control continuo, tienes dos candidatos serios:
+            <a href="16-ppo.html">PPO</a> (on-policy) y SAC (off-policy). La pregunta que decide
+            casi siempre no es matemática, es de logística: <strong>¿cuánto te cuesta un paso de
+            entorno?</strong>
+          </p>
+          <ul>
+            <li><strong>Datos caros y escasos</strong> —un robot de verdad, un simulador lento, un
+                experimento que desgasta hardware—: <strong>off-policy</strong>, SAC o TD3. El buffer
+                te deja exprimir cada transición decenas de veces.</li>
+            <li><strong>Datos baratos y abundantes</strong> —un simulador rápido, cientos de entornos
+                en paralelo—: <strong>on-policy</strong>, PPO. Cada muestra se aprovecha poco, pero
+                puedes recoger millones y el algoritmo es mucho menos quisquilloso.</li>
+          </ul>
+          <p>
+            Dicho de otro modo: SAC compra <em>eficiencia en muestras</em> pagando con
+            <em>fragilidad y complejidad</em> (más redes, más hiperparámetros, un buffer que ocupa
+            memoria); PPO compra <em>robustez y paralelismo</em> pagando con <em>muestras</em>. Y si
+            tu acción es <strong>discreta</strong>, la respuesta por defecto vuelve a ser PPO o
+            <a href="12-dqn.html">DQN</a>: DDPG, TD3 y SAC nacieron para el continuo.
+          </p>
+        </div>
 
         <h2 id="ejemplo">Ejemplo: DDPG desde cero en numpy</h2>
         <p>
@@ -626,7 +882,8 @@ def actualiza(actor, critico, actor_obj, critico_obj, lote, gamma, lr_a, lr_c):
     # --- (a) Crítico: regresión hacia el objetivo TD y = r + gamma * Q'(s', mu'(s')) ---
     a2 = actor_obj.forward(s2)                         # acción objetivo
     q_obj = critico_obj.forward(np.hstack([s2, a2]))   # Q'(s', a2)
-    y = r + gamma * q_obj                              # sin término terminal: tarea continua
+    # d=0 siempre: este entorno nunca termina, solo se corta por tiempo -&gt; siempre bootstrap.
+    y = r + gamma * q_obj
     q = critico.forward(np.hstack([s, a]))             # Q(s, a) actual
     grad_q = 2.0 * (q - y) / batch                     # dL/dQ del ECM
     critico.backward(grad_q)
@@ -777,12 +1034,48 @@ if __name__ == "__main__":
         <div class="callout intuition">
           <div class="callout-title">🧪 Experimenta</div>
           <p>
-            Sube el ruido inicial de exploración (la $\sigma$ de <code>sigma</code>) o retrásalo:
-            demasiado poco y el actor se queda «ciego» a mejores acciones; demasiado y aprende
-            despacio. Prueba a poner un solo crítico (ya lo es) frente a promediar dos y observa la
-            estabilidad. Cambia <code>gamma</code> a $0.99$ o el número de episodios y mira cómo se
-            mueve la curva. Con <code>oculta=8</code> la red apenas tiene capacidad; con
-            <code>oculta=64</code>, aprende más fino pero más lento.
+            Este ejemplo tiene todas las piezas de DDPG, así que se pueden ir quitando una a una para
+            ver qué aporta cada cual. La referencia es la última línea que imprime el programa:
+            <strong>política determinista $\approx -2{,}4$</strong>.
+          </p>
+          <p>
+            <strong>Quita las redes objetivo.</strong> Llama a <code>entrena(tau=1.0)</code>: Polyak
+            con $\tau=1$ es copiar los pesos al instante, o sea, no tener red objetivo. El retorno
+            empeora de $-2{,}4$ a $-2{,}9$ y la curva se vuelve visiblemente más dentada. En cinco
+            semillas empeora en las cinco: el efecto es pequeño pero va siempre en la misma dirección.
+            En un juguete tan fácil no llega a romperse nada; en un problema de verdad, el crítico
+            persiguiéndose la cola es exactamente lo que motivó la red objetivo del
+            <a href="12-dqn.html#target">capítulo 12</a>.
+          </p>
+          <p>
+            <strong>Quita la exploración.</strong> Hay que quitar <em>las dos</em> fuentes de ruido:
+            pon <code>inicio_aleatorio=0</code> <em>y además</em> cambia la línea
+            <code>sigma = 0.30 - 0.25 * ep / ...</code> por <code>sigma = 0.0</code>. Es importante
+            hacerlo a la vez, porque cada una por separado casi no se nota (solo con
+            <code>inicio_aleatorio=0</code> sale $-2{,}2$, igual de bien que el original; solo con
+            <code>sigma=0.0</code>, $-2{,}8$). Sin ninguna de las dos, el retorno se hunde a
+            $-6{,}6$: el actor determinista se queda encerrado en las acciones que ya conoce.
+          </p>
+          <p>
+            <strong>Quita el buffer</strong> —y llévate una lección de metodología—. Sustituye
+            <code>buffer.sample(batch, rng)</code> por las últimas <code>batch</code> transiciones
+            <em>consecutivas</em> y… no pasa nada: $-2{,}3$, idéntico. No es que el buffer no importe;
+            es que con <code>batch=64</code> y episodios de 30 pasos, esas 64 transiciones seguidas ya
+            abarcan dos episodios enteros que arrancan en puntos aleatorios del anillo, así que están
+            mucho menos correlacionadas de lo que parece. Repite el experimento con
+            <code>batch=8</code> y el efecto aparece de golpe: $-2{,}9$ muestreando al azar frente a
+            $-6{,}9$ tomando las ocho últimas seguidas (media de cinco semillas). Moraleja: un juguete
+            puede <em>esconder</em> el motivo por el que existe una técnica.
+          </p>
+          <p>
+            <strong>Conviértelo en medio TD3.</strong> Crea un segundo par
+            <code>critico2</code>/<code>critico2_obj</code>, entrena los dos hacia la misma
+            <code>y</code> y sustituye <code>q_obj</code> por
+            <code>np.minimum(q_obj1, q_obj2)</code>. Son unas ocho líneas y te dejan tocar con los
+            dedos el truco del mínimo: el <em>mínimo</em>, ojo, no la media. Aquí el retorno se queda
+            donde estaba ($-2{,}3$ de media en cinco semillas, igual que el original), y tiene todo el
+            sentido: no hay sobreestimación que corregir cuando el crítico ya acierta. El doble
+            crítico no es una mejora gratis, es un seguro contra un problema que este juguete no tiene.
           </p>
         </div>
 
@@ -940,6 +1233,10 @@ def entrena(pasos_totales=20000, inicio_aprendizaje=1000, batch=256,
     torch.manual_seed(semilla)
 
     env = gym.make("Pendulum-v1")
+    # reset(seed=...) siembra el entorno, pero NO el espacio de acciones: sin esta
+    # línea, el arranque aleatorio de abajo cambia en cada ejecución y la traza no
+    # es reproducible aunque hayas fijado todas las demás semillas.
+    env.action_space.seed(semilla)
     dim_s = env.observation_space.shape[0]
     dim_a = env.action_space.shape[0]
     a_high = env.action_space.high              # [2.0] en Pendulum
@@ -1047,14 +1344,47 @@ if __name__ == "__main__":
 
 <span class="comment"># 3) DDPG desde cero (ligero, solo numpy + matplotlib)</span>
 <span class="prompt">$</span> python code/17-control-continuo/ddpg_desde_cero.py
-<span class="comment">Retorno episodio 1   :  ~ -20   (aún explorando)
-Retorno último ep.   :  ~  -3
-Política determinista:  ~  -2   (retorno medio, 20 arranques)</span>
+<span class="comment">Retorno episodio 1   :  -19.60  (aún explorando)
+Retorno último ep.   :   -2.71
+Media primeros 5 ep. :  -16.65
+Media últimos 5 ep.  :   -2.70
+Política determinista:   -2.38  (retorno medio, 20 arranques)</span>
 
 <span class="comment"># 4) SAC con PyTorch sobre Pendulum-v1 (tarda unos minutos)</span>
 <span class="prompt">$</span> python code/17-control-continuo/sac_torch.py
-<span class="comment">paso  20000 | retorno medio (últimos 10 ep.) = ~ -180 | alpha = ...</span></pre>
+<span class="comment">paso   2000 | retorno medio (últimos 10 ep.) =  -1326.8 | alpha = 0.744
+paso   4000 | retorno medio (últimos 10 ep.) =   -958.4 | alpha = 0.443
+paso   6000 | retorno medio (últimos 10 ep.) =   -153.4 | alpha = 0.269
+paso   8000 | retorno medio (últimos 10 ep.) =   -124.2 | alpha = 0.158
+paso  10000 | retorno medio (últimos 10 ep.) =   -188.7 | alpha = 0.094
+paso  12000 | retorno medio (últimos 10 ep.) =   -131.1 | alpha = 0.056
+paso  14000 | retorno medio (últimos 10 ep.) =   -167.6 | alpha = 0.034
+paso  16000 | retorno medio (últimos 10 ep.) =   -179.0 | alpha = 0.022
+paso  18000 | retorno medio (últimos 10 ep.) =   -143.3 | alpha = 0.017
+paso  20000 | retorno medio (últimos 10 ep.) =   -191.9 | alpha = 0.013</span></pre>
         </div>
+        <p>
+          En el DDPG, el salto de $-19{,}6$ a $-2{,}7$ es todo el capítulo en dos números: el punto
+          pasa de vagar por el plano a ir derecho al origen. En el SAC, fíjate en las <em>dos</em>
+          columnas. La del retorno sube de $-1327$ a la banda de $-125$ a $-190$: eso es un péndulo
+          que se levanta y se queda arriba. No esperes que la curva sea limpia —sube a tirones,
+          porque unos episodios arrancan casi de pie y otros colgando boca abajo, y esos cuestan
+          mucho más caros—. Y la de
+          <code>alpha</code> cuenta la otra mitad de la historia: arranca en $1{,}0$ —el código
+          inicializa $\log\alpha = 0$— y va cayendo hasta $0{,}013$ conforme la política se vuelve
+          competente. Eso es el ajuste automático de la temperatura haciendo su trabajo: al principio
+          paga caro por explorar, al final ya casi no necesita comprar aleatoriedad.
+        </p>
+        <p class="pyodide-banner">
+          💡 Estas dos trazas son reproducibles: con la misma semilla y las mismas versiones de las
+          librerías salen idénticas. Y ha costado un detalle que merece la pena que veas, porque es un
+          clásico: <code>env.reset(seed=…)</code> siembra el <em>entorno</em>, pero <strong>no</strong>
+          el espacio de acciones, así que los primeros mil pasos de arranque aleatorio de SAC cambiaban
+          en cada ejecución y con ellos toda la traza. La línea <code>env.action_space.seed(semilla)</code>
+          del código es la que lo arregla. Aun así, con otra versión de <code>torch</code> o de
+          <code>gymnasium</code> verás números distintos: lo que importa es la <em>tendencia</em>, el
+          retorno sube y $\alpha$ baja.
+        </p>
 
         <h2 id="hacia-18">Hacia las fronteras del campo</h2>
         <p>
@@ -1077,6 +1407,10 @@ Política determinista:  ~  -2   (retorno medio, 20 arranques)</span>
           <ul>
             <li>Con acciones <strong>continuas</strong> no hay $\max_a$: el <strong>actor</strong>
                 propone la acción y el <strong>crítico</strong> $Q(s,a)$ la evalúa.</li>
+            <li>La <strong>política gaussiana</strong> $\mathcal{N}(\mu_\theta(s),\sigma_\theta(s)^2)$
+                basta para llevar REINFORCE, A2C y PPO al continuo: solo hacen falta su log-densidad y
+                su entropía, ambas en forma cerrada. Lo que esos métodos no dan es
+                <strong>off-policy</strong>.</li>
             <li><strong>DDPG</strong>: actor determinista $\mu_\theta$, entrenado con el gradiente
                 DPG $\nabla_a Q\,\nabla_\theta\mu$; explora con ruido; es off-policy con buffer y
                 redes objetivo. Potente pero frágil.</li>

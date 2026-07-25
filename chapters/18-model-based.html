@@ -39,7 +39,9 @@
           y <strong>planifique</strong> con él —«practique en su cabeza»— para exprimir muchísimo más
           cada experiencia real. Recorreremos el camino desde <strong>Dyna-Q</strong>, que entrelaza
           aprender y planificar, hasta <strong>MuZero</strong>, que aprende su propio modelo y planifica
-          en un espacio latente sin conocer siquiera las reglas del juego.
+          en un espacio latente sin conocer siquiera las reglas del juego. Y terminaremos con la letra
+          pequeña que casi nadie cuenta: qué ocurre cuando el modelo es una <strong>red neuronal</strong>
+          que se equivoca un poco en cada paso imaginado.
         </p>
 
         <h2 id="sin-y-con-modelo">Sin modelo y con modelo: dos formas de aprender</h2>
@@ -492,6 +494,36 @@ if __name__ == "__main__":
           </p>
         </div>
 
+        <div class="callout intuition">
+          <div class="callout-title">🧠 ¿No es un desperdicio muestrear al azar del modelo?</div>
+          <p>
+            Sí, y muchísimo. Puedes comprobarlo con una línea: mete
+            <code>print(len(visitados), np.count_nonzero(Q))</code> dentro de <code>dyna_q()</code>, al
+            terminar el primer episodio. Con $n = 50$, el agente ha visitado unos <strong>135 pares
+            $(s,a)$ distintos</strong> (de media sobre las 15 semillas del experimento) y solo
+            <strong>2,3</strong> tienen $Q \neq 0$; con $n = 5$, exactamente <strong>uno</strong>.
+            Traducido: casi todas las actualizaciones imaginadas de ese
+            primer episodio son literalmente
+            $0 \leftarrow 0 + \alpha\,(0 + \gamma \cdot 0 - 0)$. Cómputo tirado a la basura.
+          </p>
+          <p>
+            El arreglo se llama <strong>barrido priorizado</strong> (<em>prioritized sweeping</em>), y es
+            la misma idea de la <a href="05-programacion-dinamica.html">programación dinámica</a>
+            asíncrona: no barras en orden, barre donde algo ha cambiado. Se mantiene una
+            <strong>cola de prioridad</strong> ordenada por el tamaño del error de Bellman
+            $|R + \gamma \max_a Q(S', a) - Q(S, A)|$, y en cada paso de planificación se saca el par más
+            urgente. Lo bonito viene después: si al actualizarlo su valor cambia de forma apreciable, se
+            buscan en el modelo todos los <strong>predecesores</strong> de ese estado —los pares que
+            llevan hasta él— y se meten también en la cola con la prioridad que les corresponda. La
+            información fluye <em>hacia atrás</em> desde la meta, como una onda, en lugar de esperar a que
+            el azar la encuentre. Es el mismo principio del
+            <a href="13-mejoras-dqn.html#per">replay priorizado</a> del capítulo 13 aplicado a la
+            experiencia imaginada… con una ventaja que el replay no tiene: como aquí hay un modelo,
+            podemos preguntarle «¿quién lleva hasta este estado?» en vez de esperar a que esa transición
+            vuelva a salir sorteada.
+          </p>
+        </div>
+
         <h2 id="terminal">Ejecutarlo en tu terminal</h2>
         <p>
           Como todos los ejemplos del manual, este también corre fuera del navegador. Descarga el archivo
@@ -530,9 +562,31 @@ if __name__ == "__main__":
             especialmente delicado cuando el entorno <strong>cambia</strong>: un camino que antes estaba
             abierto puede bloquearse, pero el modelo seguirá «recordando» la versión antigua. La variante
             <strong>Dyna-Q+</strong> mitiga esto añadiendo un pequeño <em>bono de exploración</em> a las
-            transiciones que hace tiempo que no se prueban —un incentivo a revisitar el mundo y comprobar
-            si sigue siendo como lo recordábamos—. Es una primera muestra de la exploración dirigida que
-            veremos en el <a href="19-exploracion-avanzada.html">capítulo 19</a>.
+            transiciones que hace tiempo que no se prueban: un incentivo a revisitar el mundo y comprobar
+            si sigue siendo como lo recordábamos.
+          </p>
+        </div>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Dyna-Q+: pagar por lo que hace tiempo que no miras</div>
+          <p>$$r^{+} = r + \kappa\,\sqrt{\tau(s, a)}$$</p>
+          <p class="math-note">
+            Donde $\tau(s, a)$ es el número de pasos transcurridos desde la última vez que probamos
+            $(s,a)$ <em>de verdad</em>, y $\kappa$ es una constante pequeña (del orden de $10^{-3}$).
+            Durante la <strong>planificación</strong>, en lugar de la recompensa recordada $r$ se usa
+            $r^{+}$: cuanto más vieja es una transición, más apetecible la pinta el modelo, hasta que el
+            agente va a comprobarla y su $\tau$ vuelve a cero. Dyna-Q+ además permite planificar sobre
+            acciones <em>nunca probadas</em> en un estado, suponiéndolas de vuelta al mismo estado con
+            recompensa 0: así el bono también las alcanza. Los dos experimentos clásicos son un laberinto
+            que <strong>se bloquea</strong> (el camino corto se cierra y hay que encontrar otro: los dos
+            agentes acaban resolviéndolo, pero Dyna-Q tarda mucho más en darse por enterado) y un
+            laberinto con <strong>atajo</strong> (se abre un camino mejor, y Dyna-Q puede no encontrarlo
+            jamás, porque su política codiciosa ya funciona y nada le empuja a mirar otra vez). Fíjate en
+            la forma del bono: es el mismo motivo del
+            <a href="19-exploracion-avanzada.html">capítulo 19</a> visto del revés. Allí el bono será
+            $1/\sqrt{N(s,a)}$ y <em>decrece</em> con las visitas; aquí es $\kappa\sqrt{\tau(s,a)}$ y
+            <em>crece</em> con el desuso. Uno pregunta «¿cuánto he visto esto?»; el otro, «¿cuánto hace
+            que no lo veo?».
           </p>
         </div>
 
@@ -589,6 +643,57 @@ if __name__ == "__main__":
             líneas que van pareciendo buenas, sin abandonar del todo las dudosas. Fue el motor que llevó
             a los programas de <strong>Go</strong> del nivel amateur al profesional… antes incluso de que
             entraran las redes neuronales.
+          </p>
+        </div>
+
+        <p>
+          Vale la pena echarle las cuentas a esa fórmula una vez a mano, porque el resultado sorprende.
+          Imagina que llevamos $N(s) = 100$ simulaciones desde la raíz, con $c = 1$, y que las tres
+          acciones posibles están así (recuerda que $\ln 100 \approx 4{,}61$):
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Acción</th><th>$Q(s,a)$</th><th>$N(s,a)$</th><th>Bono $\sqrt{\ln N(s)/N(s,a)}$</th><th>UCT</th></tr></thead>
+            <tbody>
+              <tr><td>A (la favorita)</td><td>0,70</td><td>70</td><td>0,26</td><td>0,96</td></tr>
+              <tr><td>B (intermedia)</td><td>0,55</td><td>25</td><td>0,43</td><td>0,98</td></tr>
+              <tr><td>C (casi sin probar)</td><td>0,20</td><td>5</td><td>0,96</td><td><strong>1,16</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Gana <strong>C</strong>, ¡la peor de las tres por valor estimado! Y está bien que gane: con
+          cinco simulaciones, ese $0{,}20$ no es una medida, es un rumor. Pero mira qué pasa si le hacemos
+          caso y la simulamos veinte veces más y <em>sigue</em> dando $0{,}20$: ahora $N(s) = 120$ y
+          $N(s,\text{C}) = 25$, su bono se desploma a $0{,}44$ y su UCT cae a <strong>$0{,}64$</strong>, muy
+          por debajo de A y B. <strong>La duda se paga una vez; la mediocridad confirmada se abandona.</strong>
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 ¿Por qué jugamos la más visitada y no la de mayor $Q$?</div>
+          <p>
+            Porque $Q$ es una <em>media</em>, y las medias con pocas muestras mienten. Una acción puede
+            lucir un $Q$ altísimo simplemente porque las dos veces que la probamos tuvimos suerte. El
+            contador $N(s,a)$, en cambio, es el veredicto acumulado de todas las iteraciones: solo se
+            visita mucho lo que ha seguido pareciendo bueno <em>después</em> de mirarlo bien. Por eso el
+            recuento de visitas es más robusto que el valor medio, y por eso es también el objetivo que
+            AlphaZero le pone a la política de su red.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ UCT solo funciona si los valores están normalizados</div>
+          <p>
+            Fíjate en que estás <strong>sumando</strong> $Q(s,a)$ y un término de exploración que vale
+            aproximadamente 1 en la tabla de arriba. Eso solo tiene sentido si ambos viven en la misma
+            escala. En un juego de tablero, donde $Q \in [-1, 1]$ (perder, empatar, ganar), la suma está
+            equilibrada por construcción. Pero si tus $Q$ son retornos de Atari que van de 0 a 400, el
+            bono es ruido a su lado: la búsqueda se vuelve <strong>puramente codiciosa</strong> y no
+            explora nada. Es la causa número uno de que un MCTS casero «no explore». La solución que usa
+            <a href="#muzero">MuZero</a> es normalizar dentro del propio árbol: guarda el mínimo y el
+            máximo de los $Q$ vistos en esta búsqueda y reescala cada uno a $[0, 1]$ antes de sumarle el
+            bono. Si alguna vez te toca implementarlo, esa es la línea que separa un MCTS que funciona de
+            uno que no.
           </p>
         </div>
 
@@ -692,6 +797,97 @@ if __name__ == "__main__":
           </p>
         </div>
 
+        <h2 id="modelos-neuronales">Cuando el modelo es una red: el error que se acumula</h2>
+        <p>
+          Nos hemos movido entre dos extremos muy cómodos. El modelo de Dyna-Q era <strong>exacto</strong>
+          porque el laberinto era pequeño y determinista: una tabla lo capturaba entero. El de AlphaZero
+          era exacto porque las reglas del ajedrez están escritas en un libro. Pero el caso que domina el
+          RL basado en modelo de hoy no es ninguno de los dos: un robot, un motor de física, un proceso
+          industrial. Ahí el modelo es una <strong>red neuronal</strong> $\hat f_\theta(s, a) \approx (s', r)$
+          entrenada por regresión sobre las transiciones observadas. Y una red entrenada nunca es exacta:
+          se equivoca un poco en cada predicción.
+        </p>
+        <p>
+          Ese «un poco» es todo el problema. Para planificar hay que <strong>encadenar</strong> el modelo
+          consigo mismo: la salida del paso 1 es la entrada del paso 2, y así $H$ veces. El error del
+          primer paso no se limita a sumarse al del segundo; se <em>amplifica</em> al volver a pasar por
+          la red, porque el estado que le estamos dando ya no es un estado del entorno, es un estado
+          ligeramente inventado que nunca apareció en sus datos de entrenamiento.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición</div>
+          <p>
+            Es fotocopiar una fotocopia de una fotocopia. La primera copia es casi perfecta; la décima
+            es una mancha. Con una diferencia importante respecto a Dyna-Q: allí el modelo devolvía
+            <em>exactamente</em> lo que había visto, así que imaginar mil pasos era tan fiable como
+            imaginar uno. Aquí, cada paso imaginado te aleja un poco más del mundo real, y el agente no
+            tiene forma de notarlo desde dentro: sus predicciones siguen pareciéndole igual de seguras.
+          </p>
+        </div>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El error de composición a $H$ pasos</div>
+          <p>$$\|\hat s_H - s_H\| \;\lesssim\; \epsilon\,\frac{L^H - 1}{L - 1}$$</p>
+          <p class="math-note">
+            Donde $\epsilon$ es el error típico del modelo en <strong>un solo</strong> paso y $L$ la
+            constante de Lipschitz de la dinámica: cuánto separa el sistema, en un paso, a dos estados
+            que estaban juntos. La fórmula solo dice que cada paso arrastra el error heredado
+            (multiplicado por $L$) y le añade el suyo, $\epsilon$. Lo interesante es leer los dos
+            regímenes. Si $L \le 1$ —un sistema que <strong>contrae</strong>, que perdona los errores
+            pequeños— la suma es a lo sumo lineal, $H\epsilon$. Si $L &gt; 1$ —cualquier sistema
+            mínimamente inestable: un péndulo invertido, un bípedo, cualquier cosa con contactos— la suma
+            es <strong>exponencial</strong>. Pon números en la cota con $\epsilon = 0{,}01$ y
+            $L = 1{,}1$: a 5 pasos da $0{,}06$; a 20 pasos, $0{,}57$; y a 50 pasos, $11{,}6$, frente al
+            $0{,}50$ que habrías supuesto si creciera linealmente. Es una cota de peor caso, no una
+            medida —por eso el $\lesssim$—, pero la forma de la curva es la que importa: pasados unos
+            pocos pasos, tu imaginación deja de ser planificación y empieza a ser ficción. La moraleja cabe en dos
+            palabras: <strong>desenrolla poco</strong>.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Lo peor no es que el modelo falle, es que lo estás optimizando</div>
+          <p>
+            Hay algo peor que un modelo con error: un modelo con error <strong>contra el que estás
+            optimizando</strong>. Cuando buscas la política que maximiza el retorno <em>imaginado</em>, tu
+            optimizador rastrea el espacio entero buscando la mejor esquina… y las mejores esquinas del
+            modelo son precisamente aquellas donde el modelo se equivocó <em>por arriba</em>. La política
+            acaba aprendiendo a explotar los agujeros de la red: encuentra el rincón donde el modelo
+            alucina una recompensa que el mundo real no paga nunca. Se llama <em>model exploitation</em>,
+            y es primo hermano del <a href="13-mejoras-dqn.html#sesgo">sesgo de maximización</a> del
+            capítulo 13: en cuanto tomas un máximo sobre cantidades ruidosas, el ruido deja de promediarse
+            y pasa a <em>seleccionarse</em>. Los tres antídotos habituales: desenrollar pocos pasos,
+            entrenar un <strong>ensemble</strong> de modelos y quedarse con la predicción más pesimista, y
+            volver al entorno real a menudo para que refute las alucinaciones cuanto antes.
+          </p>
+        </div>
+
+        <p>
+          Con esta lente puesta, los tres grandes de la familia moderna se leen de un vistazo:
+        </p>
+        <ul>
+          <li><strong>MBPO</strong> (<em>Model-Based Policy Optimization</em>, 2019) es
+            <strong>Dyna con redes</strong>, y su truco es exactamente el de la fórmula de arriba:
+            en vez de imaginar episodios completos, lanza <em>rollouts ramificados</em>
+            <strong>muy cortos</strong> —a menudo de un solo paso— que arrancan de estados
+            <em>reales</em> sacados del buffer. Son ramitas cortas colgadas de la experiencia
+            verdadera, así que el error de composición no llega
+            a despegar. Con eso, la política (un <a href="17-control-continuo.html">SAC</a>) se entrena
+            casi por completo con datos imaginados.</li>
+          <li><strong>Modelos del mundo</strong> (<em>World Models</em>, PlaNet y la familia
+            <strong>Dreamer</strong>): aprenden, a partir de píxeles, un modelo latente recurrente —la
+            misma idea de razonar en un espacio abstracto que ya viste en MuZero— y no vuelven a salir
+            de él: PlaNet planifica dentro del sueño y Dreamer entrena ahí al agente
+            <strong>entero</strong>. En ambos casos el horizonte de imaginación es corto, de una
+            quincena de pasos. El entorno real solo se usa para recoger datos con los que mejorar el
+            modelo. Es hoy la vía más sólida hacia el RL eficiente en datos desde imágenes.</li>
+          <li><strong>MuZero</strong>, durante el entrenamiento, desenrolla su función de dinámica
+            $g_\theta$ solo unos <strong>cinco pasos</strong>… y ahora ya sabes por qué. No es un detalle
+            de implementación ni una limitación de memoria: es la única profundidad a la que un modelo
+            aprendido sigue diciendo la verdad.</li>
+        </ul>
+
         <h2 id="panorama">Panorama: ¿cuándo usar RL basado en modelo?</h2>
         <p>
           Basar el aprendizaje en un modelo no es gratis ni siempre conviene. La disyuntiva de fondo es
@@ -702,19 +898,31 @@ if __name__ == "__main__":
           <table>
             <thead><tr><th>Aspecto</th><th>Sin modelo (<em>model-free</em>)</th><th>Con modelo (<em>model-based</em>)</th></tr></thead>
             <tbody>
-              <tr><td>Eficiencia de datos</td><td>Baja (necesita mucha interacción)</td><td>Alta (planifica sobre pocos datos)</td></tr>
+              <tr><td>Eficiencia de datos</td><td>Baja (necesita mucha interacción)</td><td>Alta <em>solo</em> si el modelo sirve para reaprovechar datos: Dyna-Q, MBPO, Dreamer</td></tr>
+              <tr><td>Calidad de la decisión</td><td>La que dé la política aprendida, sin más</td><td>Alta si se planifica al decidir: la búsqueda <strong>corrige</strong> a la red (MCTS, AlphaZero, MuZero)</td></tr>
               <tr><td>Cómputo por decisión</td><td>Bajo</td><td>Alto (planificar cuesta)</td></tr>
-              <tr><td>Riesgo principal</td><td>Lentitud, ineficiencia</td><td>Un modelo erróneo desvía la política</td></tr>
-              <tr><td>Necesita las reglas</td><td>No</td><td>Dyna/MuZero: no · AlphaZero: sí</td></tr>
-              <tr><td>Ejemplos</td><td>Q-learning, DQN, PPO, SAC</td><td>Dyna-Q, AlphaZero, MuZero</td></tr>
+              <tr><td>Riesgo principal</td><td>Lentitud, ineficiencia</td><td>Un modelo erróneo desvía la política —y la optimización lo explota</td></tr>
+              <tr><td>Necesita las reglas</td><td>No</td><td>Dyna, MBPO, Dreamer, MuZero: no · AlphaZero: sí</td></tr>
+              <tr><td>Ejemplos</td><td>Q-learning, DQN, PPO, SAC</td><td>Dyna-Q, MBPO, Dreamer, AlphaZero, MuZero</td></tr>
             </tbody>
           </table>
         </div>
         <p>
+          Fíjate en las dos primeras filas, porque hemos desdoblado a propósito lo que casi todo el mundo
+          junta: <strong>«basado en modelo» no implica automáticamente «eficiente en datos»</strong>.
+          Depende de <em>para qué</em> uses el modelo. Si lo usas para <strong>exprimir cada dato real</strong>
+          —Dyna-Q, MBPO, Dreamer—, sí: esa es exactamente la ganancia. Si lo usas para
+          <strong>pensar mejor cada jugada</strong> —MCTS, AlphaZero, MuZero—, lo que ganas es calidad de
+          decisión, no ahorro: AlphaZero necesitó <em>decenas de millones</em> de partidas de auto-juego,
+          y MuZero, <em>miles de millones</em> de fotogramas. Son el ejemplo perfecto de método basado en
+          modelo y a la vez voraz en datos.
+        </p>
+        <p>
           La regla práctica: si la interacción con el entorno es <strong>cara o peligrosa</strong> (un
-          robot real, un ensayo clínico, un sistema industrial), la eficiencia de datos del enfoque basado
-          en modelo compensa de sobra el cómputo extra. Si los datos son baratos y abundantes (un
-          simulador rápido), a menudo gana la sencillez de un buen método sin modelo.
+          robot real, un ensayo clínico, un sistema industrial), la eficiencia de datos de un Dyna con
+          redes compensa de sobra el cómputo extra. Si los datos son baratos y abundantes (un simulador
+          rápido), a menudo gana la sencillez de un buen método sin modelo… salvo que lo que necesites
+          sea <em>afinar la decisión</em>, y entonces vuelve a merecer la pena buscar en un árbol.
         </p>
 
         <div class="callout key">
@@ -734,6 +942,9 @@ if __name__ == "__main__":
             <li><strong>MuZero</strong> <em>aprende</em> el modelo (funciones de representación, dinámica y
               predicción) y planifica en un espacio <strong>latente</strong> equivalente en valor, sin
               conocer las reglas.</li>
+            <li>Cuando el modelo es una <strong>red</strong>, su error se <strong>compone</strong> a cada
+              paso imaginado. De ahí la regla de oro <em>desenrolla poco</em>, y de ahí que
+              «basado en modelo» <strong>no</strong> sea sinónimo de «eficiente en datos».</li>
           </ul>
         </div>
 

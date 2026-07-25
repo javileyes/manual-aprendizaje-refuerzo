@@ -235,11 +235,76 @@
         <div class="callout key">
           <div class="callout-title">🔑 La equivalencia forward–backward</div>
           <p>
-            No es magia gratuita: se puede demostrar que, sumadas a lo largo de un episodio, las
-            actualizaciones de la <em>vista atrás</em> (con trazas) coinciden con las de la <em>vista
-            adelante</em> (con el λ-retorno). La vista adelante explica <em>qué</em> objetivo perseguimos;
+            No es magia gratuita, y aquí no vamos a pedirte que te fíes: sumadas a lo largo de un episodio,
+            las actualizaciones de la <em>vista atrás</em> (con trazas) coinciden con las de la <em>vista
+            adelante</em> (con el λ-retorno), y lo demostramos en el siguiente apartado. La vista adelante
+            explica <em>qué</em> objetivo perseguimos;
             la vista atrás nos da un algoritmo <strong>online</strong> y barato para lograrlo sin esperar
             al final del episodio. Lo mejor de los dos mundos.
+          </p>
+        </div>
+
+        <h3>Por qué son lo mismo (y de dónde sale el $\gamma\lambda$)</h3>
+        <p>
+          Esto no hay que creérselo: sale de una sola cuenta, y merece mucho la pena verla porque de paso
+          responde a una pregunta que a lo mejor te estabas haciendo: ¿por qué la traza decae justo a ritmo
+          $\gamma\lambda$ y no a cualquier otro? Damos por fija la estimación $V$ durante todo el episodio
+          (esa es la letra pequeña; volvemos a ella enseguida).
+        </p>
+        <p>
+          El primer ladrillo ya lo tienes del <a href="07-td-aprendizaje.html">capítulo 7</a>: si a un
+          retorno de $n$ pasos le restas $V(S_t)$ y sumas y restas los valores intermedios, la expresión
+          telescopa y lo que queda es una suma de errores TD,
+          $G_t^{(n)} - V(S_t) = \sum_{k=t}^{t+n-1} \gamma^{\,k-t}\,\delta_k$. Mete eso dentro del λ-retorno
+          y ordena las sumas:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ El λ-retorno, escrito con errores TD</div>
+          <p>$$G_t^{\lambda} - V(S_t) = \sum_{k=t}^{T-1} (\gamma\lambda)^{\,k-t}\, \delta_k$$</p>
+          <p class="math-note">
+            La única maniobra es intercambiar el orden de las dos sumas. Fíjate en un $\delta_k$ concreto:
+            aparece en <em>todos</em> los retornos de $n$ pasos que llegan hasta él, es decir en los que
+            tienen $n \ge k-t+1$. Sus pesos suman
+            $(1-\lambda)\sum_{n \ge k-t+1}\lambda^{\,n-1} = \lambda^{\,k-t}$ (otra vez la geométrica), y
+            multiplicando por el $\gamma^{\,k-t}$ que ya traía sale $(\gamma\lambda)^{\,k-t}$. Nada más.
+          </p>
+        </div>
+
+        <p>Ahora lee esa igualdad en los dos sentidos, porque dice dos cosas distintas:</p>
+        <ul>
+          <li><strong>De izquierda a derecha</strong> es la vista adelante: perseguir el λ-retorno desde
+          $S_t$ es lo mismo que ir acumulando los errores TD <em>futuros</em> con peso
+          $(\gamma\lambda)^{k-t}$.</li>
+          <li><strong>De derecha a izquierda</strong> es la vista atrás: fija ahora el instante $k$ y
+          pregúntate a cuántas actualizaciones contribuye ese único $\delta_k$. A la de $S_k$ con peso $1$,
+          a la de $S_{k-1}$ con peso $\gamma\lambda$, a la de $S_{k-2}$ con $(\gamma\lambda)^2$… O sea: hay
+          que repartir $\delta_k$ entre todos los estados por los que has pasado, con un peso que decae como
+          $(\gamma\lambda)^{\text{cuánto hace que pasaste}}$. <strong>Y eso es literalmente la traza.</strong></li>
+        </ul>
+        <p>
+          Así que $\gamma\lambda$ no es una heurística ni un número que alguien eligiera con buen gusto: es
+          el coeficiente que <em>ya estaba</em> dentro de la fórmula del λ-retorno. La traza se limita a
+          llevar la cuenta acumulada para no tener que recalcularla. Y de regalo te llevas una fórmula que
+          volverás a ver: cambia $V$ por un crítico aprendido y llama $\hat{A}_t$ a esa suma, y tienes el
+          <a href="15-actor-critico.html#gae">GAE del capítulo 15</a>, que es esta misma expresión con otro
+          nombre.
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ La letra pequeña: «equivalente» significa offline</div>
+          <p>
+            En la cuenta de arriba hemos supuesto $V$ fija durante todo el episodio, y en el algoritmo real
+            no lo es: cada paso la cambia, así que el $\delta_k$ que calcula la vista atrás ya no es
+            exactamente el que usaría la vista adelante con los valores del principio. La equivalencia es
+            <strong>exacta</strong> en la versión <em>offline</em> (acumulas todas las actualizaciones y las
+            aplicas de una vez al final del episodio) y solo <strong>aproximada</strong> en la versión online
+            que hemos escrito, aunque con $\alpha$ pequeña la diferencia es de segundo orden. Lo mismo vale
+            para la igualdad TD(λ=1) = Monte Carlo: offline es exacta y —con trazas acumulativas— el Monte
+            Carlo con el que coincide es el de <em>cada visita</em>, detalle aparentemente inocente que se
+            volverá muy importante al final del capítulo. Existe una variante, el <em>TD(λ) online
+            verdadero</em>, que recupera la igualdad exacta paso a paso reescribiendo sobre la marcha las
+            actualizaciones ya hechas; cuesta más y no la veremos aquí.
           </p>
         </div>
 
@@ -262,6 +327,66 @@
           </p>
         </div>
 
+        <figure class="figure">
+          <svg viewBox="0 0 640 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Traza de un mismo estado a lo largo del tiempo: acumulativa frente a de reemplazo">
+            <!-- rejilla -->
+            <line x1="30" y1="175" x2="620" y2="175" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4 4" />
+            <line x1="30" y1="100" x2="620" y2="100" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4 4" />
+            <!-- marcas de las visitas -->
+            <line x1="70"  y1="250" x2="70"  y2="45" stroke="#e2e8f0" stroke-width="10" />
+            <line x1="105" y1="250" x2="105" y2="45" stroke="#e2e8f0" stroke-width="10" />
+            <line x1="140" y1="250" x2="140" y2="45" stroke="#e2e8f0" stroke-width="10" />
+            <line x1="280" y1="250" x2="280" y2="45" stroke="#e2e8f0" stroke-width="10" />
+            <line x1="315" y1="250" x2="315" y2="45" stroke="#e2e8f0" stroke-width="10" />
+            <line x1="455" y1="250" x2="455" y2="45" stroke="#e2e8f0" stroke-width="10" />
+            <!-- ejes -->
+            <line x1="30" y1="250" x2="620" y2="250" stroke="#94a3b8" stroke-width="1.5" />
+            <text x="24" y="254" text-anchor="end" fill="#4a5568" font-size="11" font-family="sans-serif">0</text>
+            <text x="24" y="179" text-anchor="end" fill="#4a5568" font-size="11" font-family="sans-serif">1</text>
+            <text x="24" y="104" text-anchor="end" fill="#4a5568" font-size="11" font-family="sans-serif">2</text>
+            <!-- traza acumulativa -->
+            <polyline fill="none" stroke="#4f46e5" stroke-width="2.5" stroke-linejoin="round"
+              points="35,250 70,175 105,115 140,67 175,103.6 210,132.9 245,156.3 280,100.1 315,55 350,94 385,125.2 420,150.2 455,95.1 490,126.1 525,150.9 560,170.7 595,186.6" />
+            <circle cx="140" cy="67" r="3.5" fill="#4f46e5" />
+            <circle cx="315" cy="55" r="3.5" fill="#4f46e5" />
+            <!-- traza de reemplazo -->
+            <polyline fill="none" stroke="#10b981" stroke-width="2.5" stroke-linejoin="round"
+              points="35,250 70,175 105,175 140,175 175,190 210,202 245,211.6 280,175 315,175 350,190 385,202 420,211.6 455,175 490,190 525,202 560,211.6 595,219.3" />
+            <!-- etiquetas del eje de tiempo -->
+            <text x="70"  y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">1</text>
+            <text x="105" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">2</text>
+            <text x="140" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">3</text>
+            <text x="175" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">4</text>
+            <text x="210" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">5</text>
+            <text x="245" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">6</text>
+            <text x="280" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">7</text>
+            <text x="315" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">8</text>
+            <text x="350" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">9</text>
+            <text x="385" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">10</text>
+            <text x="420" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">11</text>
+            <text x="455" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">12</text>
+            <text x="490" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">13</text>
+            <text x="525" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">14</text>
+            <text x="560" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">15</text>
+            <text x="595" y="268" text-anchor="middle" fill="#4a5568" font-size="10" font-family="sans-serif">16</text>
+            <text x="325" y="288" text-anchor="middle" fill="#4a5568" font-size="11" font-family="sans-serif">paso <tspan font-style="italic">t</tspan>  (las bandas grises son las visitas al estado)</text>
+            <!-- leyenda -->
+            <text x="360" y="34" fill="#4f46e5" font-size="12" font-family="sans-serif" font-weight="700">acumulativa: e ← γλ·e + 1</text>
+            <text x="360" y="50" fill="#10b981" font-size="12" font-family="sans-serif" font-weight="700">de reemplazo: e ← 1</text>
+            <text x="35" y="34" fill="#4a5568" font-size="12" font-family="sans-serif">traza e(s) de UN estado · γλ = 0,8</text>
+          </svg>
+          <figcaption>
+            La traza de <em>un solo estado</em>, visitado en los pasos $1, 2, 3, 7, 8$ y $12$, con
+            $\gamma\lambda = 0{,}8$. Entre visita y visita las dos curvas se desvanecen igual (se multiplican
+            por $0{,}8$ en cada paso); la diferencia está en qué pasa <em>al</em> visitarlo. La acumulativa
+            suma $1$ sobre lo que quedaba y con tres visitas seguidas ya va por $2{,}44$; la de reemplazo se
+            corta en $1$ pase lo que pase. Ese techo importa: como la actualización es
+            $\alpha\,\delta\,e(s)$, una traza de $2{,}44$ es un paso de aprendizaje de $2{,}44\,\alpha$, y si
+            el estado se visita mucho y la traza casi no decae, ese factor crece sin freno. Es exactamente lo
+            que le pasa a $\lambda = 1$ en el experimento del final del capítulo.
+          </figcaption>
+        </figure>
+
         <h2 id="algoritmo">El algoritmo TD(λ), paso a paso</h2>
         <p>Para estimar la función de valor $V$ de una política dada, TD(λ) en su vista atrás es así:</p>
         <ol>
@@ -281,11 +406,117 @@
             </ol>
           </li>
         </ol>
+
+        <h3>La misma cuenta, a mano</h3>
         <p>
-          La misma idea se traslada al <strong>control</strong> (aprender la política, no solo evaluarla)
-          poniendo trazas sobre pares estado-acción: así nacen Sarsa(λ) y Q(λ), primos con memoria de la
-          <a href="09-q-learning.html">Sarsa y el Q-learning</a> del capítulo anterior.
+          Esto no se acaba de entender hasta que se hacen los números, así que tomemos el episodio más corto
+          que sirva de algo: tres estados en fila, $A \to B \to C \to$ terminal, con recompensa $0$ en los
+          dos primeros pasos y $+1$ al salir. Empezamos con $V = 0$ en todo, y ponemos $\gamma = 1$,
+          $\lambda = 0{,}5$ (o sea $\gamma\lambda = 0{,}5$) y $\alpha = 0{,}1$.
         </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Paso</th>
+                <th>Transición</th>
+                <th>$\delta_t$</th>
+                <th>Trazas $e(A)$ · $e(B)$ · $e(C)$</th>
+                <th>$V(A)$ · $V(B)$ · $V(C)$</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>$t=1$</td><td>$A \to B$, $R=0$</td><td>$0$</td>
+                <td>$1{,}00$ · $0$ · $0$</td><td>$0$ · $0$ · $0$</td>
+              </tr>
+              <tr>
+                <td>$t=2$</td><td>$B \to C$, $R=0$</td><td>$0$</td>
+                <td>$0{,}50$ · $1{,}00$ · $0$</td><td>$0$ · $0$ · $0$</td>
+              </tr>
+              <tr>
+                <td>$t=3$</td><td>$C \to$ fin, $R=1$</td><td>$+1$</td>
+                <td>$0{,}25$ · $0{,}50$ · $1{,}00$</td><td>$\mathbf{0{,}025}$ · $\mathbf{0{,}050}$ · $\mathbf{0{,}100}$</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Los dos primeros pasos no aprenden <em>nada</em>: todo vale $0$, nada sorprende y $\delta = 0$
+          (multiplica por lo que quieras, sigue siendo cero). Toda la información del episodio entra en el
+          último paso, condensada en un solo número, $\delta_3 = +1$… y las trazas la reparten hacia atrás
+          de un golpe: $C$ se lleva $\alpha \cdot 1 \cdot 1 = 0{,}1$; $B$, la mitad; $A$, la cuarta parte.
+          Compáralo con los dos extremos sobre este mismo episodio:
+        </p>
+        <ul>
+          <li><strong>TD(0)</strong> habría movido solo $C$: $V = (0;\ 0;\ 0{,}1)$. $A$ y $B$ se quedan a
+          cero y tendrán que esperar a episodios futuros para enterarse de que por ahí se sale.</li>
+          <li><strong>Monte Carlo</strong> con la misma $\alpha$ habría movido los tres por igual,
+          $V = (0{,}1;\ 0{,}1;\ 0{,}1)$, porque los tres comparten el mismo retorno $G = 1$: para él, haber
+          pasado por $A$ tres pasos antes del premio cuenta tanto como estar en $C$ al recibirlo.</li>
+          <li><strong>TD(λ=0,5)</strong> reparte en degradado: $(0{,}025;\ 0{,}05;\ 0{,}1)$.</li>
+        </ul>
+        <p>
+          Y ahí tienes a $\lambda$ en una frase: es, literalmente, <strong>cuánto crédito de la sorpresa de
+          ahora dejas llegar a lo que hiciste hace rato</strong>.
+        </p>
+
+        <h2 id="control-con-trazas">Sarsa(λ) y Q(λ): las trazas para el control</h2>
+        <p>
+          Todo lo anterior es <em>predicción</em>: estimar $V$ de una política dada. Pasar a
+          <strong>control</strong> (aprender la política, no solo evaluarla) es casi mecánico: donde había
+          una traza por estado, ahora hay una por <strong>par estado-acción</strong>, y el error TD es el de
+          la <a href="08-sarsa.html">SARSA del capítulo 8</a>. Así nace Sarsa(λ).
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Sarsa(λ)</div>
+          <p>$$\delta_t = R_{t+1} + \gamma\, Q(S_{t+1}, A_{t+1}) - Q(S_t, A_t)$$</p>
+          <p>$$e_t(s,a) = \gamma\lambda\, e_{t-1}(s,a) + \mathbb{1}[S_t = s,\ A_t = a]$$</p>
+          <p>$$Q(s,a) \leftarrow Q(s,a) + \alpha\, \delta_t\, e_t(s,a) \qquad \text{para todo par } (s,a)$$</p>
+          <p class="math-note">
+            Es palabra por palabra el TD(λ) de arriba con $Q$ en lugar de $V$: la traza vive ahora en una
+            tabla de $|\mathcal{S}| \times |\mathcal{A}|$ casillas y el $+1$ se lo lleva la casilla del par
+            que acabas de ejecutar. Con $\lambda = 0$ recuperas exactamente la SARSA del capítulo 8. La
+            diferencia en la práctica es enorme: al llegar a la meta, SARSA premia el último par y
+            Sarsa(λ) premia de golpe todo el camino que llevó hasta ella.
+          </p>
+        </div>
+
+        <p>
+          Con el <a href="09-q-learning.html">Q-learning</a> la cosa se complica, y por una razón de fondo:
+          es <strong>off-policy</strong>. Su objetivo habla de la política greedy, pero la trayectoria que
+          ha ido dejando la traza la generó una política $\varepsilon$-greedy. En cuanto el agente da un
+          paso exploratorio, el pasado deja de ser una muestra de lo que habría hecho la política objetivo,
+          y repartirle crédito sería mentir. La solución de Watkins es tan directa como suena:
+          <strong>cortar la traza</strong>.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Q(λ) de Watkins</div>
+          <p>$$\delta_t = R_{t+1} + \gamma\, \max_{a} Q(S_{t+1}, a) - Q(S_t, A_t)$$</p>
+          <p>$$e_t(s,a) = \begin{cases} \gamma\lambda\, e_{t-1}(s,a) + \mathbb{1}[S_t=s,\ A_t=a] & \text{si } A_t \text{ era la acción greedy} \\[2pt] \mathbb{1}[S_t=s,\ A_t=a] & \text{si } A_t \text{ fue exploratoria} \end{cases}$$</p>
+          <p class="math-note">
+            Si la acción tomada coincide con $\arg\max_a Q(S_t,a)$, la traza sigue viva y el crédito puede
+            seguir viajando hacia atrás. Si fue una acción de exploración, <em>todo</em> lo anterior se pone
+            a cero y la memoria vuelve a empezar desde el par actual.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ La trampa de Watkins</div>
+          <p>
+            Haz la cuenta antes de implementarlo. Con $\varepsilon = 0{,}1$ y cuatro acciones, la
+            probabilidad de tomar una acción <em>no</em> greedy es $0{,}1 \cdot \tfrac{3}{4} = 0{,}075$: la
+            traza se corta cada trece pasos de media, y casi nunca llega a estirarse. Con
+            $\varepsilon = 0{,}3$ se corta cada cuatro o cinco pasos y ya estás pagando el coste de mantener
+            una tabla de trazas para tener, en la práctica, Q-learning a secas. Justo lo contrario de lo que
+            buscábamos. Por eso, cuando alguien dice «trazas para control», casi siempre está hablando de
+            <strong>Sarsa(λ)</strong>: como es on-policy, no tiene nada que cortar.
+          </p>
+        </div>
 
         <h2 id="ejemplo">Ejemplo: barrer λ en un paseo aleatorio</h2>
         <p>
@@ -459,19 +690,41 @@ if __name__ == "__main__":
         <p>
           Pulsa <strong>▶ Ejecutar</strong>. Verás por pantalla la $\alpha$ óptima de cada $\lambda$ y,
           debajo, la gráfica. Fíjate en tres cosas: (1) casi todas las curvas tienen forma de U, con un
-          punto dulce de $\alpha$; (2) las curvas de $\lambda$ intermedio suelen tocar más abajo (menor
-          error) que la de TD(0); y (3) la de Monte Carlo ($\lambda=1$) se dispara: con trazas
-          acumulativas es la más inestable y se sale del gráfico enseguida.
+          punto dulce de $\alpha$; (2) las curvas de $\lambda$ intermedio tocan más abajo (menor error) que
+          la de TD(0) — $0{,}265$ con $\lambda = 0{,}8$ frente a $0{,}345$—; y (3) la de Monte Carlo
+          ($\lambda=1$) ni llega a dibujarse: con trazas acumulativas es tan inestable que su mejor
+          resultado se da en $\alpha = 0{,}00$ —es decir, no tocar nada— y para cualquier $\alpha$ mayor se
+          va del gráfico por arriba.
         </p>
 
         <div class="callout warn">
-          <div class="callout-title">⚠️ λ alto pide α bajo</div>
+          <div class="callout-title">⚠️ λ alto pide α bajo… y λ=1 no tiene α que valga</div>
           <p>
             Cuanto mayor es $\lambda$, más lejos viaja el crédito y más se acumulan las trazas, así que la
             actualización efectiva es mayor. Por eso los valores de $\alpha$ que funcionan bien se hacen
-            <strong>más pequeños</strong> al subir $\lambda$: verás que el mínimo de las curvas se desplaza
-            hacia la izquierda. Con $\lambda=1$ y $\alpha$ grande el método diverge (por eso su curva
-            desaparece por arriba). No es un fallo del código: es la varianza de Monte Carlo mordiendo.
+            <strong>más pequeños</strong> al subir $\lambda$: en la salida de arriba el óptimo se desplaza
+            de $\alpha = 0{,}80$ con $\lambda=0$ a $\alpha = 0{,}20$ con $\lambda = 0{,}9$.
+          </p>
+          <p>
+            Con $\lambda = 1$ pasa algo peor que «mucha varianza»: el método <strong>se rompe</strong>. Mira
+            por qué. Con $\gamma\lambda = 1$ la traza no se desvanece <em>nunca</em>, y en este paseo el
+            agente pasa una y otra vez por los mismos estados antes de salir: en un episodio típico hay
+            algún estado cuya traza llega a $14$, y en el peor de los 200 episodios del experimento llega a
+            $62$. Como la actualización es $\alpha\,\delta\,e(s)$, el paso efectivo sobre ese estado es
+            $\alpha \cdot 14$: con $\alpha = 0{,}2$ eso son $2{,}8$, casi el triple de la corrección
+            completa (y $12{,}4$ en el peor episodio). Es decir, la corrección se pasa de largo, el siguiente
+            $\delta$ sale más grande, y $V$ se dispara. Con $\alpha = 0{,}2$ el error RMS medio ya es de
+            $8\cdot 10^{27}$; ni siquiera $\alpha = 0{,}1$ salva la situación ($1{,}28$, peor que dejar $V$
+            a cero, que da $0{,}55$). Y no es cosa de actualizar en línea: la versión offline, que acumula
+            todos los cambios y los aplica al final del episodio, explota exactamente igual.
+          </p>
+          <p>
+            Tampoco es culpa de Monte Carlo. Lo que reproduce TD(1) con trazas <em>acumulativas</em> es el
+            Monte Carlo de <strong>cada visita</strong>, que suelta un paso completo por cada una de las
+            veces que pasas por el mismo estado. El de <strong>primera visita</strong> recorre este mismo
+            paseo con $\alpha = 0{,}2$ y un RMS de $0{,}39$, sin despeinarse. Y si cambias
+            <code>e[s] += 1.0</code> por <code>e[s] = 1.0</code> —la traza de reemplazo—, $\lambda=1$ vuelve
+            a portarse como Monte Carlo: RMS $0{,}388$ con $\alpha = 0{,}2$. Un carácter.
           </p>
         </div>
 
@@ -492,16 +745,31 @@ if __name__ == "__main__":
 <span class="prompt">$</span> python code/10-td-lambda/td_lambda.py
 <span class="comment">Paseo aleatorio de 19 estados - TD(lambda), error RMS minimo:
   lambda = 0.0  min RMS = 0.345  en alpha = 0.80  TD(0)
+  lambda = 0.4  min RMS = 0.273  en alpha = 0.70
   lambda = 0.8  min RMS = 0.265  en alpha = 0.30
-  ...
--> El mejor resultado global lo da lambda = 0.8 (un valor intermedio).</span></pre>
+  lambda = 0.9  min RMS = 0.293  en alpha = 0.20
+  lambda = 1.0  min RMS = 0.548  en alpha = 0.00  Monte Carlo
+-&gt; El mejor resultado global lo da lambda = 0.8 (un valor intermedio).</span></pre>
         </div>
         <p class="pyodide-banner">
           💡 Este ejemplo usa solo <code>numpy</code> y <code>matplotlib</code>, así que corre entero en el
-          navegador con <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>. Prueba a
-          cambiar la traza acumulativa por una de reemplazo (fija <code>e[s] = 1.0</code> en lugar de
-          sumar): las curvas de $\lambda$ alto se vuelven mucho más estables.
+          navegador con <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>.
         </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Cambia la traza acumulativa por una de reemplazo: sustituye <code>e[s] += 1.0</code> por
+            <code>e[s] = 1.0</code> y vuelve a pulsar ▶. Predicción, para que la compruebes tú mismo:
+            $\lambda=0$ no se entera (sigue en $0{,}345$ con $\alpha=0{,}80$, porque con $\lambda=0$ la
+            traza dura un solo paso y da igual cómo la refuerces) y $\lambda=0{,}4$ apenas se mueve
+            ($0{,}273 \to 0{,}274$), pero de ahí para arriba todo mejora y el punto dulce se corre hacia la
+            derecha: $\lambda=0{,}8$ pasa de $0{,}265$ a $\mathbf{0{,}255}$ y su óptimo se va de
+            $\alpha=0{,}30$ a $\alpha=0{,}50$; y $\lambda=1$ deja de explotar y aparece por fin en el
+            gráfico, con $\mathbf{0{,}388}$ en $\alpha=0{,}20$. Un solo carácter menos y Monte Carlo vuelve
+            a ser utilizable.
+          </p>
+        </div>
 
         <h2 id="cierre">De la tabla al mundo real</h2>
         <p>
@@ -517,7 +785,13 @@ if __name__ == "__main__":
           una función que, a partir de unas características del estado, prediga su valor. Eso es la
           <a href="11-aproximacion-funciones.html">aproximación de funciones</a>, el tema del próximo
           capítulo y la puerta de entrada al aprendizaje por refuerzo profundo. Y, buena noticia, las trazas
-          de elegibilidad que acabas de ver se combinan con esas funciones aproximadas casi sin cambios.
+          de elegibilidad que acabas de ver se combinan con esas funciones aproximadas casi sin cambios: solo
+          cambia de qué son. La traza deja de ser un número por estado y pasa a ser un <strong>vector del
+          mismo tamaño que los pesos</strong>, $\mathbf{z}_t = \gamma\lambda\,\mathbf{z}_{t-1} +
+          \nabla_{\mathbf{w}}\hat{q}(S_t,A_t,\mathbf{w})$, con la actualización de siempre
+          $\mathbf{w} \leftarrow \mathbf{w} + \alpha\,\delta_t\,\mathbf{z}_t$. Lo elegible ya no son los
+          estados: son los <em>pesos</em>. Lo retomaremos en la
+          <a href="11-aproximacion-funciones.html#control">sección de control del capítulo 11</a>.
         </p>
 
         <div class="callout key">

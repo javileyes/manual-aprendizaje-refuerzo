@@ -93,6 +93,28 @@
           </p>
         </div>
 
+        <div class="callout intuition">
+          <div class="callout-title">🧠 De dónde sale ese cuadrado</div>
+          <p>
+            No hace falta creérselo: se ve en dos líneas. Llama $X_i = \pm 1$ al desplazamiento del paso
+            $i$, con la misma probabilidad para cada signo, y sea $S_n = X_1 + \dots + X_n$ tu posición
+            tras $n$ pasos. De media no te has movido, $\mathbb{E}[S_n] = 0$ —por eso el paseo aleatorio
+            «no va a ninguna parte»—, pero las <strong>varianzas de pasos independientes se suman</strong>:
+            $\operatorname{Var}(S_n) = n\operatorname{Var}(X_i) = n$. Así que la distancia típica al origen
+            no crece como $n$, sino como $\sqrt{n}$. Dale la vuelta: si en $n$ pasos te alejas $\sqrt{n}$,
+            para alejarte $L$ necesitas $n \approx L^2$ pasos.
+          </p>
+          <p>
+            En el pasillo de 30 columnas del ejemplo que viene, un agente que se mueve al azar tarda
+            <strong>1784 pasos</strong> de media en pisar la meta por primera vez (la cuenta sale exacta
+            resolviendo la cadena de Markov del propio pasillo, sin simular nada). Y como los episodios se
+            cortan a los 250 pasos, la probabilidad de llegar dentro de un episodio es del
+            <strong>1,5 %</strong>: uno de cada 66. Alarga el pasillo a 40 columnas y esa probabilidad se
+            hunde al <strong>0,07 %</strong>, uno de cada 1389. Diez columnas más, y un problema difícil se
+            ha vuelto imposible. Eso es el $L^2$.
+          </p>
+        </div>
+
         <div class="callout warn">
           <div class="callout-title">⚠️ El círculo vicioso de la recompensa escasa</div>
           <p>
@@ -137,6 +159,30 @@
           </p>
         </div>
 
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El bono es una recompensa que se mueve bajo tus pies</div>
+          <p>
+            Antes de seguir, dos avisos que se pagan caros si se descubren tarde. $r^{+}$ <strong>no es</strong>
+            la recompensa de tu problema: es una muleta que tú has fabricado y que además cambia sola a
+            medida que el agente aprende.
+          </p>
+          <p>
+            <strong>Uno: no evalúes nunca con $r^{+}$.</strong> La curva que enseñas y el criterio con el
+            que eliges hiperparámetros tienen que estar medidos en $r$, la recompensa real del entorno. Si
+            los mides con la aumentada, un agente que se ha vuelto un turista profesional te parecerá un
+            campeón.
+          </p>
+          <p>
+            <strong>Dos: en cuanto uses redes, lleva las dos cuentas por separado.</strong> No un crítico
+            sobre $r^{+}$, sino dos, $V_E$ y $V_I$, cada uno con su descuento —la parte intrínseca suele
+            tratarse como <em>no episódica</em>, porque la curiosidad no debería reiniciarse solo porque te
+            hayan matado—, y las ventajas se combinan al final:
+            $\hat A = \hat A_E + \beta\,\hat A_I$. Con la tabla de $2\times 30$ de este capítulo la
+            diferencia no se nota; con una red y millones de pasos es la diferencia entre que funcione y
+            que no.
+          </p>
+        </div>
+
         <h2 id="conteo">Bonos por conteo: «ve donde no has ido»</h2>
         <p>
           La forma más directa de medir la novedad es <strong>contar</strong>. Llevamos un registro
@@ -152,6 +198,20 @@
             se prueba $(s,a)$ el bono es máximo; con cada visita, $N$ crece y el bono se desvanece como
             $1/\sqrt{N}$. Una variante habitual usa el conteo del estado, $b(s) = 1/\sqrt{N(s)}$, si solo
             nos importa <em>dónde</em> hemos estado y no <em>qué</em> hicimos allí.
+          </p>
+        </div>
+
+        <div class="callout math">
+          <div class="callout-title">➗ ¿Y por qué una raíz, y no $1/N$?</div>
+          <p>$$\text{error típico de una media de } N \text{ muestras} \;=\; \frac{\sigma}{\sqrt{N}}$$</p>
+          <p class="math-note">
+            La raíz no es un ajuste empírico ni un capricho: sale de la estadística de primer curso. Tu
+            estimación de $Q(s,a)$ es, en el fondo, un <strong>promedio</strong> de $N(s,a)$ muestras
+            ruidosas del retorno, y el error típico de un promedio no baja como $1/N$, sino como
+            $1/\sqrt{N}$: para dividir tu incertidumbre entre dos hacen falta <strong>cuatro</strong> veces
+            más datos. Por eso el bono se escribe $1/\sqrt{N}$ y no $1/N$: leído despacio, dice
+            «premia cada par $(s,a)$ en proporción a lo mal que conoces su valor». Es exactamente la
+            misma raíz que verás dentro de UCB, y volverá a aparecer cada vez que midas algo promediando.
           </p>
         </div>
 
@@ -236,6 +296,25 @@
           </p>
         </div>
 
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Por qué el modelo inverso filtra lo que no controlas</div>
+          <p>
+            El modelo inverso recibe dos estados consecutivos y tiene que adivinar <em>qué acción</em>
+            hubo en medio. Ponte en la piel de $\phi$, que es quien le pasa la información: para acertar
+            te sirve todo lo que <strong>tú</strong> moviste —dónde estaba tu personaje antes y dónde está
+            ahora— y no te sirve absolutamente de nada la nube que pasaba por el fondo, ni el parpadeo de
+            la tele, porque no dependen de la acción. Como $\phi$ solo se entrena para esa tarea, lo
+            incontrolable no tiene ningún motivo para sobrevivir dentro de ella. Las dos piezas se
+            entrenan a la vez, con una pérdida que las pesa:
+          </p>
+          <p>$$\mathcal{L} \;=\; (1-\lambda)\,\ell_{\text{inv}} \;+\; \lambda\,\big\|\,g(\phi(s_t),a_t) - \phi(s_{t+1})\,\big\|^2$$</p>
+          <p>
+            Y fíjate en lo que es $g$: un <strong>modelo de la dinámica</strong>, exactamente el mismo
+            objeto que construimos en el <a href="18-model-based.html#dyna">capítulo 18</a>. Allí lo
+            usábamos para planificar; aquí usamos <em>lo mal que funciona</em> como brújula.
+          </p>
+        </div>
+
         <h3>RND: predecir una red aleatoria fija</h3>
         <p>
           <em>Random Network Distillation</em> (RND) es aún más ingenioso y sencillo. Usa
@@ -255,9 +334,13 @@
           <div class="callout-title">➗ Bono de RND</div>
           <p>$$b(s) \;=\; \big\|\, f_\theta(s) \;-\; \hat{f}(s) \,\big\|^2$$</p>
           <p class="math-note">
-            $\hat{f}(s)$ es la salida (un vector) de la red objetivo fija; $f_\theta(s)$ la de la red
-            predictora. Ambas se entrenan… no: solo $f_\theta$ se entrena, minimizando ese mismo error
-            $\|f_\theta(s) - \hat{f}(s)\|^2$ por descenso de gradiente sobre los estados vistos. En un
+            $\hat{f}(s)$ es la salida (un vector) de la red objetivo, que se inicializa al azar y
+            <strong>nunca se toca</strong>; $f_\theta(s)$ la de la red predictora, la única que se
+            entrena, minimizando ese mismo error $\|f_\theta(s) - \hat{f}(s)\|^2$ por descenso de
+            gradiente sobre los estados que el agente va visitando. Es un detalle que sorprende la
+            primera vez: <strong>el bono de exploración y la pérdida de entrenamiento son exactamente la
+            misma cantidad</strong>. El agente cobra por hacer que su propia pérdida sea alta, y al
+            cobrarla la baja. En un
             estado <strong>ya visitado</strong> muchas veces, la predictora ha tenido ocasión de ajustarse
             y el error es bajo → bono pequeño. En un estado <strong>nuevo</strong>, la predictora nunca lo
             entrenó y falla → error alto → bono grande. La red objetivo aleatoria hace de «huella digital»
@@ -308,9 +391,65 @@
             <strong>azar puro e impredecible</strong> (una pantalla con estática, un dado que rueda), un
             agente basado en error de predicción quedará <em>hipnotizado</em> por ella: nunca podrá
             predecir el ruido, así que el bono ahí es eternamente alto y el agente se queda mirándola en
-            vez de explorar. RND lo evita porque su red objetivo es <strong>determinista</strong> (misma
-            entrada, misma salida), de modo que el error sí baja a cero al visitar un estado repetidas
-            veces. ICM lo mitiga aprendiendo características que ignoran lo que el agente no controla.
+            vez de explorar.
+          </p>
+          <p>
+            ¿Se salva RND? A medias, y conviene saber exactamente cuánto. RND no predice el futuro: solo
+            una función fija y determinista del estado <em>actual</em>. Si el azar está en la
+            <strong>transición</strong> —un dado que decide a qué habitación pasas—, RND ni se entera y su
+            error sí baja a cero al revisitar. Pero si el azar está en la <strong>observación</strong>
+            —la estática de la tele forma parte de los píxeles de $s$—, entonces cada fotograma es un
+            estado nuevo que no se repite jamás, la predictora no puede ajustarse a un espacio infinito de
+            pantallas aleatorias y el bono se queda alto. RND <strong>mitiga</strong> la tele con ruido; no
+            la elimina. ICM ataca el problema por el otro lado: aprende unas características $\phi$ que
+            tiran directamente a la basura lo que el agente no controla.
+          </p>
+        </div>
+
+        <h3 id="dos-incertidumbres">Dos incertidumbres que no hay que confundir</h3>
+        <p>
+          La tele con ruido no es una anécdota simpática: es el síntoma de una confusión que conviene
+          desmontar de una vez, porque reordena todo este capítulo. Cuando un agente «no sabe» qué va a
+          pasar, puede ser por dos motivos que se parecen mucho por fuera y no tienen nada que ver por
+          dentro:
+        </p>
+        <ul>
+          <li><strong>Incertidumbre epistémica</strong> (de <em>epistēmē</em>, conocimiento): no lo sé
+            <em>todavía</em>. Es ignorancia mía, y <strong>se cura con datos</strong>. Cuántas monedas hay
+            detrás de esa puerta que aún no he abierto.</li>
+          <li><strong>Incertidumbre aleatoria</strong>: no lo sabe <em>nadie</em>. Es azar del mundo, y
+            <strong>no se cura con nada</strong>. Qué número saldrá en el próximo dado, aunque lo haya
+            tirado un millón de veces.</li>
+        </ul>
+        <p>
+          Explorar solo tiene sentido para reducir la <strong>primera</strong>. Ir a mirar detrás de la
+          puerta paga; quedarse mirando el dado no paga nunca, por mucho que la sorpresa se repita en cada
+          tirada. Con esa lente puesta, los métodos de este capítulo dejan de ser cuatro trucos sueltos y
+          se ordenan solos según <em>cuál de las dos miden</em>:
+        </p>
+        <ul>
+          <li><strong>Conteos y pseudo-conteos</strong>: epistémica pura. $N(s,a)$ cuenta datos, y solo
+            datos; el azar del entorno no le afecta.</li>
+          <li><strong>ICM</strong>: mezcla las dos, porque el error de predecir el futuro sube tanto si no
+            has estado allí como si allí hay un dado. Por eso la tele lo hipnotiza: no porque esté mal
+            programado, sino porque está midiendo la incertidumbre equivocada.</li>
+          <li><strong>RND</strong>: intenta quedarse solo con la epistémica quitando el futuro de la
+            ecuación —predice una función determinista del estado actual—, y lo consigue salvo cuando el
+            ruido está dentro de la propia observación.</li>
+          <li><strong>Ensembles</strong> (el <em>bootstrapped DQN</em> del final del capítulo): la miden
+            por <strong>desacuerdo</strong>. Entrenas varias cabezas $Q$ con datos y arranques distintos;
+            donde hay datos, todas convergen a lo mismo —el azar del entorno lo ven todas por igual, así
+            que apenas las separa—; donde no los hay, discrepan. El desacuerdo entre modelos es
+            <em>casi</em> epistémico puro, y esa es su gracia.</li>
+        </ul>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La pregunta de una sola línea</div>
+          <p>
+            Ante cualquier método de exploración que te encuentres —los de este capítulo o los que se
+            publiquen el año que viene—, hazle siempre la misma pregunta: <strong>¿su bono baja a cero
+            cuando el agente ya lo ha visto todo, o se queda enganchado en el ruido?</strong> Si baja,
+            mide lo epistémico y sirve. Si no baja, tienes una tele con ruido esperándote en algún sitio.
           </p>
         </div>
 
@@ -325,8 +464,8 @@
           <li>Para cada episodio, empieza en el estado de salida.</li>
           <li>Elige la acción $a$ con ε-greedy sobre $Q(s, \cdot)$ (igual que siempre).</li>
           <li>Ejecuta $a$; observa la recompensa real $r$ y el nuevo estado $s'$.</li>
-          <li>Incrementa el conteo, $N(s,a) \leftarrow N(s,a) + 1$, y calcula el bono $b = \beta/\sqrt{N(s,a)}$.</li>
-          <li>Forma la recompensa aumentada $r^{+} = r + b$ y actualiza:
+          <li>Incrementa el conteo, $N(s,a) \leftarrow N(s,a) + 1$, y calcula el bono $b = 1/\sqrt{N(s,a)}$.</li>
+          <li>Forma la recompensa aumentada $r^{+} = r + \beta\,b$ y actualiza:
             $$Q(s,a) \leftarrow Q(s,a) + \alpha\Big[\, r^{+} + \gamma\,\max_{a'} Q(s', a') - Q(s,a) \,\Big]$$</li>
           <li>Avanza $s \leftarrow s'$ y repite hasta terminar el episodio.</li>
         </ol>
@@ -545,23 +684,44 @@ if __name__ == "__main__":
 
         <p>
           Pulsa <strong>▶ Ejecutar</strong> (la primera vez tarda unos segundos en descargar Python y
-          matplotlib). El contraste es rotundo: el agente <strong>sin bono</strong> se pasa casi todo el
-          entrenamiento sin ver jamás la recompensa —su curva de éxitos se queda pegada al suelo— y su
-          mapa de calor muestra que se apelotona cerca de la salida, sin llegar nunca al fondo del
-          pasillo. El agente <strong>con bono</strong>, en cambio, barre el pasillo de forma sistemática,
-          da con la meta y, a partir de ahí, la alcanza una y otra vez. Su mapa de visitas es casi
-          uniforme: ha estado <em>en todas partes</em>.
+          matplotlib). El contraste es rotundo. El agente <strong>sin bono</strong> se pasa casi todo el
+          entrenamiento sin ver jamás la recompensa: en 250 episodios da con la meta <strong>una sola
+          vez</strong>, por pura chiripa, en el episodio 208. Y aquí está lo importante: ni siquiera ese
+          acierto le sirve de nada. Un premio suelto solo propaga valor <strong>un</strong> estado hacia
+          atrás —esa es la aritmética del <em>bootstrapping</em> del
+          <a href="07-td-aprendizaje.html">capítulo 7</a>—, así que al empezar el episodio 209 lo único
+          que ha aprendido en todo el entrenamiento es qué hacer si algún día vuelve a encontrarse pegado
+          a la meta; para salir de la zona de partida sigue tan a ciegas como en el episodio 1, y de hecho
+          no vuelve a llegar. Su mapa de calor lo cuenta todo de un vistazo: un borrón de visitas
+          apelotonado en las primeras columnas, con 8354 visitas a la columna 0 y solo seis a la
+          penúltima, que es la antesala de la meta.
+        </p>
+        <p>
+          El agente <strong>con bono</strong>, en cambio, barre el pasillo de forma sistemática. Su mapa
+          de visitas es casi plano —ninguna de las 27 primeras columnas baja de 897 visitas ni pasa de
+          1421, y en esa penúltima columna que el otro pisó seis veces entra 170—, da con la meta en el
+          episodio 98 y a partir de ahí la alcanza en <strong>146 de los 153 episodios</strong> que le
+          quedaban. Ha estado <em>en todas partes</em>, y por eso sabe volver.
         </p>
 
         <div class="callout intuition">
           <div class="callout-title">🧪 Experimenta</div>
           <p>
             Cambia <code>semilla=0</code> por otro valor en las dos llamadas a <code>entrenar</code> y
-            vuelve a ejecutar. Verás que el agente ε-greedy es <strong>una lotería</strong>: con suerte
-            tropieza pronto con la meta, y sin ella no la encuentra en todo el entrenamiento. El agente
-            con bono, en cambio, es <strong>fiable</strong> semilla tras semilla. Prueba también a alargar
-            el pasillo (<code>columnas=40</code> en <code>GridWorldDisperso</code>): la ventaja del bono
-            se vuelve todavía más dramática, porque el coste del azar crece como $L^2$.
+            vuelve a ejecutar. El agente ε-greedy es <strong>una lotería</strong>: en las ocho primeras
+            semillas su primer éxito cae en el episodio 4, o en el 208, o en cualquier punto intermedio,
+            y termina el entrenamiento con entre <strong>1 y 11</strong> episodios exitosos de 250. El del
+            bono no depende de la suerte: da con la meta siempre alrededor del episodio 100 y acaba con
+            <strong>entre 139 y 163</strong> éxitos, semilla tras semilla.
+          </p>
+          <p>
+            Prueba después a alargar el pasillo (<code>columnas=40</code> en el constructor de
+            <code>GridWorldDisperso</code>) y la comparación deja de ser una comparación: con 40 columnas
+            el agente sin bono <strong>no ve la recompensa ni una sola vez</strong> —cero éxitos en las
+            cuatro semillas que probamos—, mientras que el del bono sigue rondando el centenar, con
+            <strong>entre 97 y 134</strong> éxitos. Es el $L^2$ del principio del capítulo, cobrado en
+            efectivo: al agente sin bono le
+            hemos subido el precio de la lotería y ya no puede pagarlo.
           </p>
         </div>
 
@@ -604,12 +764,14 @@ Q-learning ε-greedy + bono por conteo (1/sqrt(N)):
               <tr><td>Pseudo-conteos</td><td>Modelo de densidad $\rho(s)$</td><td>Sí (imágenes, etc.)</td></tr>
               <tr><td>Curiosidad ICM</td><td>Error del modelo de dinámica</td><td>Sí; sensible al azar del entorno</td></tr>
               <tr><td>RND</td><td>Error al imitar una red fija aleatoria</td><td>Sí; robusto y muy usado</td></tr>
+              <tr><td>Ensembles (<em>bootstrapped DQN</em>)</td><td>Desacuerdo entre varias cabezas $Q$</td><td>Sí; caro (varias redes), pero mide epistémica por construcción</td></tr>
               <tr><td>UCB / Thompson (cap. 2)</td><td>Optimismo / muestreo posterior</td><td>Raíz teórica; difícil en RL profundo</td></tr>
             </tbody>
           </table>
         </div>
         <p>
-          <strong>Thompson sampling</strong>, que mencionamos en el capítulo 2, es la otra gran raíz
+          El <a href="02-bandido-multibrazo.html#thompson"><strong>Thompson sampling</strong></a> del
+          capítulo 2 es la otra gran raíz
           teórica: en lugar de un bono explícito, mantiene una <em>distribución</em> sobre lo que cree del
           mundo y actúa según una muestra de ella; a veces le toca una hipótesis optimista y explora, y a
           veces una conservadora y explota. En RL profundo es difícil de implementar exactamente, pero
@@ -628,6 +790,10 @@ Q-learning ε-greedy + bono por conteo (1/sqrt(N)):
               incertidumbre</strong> de UCB; los <strong>pseudo-conteos</strong> los llevan a espacios enormes.</li>
             <li>La <strong>curiosidad</strong> (ICM, RND) mide la novedad como <strong>error de predicción</strong>:
               lo que no sabes predecir es lo que aún no conoces. Ojo con la «tele con ruido».</li>
+            <li>La idea que ordena todas las demás: explorar sirve para reducir la incertidumbre
+              <strong>epistémica</strong> (la que se cura con datos), nunca la <strong>aleatoria</strong>
+              (el azar del mundo). Pregúntale siempre a un método si su bono baja a cero cuando ya no
+              queda nada por descubrir.</li>
             <li>En nuestro pasillo, un bono por conteo de una sola línea convierte un problema irresoluble
               para el azar en uno que se resuelve con holgura.</li>
           </ul>

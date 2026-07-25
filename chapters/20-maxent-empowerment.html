@@ -93,6 +93,27 @@
           </p>
         </div>
 
+        <div class="callout warn">
+          <div class="callout-title">⚠️ $\alpha$ no es un número suelto: es una razón de cambio</div>
+          <p>
+            Fíjate en las unidades de esa suma. Si sumas recompensa y entropía, $\alpha$ tiene que estar
+            medida en <strong>recompensa por nat</strong>: es el <em>precio</em> al que estás dispuesto a
+            comprar aleatoriedad. Y de ahí se sigue algo que descoloca la primera vez: <em>no existe un
+            $\alpha$ bueno en abstracto</em>. Si multiplicas todas las recompensas de tu entorno por $10$,
+            tienes que multiplicar $\alpha$ por $10$ para obtener exactamente la misma política (los $Q$ se
+            multiplican por $10$ y el cociente $Q/\alpha$ ni se entera). En el gridworld del final del
+            capítulo el paso cuesta $-1$ y el desastre llega en $\alpha \approx 0{,}72$; con un paso de
+            $-10$ llegaría en $\alpha \approx 7{,}2$.
+          </p>
+          <p>
+            Ese es el motivo real de que <strong>SAC dejara de fijar $\alpha$ a mano</strong>: un precio
+            depende de una escala que cambia de entorno en entorno —y que además cambia <em>durante</em> el
+            entrenamiento, conforme crecen los $Q$—. Así que SAC no fija el precio: fija una
+            <strong>entropía objetivo</strong>, en nats, que no depende de ninguna escala, y deja que
+            $\alpha$ se mueva solo hasta conseguirla.
+          </p>
+        </div>
+
         <h3 id="soft">Bellman «suave» y la política softmax</h3>
         <p>
           Con este objetivo, las ecuaciones de Bellman del <a href="04-retornos-y-valor.html">capítulo 4</a>
@@ -115,6 +136,65 @@
           </p>
         </div>
 
+        <div class="callout math">
+          <div class="callout-title">➗ De dónde salen el softmax y el log-sum-exp, en cuatro líneas</div>
+          <p>
+            Esas dos fórmulas no hay que creérselas: salen de una sola cuenta. Fija un estado y pregúntate
+            qué política $\pi$ maximiza «valor esperado más entropía». Llama
+            $Z = \sum_a e^{Q_a/\alpha}$ y $\mu_a = e^{Q_a/\alpha}/Z$ (o sea, $Q_a/\alpha = \log\mu_a + \log Z$):
+          </p>
+          <p>$$\begin{aligned}
+            \sum_a \pi_a Q_a + \alpha\,\mathcal{H}(\pi)
+              &= \alpha\sum_a \pi_a\Big[\tfrac{Q_a}{\alpha} - \log \pi_a\Big] \\
+              &= \alpha\sum_a \pi_a\big[\log\mu_a + \log Z - \log\pi_a\big] \\
+              &= -\alpha\sum_a \pi_a\log\frac{\pi_a}{\mu_a} \;+\; \alpha\log Z \\
+              &= -\alpha\,\mathrm{KL}(\pi\,\|\,\mu) \;+\; \alpha\log Z
+          \end{aligned}$$</p>
+          <p class="math-note">
+            Y ya está: <strong>dos regalos de una misma línea</strong>. El primero, que $\mathrm{KL}\ge 0$ y
+            solo vale $0$ cuando $\pi = \mu$ — así que la política óptima <em>es</em> el softmax
+            $\mu_a \propto e^{Q_a/\alpha}$, sin que hayamos tenido que derivar nada. El segundo, que como
+            $\alpha\log Z$ no depende de $\pi$, ese es el valor máximo alcanzable: el <em>log-sum-exp</em> no
+            es «una aproximación suave del máximo», <strong>es el valor exacto del nuevo máximo</strong>, el
+            del objetivo que incluye la entropía. Guarda este truco de «completar una KL»: en el
+            <a href="21-rlhf.html#objetivo-kl">capítulo 21</a> reaparece idéntico, con el modelo de
+            referencia en el papel de $\mu$.
+          </p>
+        </div>
+
+        <div class="callout math">
+          <div class="callout-title">🔢 La cuenta a mano: dos acciones empatadas y dos malas</div>
+          <p>
+            Bajemos a números. Un estado con cuatro acciones donde las dos primeras están
+            <strong>exactamente empatadas</strong> y las otras dos son claramente peores:
+            $Q = (1,\;1,\;0,\;0)$. Aplicamos las dos fórmulas para tres temperaturas:
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>$\alpha$</th><th>$\pi^\star(\cdot\mid s)$</th><th>$\sum_a \pi_a Q_a$</th><th>$\alpha\,\mathcal{H}(\pi)$</th><th>$V_{\text{soft}}$</th></tr></thead>
+              <tbody>
+                <tr><td>$0{,}1$</td><td>$(0{,}50;\ 0{,}50;\ 0{,}00;\ 0{,}00)$</td><td>$1{,}000$</td><td>$0{,}069$</td><td>$1{,}069$</td></tr>
+                <tr><td>$1$</td><td>$(0{,}37;\ 0{,}37;\ 0{,}13;\ 0{,}13)$</td><td>$0{,}731$</td><td>$1{,}275$</td><td>$2{,}006$</td></tr>
+                <tr><td>$10$</td><td>$(0{,}26;\ 0{,}26;\ 0{,}24;\ 0{,}24)$</td><td>$0{,}525$</td><td>$13{,}850$</td><td>$14{,}375$</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="math-note">
+            Tres cosas que leer ahí. <strong>(1)</strong> Con $\alpha$ pequeño la política <em>no rompe el
+            empate: lo conserva</em>. Reparte $0{,}50/0{,}50$ entre las dos buenas y deja las malas
+            prácticamente a cero. Un $\max$ de los de siempre habría elegido una de las dos
+            <em>arbitrariamente</em> (la primera que devolviese el <em>argmax</em>); el máximo suave se queda
+            con las dos. <strong>(2)</strong> Las dos columnas centrales suman la tercera: eso es la cuenta
+            de arriba, $V_{\text{soft}} = \sum_a\pi_a Q_a + \alpha\mathcal{H}(\pi)$, comprobada con
+            calculadora. Y como la entropía solo suma, <strong>$V_{\text{soft}} \ge \max_a Q$ siempre</strong>.
+            <strong>(3)</strong> Al subir $\alpha$ la política se aplana hacia la uniforme ($0{,}26$ contra
+            $0{,}24$ con $\alpha = 10$: ya casi ni distingue lo bueno de lo malo) mientras
+            $V_{\text{soft}}$ se dispara. Ese disparo es la señal de alarma: con $\alpha = 10$ el valor ya no
+            mide la tarea, mide el ruido que le has añadido —de los $14{,}375$, solo $0{,}525$ son
+            recompensa—.
+          </p>
+        </div>
+
         <figure class="figure">
           <svg viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="El máximo suave interpola entre la media y el máximo de los valores según la temperatura alfa">
             <defs>
@@ -132,13 +212,16 @@
             <text x="110" y="132" text-anchor="start" font-family="sans-serif" font-size="12.5" style="fill:var(--text-faint)">α → ∞ (muy indeciso)</text>
             <text x="530" y="132" text-anchor="end" font-family="sans-serif" font-size="12.5" style="fill:var(--text-faint)">α → 0 (greedy de siempre)</text>
             <path d="M410,80 l-9,-15 l18,0 z" fill="#f59e0b" />
-            <text x="410" y="52" text-anchor="middle" font-family="sans-serif" font-size="12.5" font-weight="700" style="fill:var(--text-soft)">V_soft(α)</text>
+            <text x="410" y="52" text-anchor="middle" font-family="sans-serif" font-size="12.5" font-weight="700" style="fill:var(--text-soft)">el máximo suave</text>
             <line x1="150" y1="166" x2="490" y2="166" style="stroke:var(--text-faint)" stroke-width="2" marker-end="url(#arrsm)" />
-            <text x="316" y="187" text-anchor="middle" font-family="sans-serif" font-size="12.5" style="fill:var(--text-soft)">al bajar α, V_soft se desliza de la media al máximo</text>
+            <text x="316" y="187" text-anchor="middle" font-family="sans-serif" font-size="12.5" style="fill:var(--text-soft)">al bajar α, el máximo suave se desliza de la media al máximo</text>
           </svg>
-          <figcaption>El «máximo suave» $V_{\text{soft}}(s)=\alpha\log\sum_a e^{Q(s,a)/\alpha}$ vive entre la
-          <strong>media</strong> de los valores (cuando $\alpha\to\infty$: la política ya no distingue y todo pesa igual)
-          y su <strong>máximo</strong> (cuando $\alpha\to 0$: se queda con el mejor). La temperatura elige el punto intermedio.</figcaption>
+          <figcaption>El «máximo suave» se desliza entre el <strong>máximo</strong> de los valores
+          (cuando $\alpha\to 0$: se queda con el mejor) y su <strong>media</strong> (cuando $\alpha\to\infty$:
+          la política ya no distingue y todo pesa igual). La temperatura elige el punto intermedio.
+          Con letra pequeña: quien hace ese recorrido limpio es $\alpha\log\frac{1}{|\mathcal{A}|}\sum_a e^{Q(s,a)/\alpha}$;
+          el $V_{\text{soft}}$ del recuadro de arriba es eso mismo <em>más</em> la constante $\alpha\log|\mathcal{A}|$
+          —que es justamente la razón de que $V_{\text{soft}}$ nunca baje del máximo—.</figcaption>
         </figure>
 
         <div class="callout warn">
@@ -187,7 +270,27 @@
             El empowerment es esa información mutua <em>maximizada</em> sobre tu forma de elegir acciones
             (la «capacidad del canal» entre acciones y futuros). Intuitivamente: <strong>cuántos futuros
             distintos y controlables tienes a tu alcance</strong> desde $s$. Un proxy sencillo cuando el
-            mundo es determinista: $\log_2$ del número de estados que puedes alcanzar en $k$ pasos.
+            mundo es determinista: $\log_2$ del número de estados que puedes alcanzar en como mucho $k$ pasos
+            (es lo que calcula el código de más abajo).
+          </p>
+        </div>
+
+        <p>
+          Y ese «proxy» merece una aclaración, porque no es un apaño: en un mundo determinista es
+          <em>literalmente</em> la definición, evaluada.
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ Por qué contar futuros <em>es</em> la fórmula</div>
+          <p>$$I\big(\mathbf{A};S'\mid S=s\big) = \mathcal{H}(S') - \mathcal{H}(S'\mid \mathbf{A})$$</p>
+          <p class="math-note">
+            Lee los dos términos por separado. $\mathcal{H}(S')$ es lo incierto que es tu futuro visto desde
+            fuera; $\mathcal{H}(S'\mid\mathbf{A})$ es lo que <em>sigue</em> siendo incierto aunque yo sepa
+            exactamente qué vas a hacer. La información mutua es la resta: la parte de tu futuro que
+            <strong>decides tú</strong> y no el azar. Ahora bien, si la dinámica es
+            <strong>determinista</strong>, fijada la secuencia de acciones el estado futuro queda decidido y
+            $\mathcal{H}(S'\mid\mathbf{A}) = 0$. Solo queda $\mathcal{H}(S')$, que se maximiza repartiendo
+            por igual entre los $N$ futuros distintos alcanzables… y entonces vale exactamente $\log_2 N$.
+            Contar casillas no es una aproximación: es la fórmula haciendo la cuenta por ti.
           </p>
         </div>
 
@@ -309,8 +412,55 @@
           estados visitados</strong> (no de las acciones). Es decir, «visita el mayor abanico de situaciones
           posible». Se usa en exploración sin recompensa y en el <strong>descubrimiento de habilidades</strong>
           (aprender comportamientos variados y distinguibles antes de saber cuál será la tarea). Comparte el
-          espíritu del capítulo 19: cubrir el mundo en vez de quedarte en una esquina.
+          espíritu del <a href="19-exploracion-avanzada.html">capítulo 19</a>: cubrir el mundo en vez de
+          quedarte en una esquina.
         </p>
+
+        <h3 id="habilidades">Descubrimiento de habilidades: DIAYN</h3>
+        <p>
+          Ese «descubrimiento de habilidades» tiene una formulación concreta y muy citada:
+          <strong>DIAYN</strong> (<em>Diversity Is All You Need</em>). Al empezar cada episodio el agente
+          sortea una variable oculta $z$ —su <strong>habilidad</strong>— y la mantiene todo el episodio. No
+          hay recompensa externa; lo único que se le pide es que las distintas $z$ produzcan comportamientos
+          <strong>distinguibles</strong>.
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ Habilidades que se reconocen por dónde te llevan</div>
+          <p>$$\max\; I(S;Z)
+             \qquad\text{con la recompensa intrínseca}\qquad
+             r_z(s) = \log q_\psi(z\mid s) - \log p(z)$$</p>
+          <p class="math-note">
+            $q_\psi(z\mid s)$ es un <strong>discriminador</strong> entrenado a adivinar qué habilidad estaba
+            en marcha viendo un solo estado. Así que la recompensa premia al agente por visitar estados que
+            <em>delatan</em> qué habilidad está ejecutando. Como $p(z)$ es fija (uniforme sobre las
+            habilidades), $-\log p(z)$ es una constante que solo sirve para que el bono no salga siempre
+            negativo. El resultado, sin ninguna recompensa externa, es un repertorio de comportamientos
+            distintos —andar, girar, caerse hacia delante— que luego puedes reutilizar cuando por fin
+            aparezca la tarea de verdad.
+          </p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Idea</th><th>Cantidad que maximiza</th><th>Qué diversifica</th></tr></thead>
+            <tbody>
+              <tr><td>Entropía de acción</td><td>$\mathcal{H}\big(\pi(\cdot\mid s)\big)$</td><td>Lo que <strong>haces</strong> en cada estado</td></tr>
+              <tr><td>Entropía de estados</td><td>$\mathcal{H}(S)$ sobre los estados visitados</td><td><strong>Dónde</strong> acabas estando</td></tr>
+              <tr><td>Empowerment</td><td>$I(\mathbf{A};S'\mid S=s)$</td><td>Cuánto <strong>atan</strong> tus acciones tu futuro</td></tr>
+              <tr><td>Habilidades (DIAYN)</td><td>$I(S;Z)$</td><td>Cuánto <strong>delata</strong> el estado tu habilidad</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Son la misma plantilla</div>
+          <p>
+            Visto así, este capítulo deja de ser tres temas sueltos. Los cuatro objetivos son
+            <strong>la misma plantilla</strong> —una entropía o una información mutua— cambiando únicamente
+            <em>qué pones a cada lado</em>. Elige el par y tendrás un objetivo nuevo. Esa es la razón de que
+            estos métodos se parezcan tantísimo en el código y tan poco en el nombre.
+          </p>
+        </div>
 
         <h2 id="algoritmo">El algoritmo: iteración de valor suave</h2>
         <p>Para un MDP pequeño y conocido, calcular la política de máxima entropía es casi idéntico a la
@@ -328,6 +478,30 @@
         </ol>
         <p>(Para acciones continuas no puedes recorrer todas las acciones ni calcular el <em>log-sum-exp</em>
         exactamente: ahí entra SAC, que aproxima todo con redes neuronales. La idea de fondo es esta.)</p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ De aquí sale el $-\alpha\log\pi$ de SAC</div>
+          <p>Vale la pena hacer el último despeje, porque explica una fórmula del
+          <a href="17-control-continuo.html#sac">capítulo 17</a> que allí parecía llovida del cielo. Toma
+          logaritmos en la política óptima:</p>
+          <p>$$\pi^\star(a\mid s) = \exp\!\Big(\tfrac{Q_{\text{soft}}(s,a) - V_{\text{soft}}(s)}{\alpha}\Big)
+             \quad\Longrightarrow\quad
+             \alpha\log\pi^\star(a\mid s) = Q_{\text{soft}}(s,a) - V_{\text{soft}}(s)$$</p>
+          <p>Despeja $V_{\text{soft}}$ y promedia sobre $a\sim\pi^\star$ (puedes hacerlo porque el lado
+          izquierdo no depende de $a$: la igualdad vale para <em>cada</em> acción, así que también para su
+          media):</p>
+          <p>$$\boxed{\;V_{\text{soft}}(s) = \mathbb{E}_{a\sim\pi^\star}\big[\,Q_{\text{soft}}(s,a) \;-\; \alpha\log\pi^\star(a\mid s)\,\big]\;}$$</p>
+          <p class="math-note">
+            Esa línea <em>es</em> el objetivo del crítico de SAC. Y ahí está el clic: ese
+            $-\alpha\log\pi$ que en el capítulo 17 parecía un apaño para «premiar la entropía»
+            <strong>no es un apaño: es un log-sum-exp disfrazado</strong>, la misma cantidad escrita como
+            esperanza en lugar de como suma. Y escribirla como esperanza no es un capricho estético: con
+            acciones continuas la suma $\sum_a$ no existe, pero la esperanza se estima con <em>una sola
+            muestra</em> de la política. <em>(El $\min$ entre dos críticos que SAC también lleva es cosa
+            aparte: eso es herencia de TD3 contra la sobreestimación, y no tiene nada que ver con la
+            entropía.)</em>
+          </p>
+        </div>
 
         <h2 id="ejemplo">En Python: el compromiso y el empowerment</h2>
         <p>
@@ -361,8 +535,9 @@ gridworld abierto donde hay MUCHOS caminos óptimos hasta la meta:
      La política óptima es un softmax sobre los valores:  pi(a|s) ∝ exp(Q(s,a)/alpha).
 
   2) EMPOWERMENT: cuántos estados futuros distintos puede alcanzar el agente
-     (aquí, un proxy: log2 del nº de estados alcanzables en k pasos). Formaliza
-     "mantener opciones abiertas": el centro tiene más futuro posible que una esquina.
+     (aquí, un proxy: log2 del nº de estados alcanzables en como mucho k pasos).
+     Formaliza "mantener opciones abiertas": el centro tiene más futuro posible
+     que una esquina.
 
 Ejecutar:
     python code/20-maxent-empowerment/maxent_empowerment.py
@@ -473,8 +648,19 @@ for a in range(nA):
     print(f"  {A_NAMES[a]:&gt;10}: {pol_demo[s0, a]:.2f}")
 print("(dos caminos igual de cortos -&gt; reparte entre 'abajo' y 'derecha')")
 
-# ---------- 2) Empowerment: nº de futuros alcanzables ----------
+# ---------- 2) ¿Por qué el retorno se hunde hasta -100? El agente no quiere terminar ----------
+# Miramos (5,6), la casilla justo encima de la meta: la acción 'abajo' (índice 1) entra en ella.
+print("\nDesde (5,6) -justo encima de la meta- probabilidad de ENTRAR en la meta:")
+for a in [0.10, 0.50, 0.70, 1.00]:
+    _, _, pol_a = soft_value_iteration(a)
+    print(f"  alpha={a:.2f}:  P(abajo | (5,6)) = {pol_a[idx(5, 6), 1]:.3f}")
+print(f"Umbral: por encima de alpha* = 1/ln(4) = {1 / np.log(4):.3f}, deambular paga más que terminar.")
+pol_unif = np.full((nS, nA), 1.0 / nA)
+print(f"(Para comparar: la política UNIFORME vale {evaluar_politica(pol_unif)[idx(0, 0)]:.2f}, no -100.)")
+
+# ---------- 3) Empowerment: nº de futuros alcanzables ----------
 def empowerment(k=4):
+    """log2 del nº de estados alcanzables desde s en COMO MUCHO k pasos."""
     emp = np.zeros(nS)
     for s in range(nS):
         alcanzables = {s}
@@ -488,7 +674,7 @@ def empowerment(k=4):
     return emp.reshape(H, W)
 
 EMP = empowerment(4)
-print(f"\nEmpowerment (log2 de estados alcanzables en 4 pasos):")
+print(f"\nEmpowerment (log2 de estados alcanzables en como mucho 4 pasos):")
 print(f"  esquina (0,0): {EMP[0, 0]:.2f}   centro ({H // 2},{W // 2}): {EMP[H // 2, W // 2]:.2f}")
 print("El centro 'abre' más posibilidades que una esquina, aunque la esquina no dé menos recompensa.")
 
@@ -528,23 +714,60 @@ plt.show()</code></pre>
 
         <p>
           Al ejecutarlo verás dos cosas muy elocuentes. En la <strong>tabla</strong>, el retorno se mantiene
-          casi óptimo ($\approx -11.4$) mientras $\alpha$ es pequeño —la política gana diversidad
-          <em>casi gratis</em>— y luego se <strong>desploma</strong> hacia $-100$ (una política casi uniforme
-          que ya no llega a la meta). Fíjate en un detalle bonito: la entropía <strong>no baja a cero</strong>
+          casi óptimo ($\approx -11{,}4$) mientras $\alpha$ es pequeño —la política gana diversidad
+          <em>casi gratis</em>— y luego se <strong>desploma</strong> hasta el suelo de $-100$… por un motivo
+          que no es el que parece, y que merece su propio aviso (lo tienes justo debajo).
+          Fíjate antes en un detalle bonito: la entropía <strong>no baja a cero</strong>
           ni con $\alpha \to 0$, porque hay caminos genuinamente empatados y la política reparte $0{,}50/0{,}50$
           entre «abajo» y «derecha» en el estado inicial: la máxima entropía <em>resuelve los empates
           conservándolos todos</em>. Y en las gráficas, el <strong>mapa de empowerment</strong> muestra que el
-          centro ($\approx 5{,}2$) «abre» más futuros que una esquina ($\approx 3{,}9$), aunque ninguna casilla
-          dé más recompensa que otra.
+          centro ($5{,}21$, o sea $37$ casillas alcanzables) «abre» más futuros que una esquina ($3{,}91$, solo
+          $15$), aunque ninguna casilla dé más recompensa que otra.
         </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El $-100$ no es «una política casi uniforme»: es un agente que no quiere terminar</div>
+          <p>
+            Lo primero, un dato que descoloca: la política <strong>uniforme</strong> —la más aleatoria
+            posible— vale $-77{,}14$ en esta rejilla, no $-100$. El paseo al azar acaba llegando a la meta,
+            solo que tarda. El $-100$ es otra cosa: es exactamente el suelo $-1/(1-\gamma)$, el retorno de
+            <strong>no llegar jamás</strong>. Y no se llega jamás porque el agente <em>no quiere</em>.
+          </p>
+          <p>
+            La contabilidad de un paso lo explica. La meta es absorbente y ahí ya no hay nada que decidir:
+            entropía $0$, premio $0$, para siempre. Deambular, en cambio, cuesta $-1$ pero cobra hasta
+            $\alpha\log 4$ por paso. Terminar deja de compensar en cuanto
+          </p>
+          <p>$$\alpha\log|\mathcal{A}| > 1 \quad\Longleftrightarrow\quad \alpha > \alpha^\star = \frac{1}{\log 4} \approx 0{,}721$$</p>
+          <p>
+            y el barrido lo confirma con una precisión casi cruel: $\alpha = 0{,}70 \to -44{,}97$;
+            $\alpha = 0{,}72 \to -74{,}43$; $\alpha = 0{,}75 \to -99{,}71$. El programa imprime además la
+            prueba del delito: desde $(5,6)$ —la casilla pegada a la meta— la probabilidad de <em>entrar</em>
+            en ella pasa de $1{,}000$ con $\alpha = 0{,}1$ a $0{,}433$ con $\alpha = 0{,}7$ y a
+            <strong>$0{,}000$ exacto</strong> con $\alpha = 1$. Ahí $V_{\text{soft}}(0,0)$ vale
+            <strong>$+38{,}2$</strong>, muy cerca de $(-1+\log 4)/(1-\gamma) \approx 38{,}6$: el valor de
+            vagar eternamente cobrando el premio de entropía. El agente no está fallando; está ganando
+            —con <em>su</em> objetivo, no con el tuyo—.
+          </p>
+          <p>
+            La lección práctica es seria: si tu tarea tiene estado terminal y coste por paso, una temperatura
+            demasiado alta no «ensucia» la política, la <strong>invierte</strong> — el agente aprende a
+            <strong>no terminar</strong>.
+          </p>
+        </div>
 
         <div class="callout intuition">
           <div class="callout-title">🧪 Experimenta</div>
           <p>
             Cambia la meta a una casilla central en vez de la esquina, o mete un muro que cree un
             <em>cuello de botella</em>, y vuelve a mirar el mapa de empowerment: las casillas junto al cuello
-            de botella pierden empowerment (desde ahí tienes menos futuros). Prueba también a subir $\alpha$
-            por encima de $1$ y observa cómo el retorno cae al suelo de $-100$.
+            de botella pierden empowerment (desde ahí tienes menos futuros). Y para cerrar el aviso sobre las
+            unidades de $\alpha$, un experimento de una línea: cambia el coste por paso de <code>-1.0</code> a
+            <code>-10.0</code> (aparece en las tres funciones de valor) y repite el barrido fino diez veces más
+            allá. Reaparece el mismo <strong>precipicio de cinco centésimas</strong>, solo que en
+            $\alpha \approx 7{,}2$: salen $-449{,}73$, $-744{,}30$ y $-997{,}11$ para
+            $\alpha = 7{,}0$, $7{,}2$ y $7{,}5$ —los mismos números de antes multiplicados por diez— y la
+            política que sale es <em>exactamente la misma</em>. $\alpha$ no es un número: es un precio.
           </p>
         </div>
 
@@ -562,9 +785,40 @@ plt.show()</code></pre>
  alpha  retorno real  entropía media
 ------------------------------------
   0.01        -11.36           0.466
-  ...
-  1.00       -100.00           1.370</span></pre>
+  0.05        -11.36           0.466
+  0.10        -11.36           0.467
+  0.20        -11.41           0.497
+  0.30        -11.72           0.603
+  0.50        -14.57           0.987
+  0.70        -44.97           1.369
+  1.00       -100.00           1.370
+
+En el estado inicial (0,0) con alpha=0.1, la política soft reparte:
+      arriba: 0.00
+       abajo: 0.50
+   izquierda: 0.00
+     derecha: 0.50
+(dos caminos igual de cortos -> reparte entre 'abajo' y 'derecha')
+
+Desde (5,6) -justo encima de la meta- probabilidad de ENTRAR en la meta:
+  alpha=0.10:  P(abajo | (5,6)) = 1.000
+  alpha=0.50:  P(abajo | (5,6)) = 0.796
+  alpha=0.70:  P(abajo | (5,6)) = 0.433
+  alpha=1.00:  P(abajo | (5,6)) = 0.000
+Umbral: por encima de alpha* = 1/ln(4) = 0.721, deambular paga más que terminar.
+(Para comparar: la política UNIFORME vale -77.14, no -100.)
+
+Empowerment (log2 de estados alcanzables en como mucho 4 pasos):
+  esquina (0,0): 3.91   centro (3,3): 5.21
+El centro 'abre' más posibilidades que una esquina, aunque la esquina no dé menos recompensa.</span></pre>
         </div>
+        <p>
+          Fíjate en las dos últimas filas de la tabla, porque son la moraleja del capítulo. Entre
+          $\alpha = 0{,}70$ y $\alpha = 1{,}00$ la entropía prácticamente no sube ($1{,}369 \to 1{,}370$, ya
+          casi tocando el máximo $\ln 4 = 1{,}386$) pero el retorno se hunde de $-45$ a $-100$. No estás
+          comprando diversidad a cambio de recompensa: estás <strong>tirando la recompensa sin comprar
+          nada</strong>.
+        </p>
 
         <div class="callout key">
           <div class="callout-title">🔑 Resumen del capítulo</div>
@@ -580,6 +834,9 @@ plt.show()</code></pre>
             hermana de la <strong>KL</strong> del RLHF (cap. 21).</li>
             <li>El <strong>empowerment</strong> —información mutua entre acciones y futuros— formaliza «mantener
             las opciones abiertas»; es distinto de la entropía de acción y sirve como motivación intrínseca.</li>
+            <li>Entropía de acción, entropía de estados, empowerment y descubrimiento de habilidades
+            (<strong>DIAYN</strong>) son <strong>la misma plantilla</strong>: una entropía o una información
+            mutua, cambiando qué pones a cada lado.</li>
           </ul>
         </div>
 

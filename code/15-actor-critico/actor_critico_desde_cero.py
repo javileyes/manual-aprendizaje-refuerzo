@@ -13,9 +13,13 @@ recompensa RUIDOSA) para comparar la VARIANZA de sus curvas de aprendizaje:
 
 Para que la comparación sea justa, el entrenamiento usa la recompensa ruidosa,
 pero la métrica que dibujamos es el retorno LIMPIO (sin ruido): así la curva
-refleja la calidad de la política, no el azar de las recompensas. El crítico de
-A2C aprende a predecir ese ruido y lo cancela vía la ventaja, de modo que su
-curva sube antes y con bandas mucho más estrechas.
+refleja la calidad de la política, no el azar de las recompensas.
+
+OJO a un matiz que suele contarse mal: A2C no ADIVINA el ruido (es gaussiano de
+media cero e independiente en cada paso; nadie lo adivina). Lo que hace es no
+ACUMULARLO: su delta solo contiene el ruido del paso actual, mientras que el G_t
+de REINFORCE arrastra el de toda la trayectoria. Por eso A2C falla menos veces y
+su banda entre semillas sale la mitad de ancha.
 
 Cómo ejecutarlo:
     pip install -r requirements.txt

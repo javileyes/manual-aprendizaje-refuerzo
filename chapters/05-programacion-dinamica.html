@@ -123,6 +123,14 @@
             cambio máximo entre barridos, $\max_s |V_{k+1}(s) - V_k(s)|$, cae por debajo de un umbral
             $\theta$ pequeño.
           </p>
+          <p class="math-note">
+            ¿Y qué garantiza ese $\theta$? Ojo, porque no es el error que te llevas, sino el
+            <em>cambio</em> del último barrido. La relación entre los dos es
+            $\lVert V_{k+1} - V^\pi \rVert_\infty \le \frac{\gamma}{1-\gamma}\,\theta$. Con
+            $\gamma = 0{,}9$ ese factor vale 9, así que parar en $\theta = 10^{-8}$ te deja un error de
+            como mucho $9\cdot 10^{-8}$: irrelevante. Pero con $\gamma = 0{,}999$ el factor es 999, y
+            entonces el umbral que creías generoso te está mintiendo por tres órdenes de magnitud.
+          </p>
         </div>
 
         <p>
@@ -134,12 +142,25 @@
         <div class="callout math">
           <div class="callout-title">➗ Por qué no puede fallar</div>
           <p>$$\lVert T^\pi U - T^\pi W \rVert_\infty \;\le\; \gamma\, \lVert U - W \rVert_\infty$$</p>
+          <p>Y sale en tres líneas. Resta las dos actualizaciones en un mismo estado $s$:</p>
+          <p>$$(T^\pi U)(s) - (T^\pi W)(s) \;=\; \gamma \sum_{a} \pi(a\mid s) \sum_{s',r} p(s',r \mid s,a)\,\big[\, U(s') - W(s') \,\big]$$</p>
+          <p>
+            Primero: las recompensas <strong>se han cancelado</strong>. Son las mismas en los dos lados
+            porque no dependen de la estimación, y por eso desaparecen del todo. Segundo: lo que queda
+            es una <strong>media ponderada</strong> de las diferencias $U(s')-W(s')$, con pesos
+            $\pi(a\mid s)\,p(s',r\mid s,a)$ que suman 1. Y tercero: una media ponderada nunca supera al
+            mayor de sus términos, así que su valor absoluto está acotado por $\lVert U-W\rVert_\infty$.
+            Toma el máximo sobre $s$ y ahí tienes la desigualdad.
+          </p>
           <p class="math-note">
             $\lVert \cdot \rVert_\infty$ es la mayor diferencia sobre todos los estados. Como
             $\gamma&lt;1$, las distancias se encogen barrido a barrido: por el
             <strong>teorema del punto fijo de Banach</strong> la sucesión $V_0, V_1, V_2,\dots$
-            converge a un <strong>único</strong> punto fijo, que es exactamente $V^\pi$. La
-            convergencia es geométrica (el error se multiplica por $\gamma$ en cada paso).
+            converge a un <strong>único</strong> punto fijo, que es exactamente $V^\pi$. Fíjate en lo
+            que ha salido de la cuenta: <strong>el factor de contracción es el propio factor de
+            descuento</strong>. Con $\gamma = 0{,}9$ el error se divide por diez cada 22 barridos; con
+            $\gamma = 0{,}99$ hacen falta 230. El horizonte largo no solo es más difícil de aprender:
+            también es más caro de resolver, aunque conozcas el modelo entero.
           </p>
         </div>
 
@@ -147,10 +168,13 @@
           <div class="callout-title">⚠️ Un detalle de implementación útil</div>
           <p>
             Hay dos formas de barrer. En la versión «de libro» usas dos vectores: lees de $V_k$ y
-            escribes en $V_{k+1}$. En la versión <em>in situ</em> (la que usamos en el código) hay un
-            único vector y cada estado ya aprovecha los valores recién actualizados de sus vecinos.
+            escribes en $V_{k+1}$. En la versión <em>in situ</em> (la que usa nuestra
+            <code>evaluar_politica</code>) hay un único vector y cada estado ya aprovecha los valores
+            recién actualizados de sus vecinos.
             La versión in situ suele converger <strong>más rápido</strong> y también lo hace al mismo
-            $V^\pi$; por eso es la habitual.
+            $V^\pi$; por eso es la habitual. Y no es solo un truco de programador: es el caso más suave
+            de una familia entera de métodos, la <a href="#asincrona">DP asíncrona</a>, que veremos más
+            abajo.
           </p>
         </div>
 
@@ -183,11 +207,36 @@
         </div>
 
         <p>
-          ¿Es $\pi'$ realmente mejor? El <strong>teorema de mejora de política</strong> lo garantiza.
-          La intuición es una cadena de desigualdades: si en el primer paso actúas greedy y luego
-          vuelves a $\pi$, no pierdes; pero entonces conviene actuar greedy también en el segundo
-          paso, y en el tercero… Encadenando, la mejora se propaga a todo el horizonte.
+          ¿Es $\pi'$ realmente mejor? El <strong>teorema de mejora de política</strong> lo garantiza, y
+          conviene ver la demostración porque es corta y porque todo el capítulo —y todo el GPI del
+          resto del manual— cuelga de ella. El punto de partida es casi una tautología: $\pi'$ elige en
+          cada estado la acción de mayor $Q^\pi$, mientras que $V^\pi(s)$ no es más que un promedio de
+          esos mismos $Q^\pi(s,a)$ con los pesos de $\pi$. Y un máximo nunca queda por debajo de un
+          promedio:
         </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La cadena de desigualdades, paso a paso</div>
+          <p>$$Q^\pi\big(s, \pi'(s)\big) \;=\; \max_a Q^\pi(s,a) \;\ge\; \sum_a \pi(a\mid s)\,Q^\pi(s,a) \;=\; V^\pi(s)$$</p>
+          <p>
+            Eso solo dice que <em>desviarse un paso</em> no perjudica. Ahora desarrollamos ese paso y,
+            en el estado al que hemos ido a parar, volvemos a aplicar exactamente la misma desigualdad:
+          </p>
+          <p>$$\begin{aligned}
+            V^\pi(s) \;&amp;\le\; Q^\pi\big(s,\pi'(s)\big) \;=\; \mathbb{E}_{\pi'}\!\left[\, R_{t+1} + \gamma\,V^\pi(S_{t+1}) \mid S_t = s \,\right] \\[0.3em]
+            \;&amp;\le\; \mathbb{E}_{\pi'}\!\left[\, R_{t+1} + \gamma\,Q^\pi\big(S_{t+1},\pi'(S_{t+1})\big) \mid S_t = s \,\right] \\[0.3em]
+            \;&amp;=\; \mathbb{E}_{\pi'}\!\left[\, R_{t+1} + \gamma R_{t+2} + \gamma^2 V^\pi(S_{t+2}) \mid S_t = s \,\right] \\[0.3em]
+            \;&amp;\le\; \cdots \;\le\; \mathbb{E}_{\pi'}\!\left[\, R_{t+1} + \gamma R_{t+2} + \gamma^2 R_{t+3} + \cdots \mid S_t = s \,\right] \;=\; V^{\pi'}(s)
+          \end{aligned}$$</p>
+          <p class="math-note">
+            Lee la cadena como si estuvieras moviendo una frontera. Al principio actúas greedy un solo
+            paso y a partir de ahí vuelves a $\pi$; en cada línea empujas esa frontera un paso más hacia
+            el futuro, y en cada empujón el valor <em>no baja</em>. Cuando la frontera se va al infinito
+            ya no queda ni rastro de $\pi$ en la expresión: lo que ha quedado escrito es, literalmente,
+            la definición de $V^{\pi'}(s)$. El paso al límite es legítimo porque el término que vamos
+            descartando va multiplicado por $\gamma^k$ y $\gamma&lt;1$.
+          </p>
+        </div>
 
         <div class="callout key">
           <div class="callout-title">🔑 Teorema de mejora de política</div>
@@ -270,6 +319,41 @@
           lugar de promediar sobre las acciones de $\pi$, nos quedamos con la máxima.
         </p>
 
+        <h2 id="asincrona">DP asíncrona: no hace falta barrer en orden</h2>
+        <p>
+          Hasta aquí hemos dado por supuesto que cada barrido recorre <em>todos</em> los estados, uno
+          detrás de otro, en un orden fijo. Es cómodo de programar y de demostrar, pero no es una
+          exigencia del método. Los métodos de <strong>DP asíncrona</strong> actualizan los estados en
+          el orden que les da la gana, con la información que tengan a mano en ese momento, y unos
+          estados pueden actualizarse muchísimas más veces que otros. La convergencia sobrevive con una
+          condición sorprendentemente floja: basta con que <strong>ningún estado deje de actualizarse
+          indefinidamente</strong>.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Tres formas de romper el barrido ordenado</div>
+          <ul>
+            <li><strong>In situ.</strong> Un único vector $V$, y cada estado aprovecha ya los valores
+              recién actualizados de sus vecinos. Es lo que hace nuestra <code>evaluar_politica</code>, y
+              es la versión asíncrona más suave: el orden no cambia, pero la información viaja <em>dentro</em> del propio
+              barrido en lugar de esperar al siguiente.</li>
+            <li><strong>Barrido priorizado.</strong> Mantén una cola con los estados ordenados por su
+              <strong>error de Bellman</strong> —cuánto cambiaría $V(s)$ si lo actualizaras— y atiende
+              siempre al peor. Es justo la «onda» que sale de la meta, pero sin gastar cómputo en las
+              casillas por las que la onda todavía no ha pasado.</li>
+            <li><strong>DP en tiempo real.</strong> No elijas tú los estados: deja que los elija el
+              agente mientras actúa y actualiza solo aquellos por los que va pasando. Los estados que
+              no visita nadie no se calculan nunca, y en un problema grande son la inmensa mayoría.</li>
+          </ul>
+        </div>
+
+        <p>
+          Esto es bastante más que una optimización. Convierte «resolver el MDP» en algo que se puede
+          hacer <strong>a trocitos</strong>, entrelazado con la actuación, en vez de en una fase previa
+          que hay que terminar entera antes de dar el primer paso. Esa mezcla de planificar y actuar
+          volverá con nombre propio en <a href="18-model-based.html#dyna">Dyna-Q</a>.
+        </p>
+
         <h2 id="gpi">GPI: la idea que lo unifica todo</h2>
         <p>
           Iteración de política e iteración de valor parecen dos algoritmos distintos, pero son dos
@@ -304,7 +388,7 @@
             <tbody>
               <tr><td>Cada iteración</td><td>Evalúa $\pi$ <em>hasta converger</em> + una mejora</td><td>Un barrido con $\max_a$</td></tr>
               <tr><td>Coste por barrido</td><td>$O(|\mathcal{S}|^2)$ (política fija)</td><td>$O(|\mathcal{S}|^2\,|\mathcal{A}|)$</td></tr>
-              <tr><td>Nº de iteraciones externas</td><td>Muy pocas</td><td>Más, pero baratas</td></tr>
+              <tr><td>Nº de iteraciones externas</td><td>Muy pocas, pero cada una cuesta una evaluación entera</td><td>Más, pero baratas</td></tr>
               <tr><td>Converge a</td><td>$(\pi^*, V^*)$ exactos</td><td>$V^*$ exacto, luego $\pi^*$</td></tr>
             </tbody>
           </table>
@@ -317,6 +401,25 @@
           coste real es mucho menor. Para problemas con millones de estados, esta dependencia de
           <em>todo</em> el espacio de estados es justamente la barrera que romperemos en la
           <a href="11-aproximacion-funciones.html">Parte 2</a> con aproximación de funciones.
+        </p>
+
+        <h3>La maldición de la dimensionalidad</h3>
+        <p>
+          Ese $|\mathcal{S}|$ de las fórmulas parece inofensivo hasta que te preguntas de dónde sale.
+          En un problema real un estado no es un número: es un <em>vector</em> de variables. Coge un
+          robot con 10 articulaciones y discretiza cada ángulo en solo 100 valores —una rejilla
+          grosera, casi ofensiva—. Ya tienes $100^{10} = 10^{20}$ estados. Un único barrido tendría que
+          tocarlos todos, y ni siquiera llegas a intentarlo: guardar esa tabla de $V$ con un número de
+          8 bytes por estado pide 800 <em>exabytes</em> de memoria.
+        </p>
+        <p>
+          A eso se le llama la <strong>maldición de la dimensionalidad</strong>: el número de estados
+          crece <em>exponencialmente</em> con el número de variables, así que en cuanto añades una sola
+          variable más al estado la tabla se multiplica por cien. Y no es un problema de implementación que
+          se arregle escribiendo mejor código: es que la tabla misma no cabe. La salida no será barrer
+          más rápido, sino <strong>dejar de barrer</strong>: representar $V$ con una función de pocos
+          parámetros que generalice de los estados que sí has visto a los que no. Ese es el salto de la
+          Parte 2, y ahora ya sabes exactamente qué problema viene a resolver.
         </p>
 
         <h2 id="ejemplo">El ejemplo: un gridworld resuelto de dos formas</h2>
@@ -428,11 +531,13 @@ def construir_modelo():
 def evaluar_politica(politica, P, R, gamma, theta=1e-8):
     """Evaluación iterativa de política: barre la ecuación de Bellman de
     esperanza hasta que V deja de cambiar. `politica` es un vector de índices
-    de acción (uno por estado). Devuelve V^pi.
+    de acción (uno por estado). Devuelve (V^pi, nº de barridos gastados).
     """
     nS = len(politica)
     V = np.zeros(nS)
+    barridos = 0
     while True:
+        barridos += 1
         delta = 0.0
         for s in range(nS):
             a = politica[s]
@@ -441,7 +546,7 @@ def evaluar_politica(politica, P, R, gamma, theta=1e-8):
             V[s] = v_nuevo
         if delta &lt; theta:
             break
-    return V
+    return V, barridos
 
 
 def valores_de_accion(V, P, R, gamma):
@@ -462,17 +567,21 @@ def mejorar_politica(V, P, R, gamma):
 
 def iteracion_de_politica(P, R, gamma, politica0=None):
     """Iteración de política (GPI): evaluar V^pi y luego volverse greedy,
-    repetido hasta que la política ya no cambia. Devuelve (politica, V, iteraciones).
+    repetido hasta que la política ya no cambia. Contamos también los barridos
+    de evaluación que se gastan por el camino, que es el coste real.
+    Devuelve (politica, V, iteraciones, barridos_totales).
     """
     nS, nA = R.shape
     politica = np.zeros(nS, dtype=int) if politica0 is None else politica0.copy()
     iteraciones = 0
+    barridos_totales = 0
     while True:
         iteraciones += 1
-        V = evaluar_politica(politica, P, R, gamma)
+        V, barridos = evaluar_politica(politica, P, R, gamma)
+        barridos_totales += barridos
         nueva, _ = mejorar_politica(V, P, R, gamma)
         if np.array_equal(nueva, politica):
-            return politica, V, iteraciones
+            return politica, V, iteraciones, barridos_totales
         politica = nueva
 
 
@@ -555,9 +664,6 @@ def dibujar(idx, V, politica, terminal):
 
 
 # --- Programa principal: resolvemos el gridworld de las dos formas ------------
-# (Sin bloque `if __name__ == "__main__"` a propósito, para que este mismo código
-#  se ejecute tal cual en el navegador con Pyodide, que lo corre en un espacio de
-#  nombres nuevo donde __name__ no vale "__main__".)
 estados, idx, P, R, terminal = construir_modelo()
 n_no_term = int((~terminal).sum())
 print(f"Gridworld {FILAS}x{COLS}: {len(estados)} estados "
@@ -566,7 +672,7 @@ print(f"Gridworld {FILAS}x{COLS}: {len(estados)} estados "
 # (1) EVALUACIÓN DE POLÍTICA sobre una política fija y mediocre: "ir siempre
 # a la derecha". Se queda atascada contra la pared este y acumula costes.
 pol_derecha = np.full(len(estados), 1, dtype=int)  # 1 = derecha
-V_derecha = evaluar_politica(pol_derecha, P, R, GAMMA)
+V_derecha, _ = evaluar_politica(pol_derecha, P, R, GAMMA)
 inicio = (2, 0)
 print(f"\nEvaluación de 'siempre derecha': V del inicio {inicio} = "
       f"{V_derecha[idx[inicio]]:.2f}  (se atasca y suma -1 sin fin)")
@@ -575,9 +681,9 @@ print(f"\nEvaluación de 'siempre derecha': V del inicio {inicio} = "
 # ver que converge igual (semilla fija para reproducibilidad).
 rng = np.random.default_rng(0)
 pol_inicial = rng.integers(0, len(ACCIONES), size=len(estados))
-pol_pi, V_pi, iters_pi = iteracion_de_politica(P, R, GAMMA, pol_inicial)
+pol_pi, V_pi, iters_pi, barridos_pi = iteracion_de_politica(P, R, GAMMA, pol_inicial)
 print(f"\nIteración de política: convergió en {iters_pi} iteraciones "
-      f"(evaluar + mejorar).")
+      f"= {barridos_pi} barridos de evaluación en total.")
 print(politica_a_texto(idx, pol_pi, terminal))
 
 # (3) ITERACIÓN DE VALOR.
@@ -596,13 +702,26 @@ dibujar(idx, V_vi, pol_vi, terminal)
         </div>
 
         <p>
-          Pulsa <strong>▶ Ejecutar</strong>. Verás por texto que la iteración de política converge en
-          poquísimas iteraciones y la de valor en unos pocos barridos más, que <strong>ambas dan la
-          misma política</strong> y que la diferencia entre sus $V^*$ es prácticamente cero. Luego
-          aparece el mapa de calor: verde donde vale la pena estar (cerca de la meta) y rojo cerca de
-          la trampa. Las flechas trazan la ruta óptima, y fíjate en que en la casilla de abajo a la
-          derecha la flecha apunta <em>a la izquierda</em>: el plan óptimo <strong>rodea</strong> la
-          trampa en lugar de arriesgarse a caer en ella.
+          Pulsa <strong>▶ Ejecutar</strong> y fíjate bien en dos números de la salida, porque son la
+          moraleja del capítulo. La iteración de política converge en solo <strong>5 iteraciones</strong>…
+          pero cada una de ellas esconde una evaluación completa: <strong>536 barridos</strong> en
+          total. La iteración de valor necesita <strong>6</strong>. ¿Por qué tanta diferencia? Porque
+          evaluar hasta $\theta = 10^{-8}$ con $\gamma = 0{,}9$ exige del orden de
+          $\ln\theta / \ln\gamma \approx 175$ barridos, y los tres primeros pasos de la iteración de
+          política los pagan enteros: sus políticas todavía tienen <strong>bucles</strong> —el agente
+          da vueltas o se queda chocando contra una pared— y ahí el valor solo converge arrastrando esa
+          cola geométrica. Los dos últimos pasos, ya sin bucles, se despachan en cuatro barridos cada
+          uno: $176+176+176+4+4 = 536$. La lección es que <strong>«pocas iteraciones» no significa
+          «barato»</strong>. Ese desperdicio es justo lo que la iteración de valor —y en general la
+          evaluación truncada— viene a eliminar: si la política va a cambiar de todas formas, afinar su
+          valor hasta la octava cifra decimal es tirar cómputo a la basura.
+        </p>
+        <p>
+          Lo demás sale como esperábamos: <strong>ambas dan la misma política</strong> y la diferencia
+          entre sus $V^*$ es cero. Luego aparece el mapa de calor: verde donde vale la pena estar (cerca
+          de la meta) y rojo cerca de la trampa. Las flechas trazan la ruta óptima, y fíjate en que en
+          la casilla de abajo a la derecha la flecha apunta <em>a la izquierda</em>: el plan óptimo
+          <strong>rodea</strong> la trampa en lugar de arriesgarse a caer en ella.
         </p>
 
         <div class="callout warn">
@@ -615,6 +734,102 @@ dibujar(idx, V_vi, pol_vi, terminal)
             $V^*(\text{meta}) = 0$. Por eso la casilla que de verdad vale mucho es la contigua, desde
             la que un solo paso te da el premio. Es una confusión clásica; tenerla clara te ahorrará
             muchos dolores de cabeza.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 El $-10{,}00$ de «siempre derecha» no es la trampa</div>
+          <p>
+            La salida dice que la política «ir siempre a la derecha» vale exactamente $-10{,}00$ desde
+            la casilla de salida $(2,0)$, y es muy tentador pensar que ese
+            $-10$ viene de la trampa. No es eso. Desde $(2,0)$, ir siempre a la derecha te lleva a
+            $(2,3)$ y allí te deja <em>chocando contra la pared este para siempre</em>, cobrando $-1$
+            por cada intento. Ese valor es la suma de infinitos $-1$ descontados:
+          </p>
+          <p>$$-1 - 0{,}9 - 0{,}9^2 - 0{,}9^3 - \dots = \frac{-1}{1 - 0{,}9} = -10$$</p>
+          <p>
+            Es la <a href="03-mdp.html#episodico-continuo">serie geométrica del capítulo 3</a> en carne
+            y hueso. Que el resultado coincida con la recompensa de la trampa es pura casualidad de los
+            números que hemos elegido; si cambiaras $\gamma$ a $0{,}8$, este valor pasaría a ser $-5$ y
+            la trampa seguiría valiendo $-10$.
+          </p>
+        </div>
+
+        <h3>Los números, a mano</h3>
+        <p>
+          El mapa de calor no tiene nada de mágico: puedes rehacerlo con lápiz y papel en un minuto.
+          Empieza por la casilla pegada a la meta, $(0,2)$. Un paso a la derecha entra en la meta y
+          cobra $+10$; y una vez dentro el episodio se acaba, así que no hay futuro que descontar:
+        </p>
+        <p>$$V^*(0,2) = 10 + 0{,}9\cdot \underbrace{0}_{V^*(\text{meta})} = 10$$</p>
+        <p>
+          Ahora retrocede una casilla. Desde $(0,1)$ lo mejor es ir a $(0,2)$: cuesta $-1$ y te deja en
+          un sitio que ya sabemos que vale $10$. Y otra vez, y otra:
+        </p>
+        <p>$$V^*(0,1) = -1 + 0{,}9\cdot 10 = 8 \qquad V^*(0,0) = -1 + 0{,}9\cdot 8 = 6{,}2$$</p>
+        <p>
+          Siguiendo la cadena salen $-1 + 0{,}9\cdot 6{,}2 = 4{,}58$ y $-1 + 0{,}9\cdot 4{,}58 = 3{,}122$.
+          Son exactamente los valores que calcula el programa (el mapa de calor los redondea a un
+          decimal, así que ahí verás $4{,}6$ y $3{,}1$). Lo bonito es que la iteración de valor
+          <em>hace justo eso</em>, pero sin que nadie le diga por dónde empezar. Esta es la traza real
+          de sus seis barridos:
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Barrido</th><th>Casillas que alcanzan ya su valor definitivo</th><th>Valor</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td>$(0,2)$</td><td>$10{,}00$</td></tr>
+              <tr><td>2</td><td>$(0,1)$ y $(1,2)$</td><td>$8{,}00$</td></tr>
+              <tr><td>3</td><td>$(0,0)$ y $(2,2)$</td><td>$6{,}20$</td></tr>
+              <tr><td>4</td><td>$(1,0)$, $(2,1)$ y $(2,3)$</td><td>$4{,}58$</td></tr>
+              <tr><td>5</td><td>$(2,0)$</td><td>$3{,}122$</td></tr>
+              <tr><td>6</td><td>ninguna: nada cambia, y por eso paramos</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Fíjate en el patrón: en el barrido $k$ el valor definitivo ha llegado exactamente a las
+          casillas que están a $k$ pasos de la meta. La información se propaga hacia atrás <strong>una
+          casilla por barrido</strong>, como una onda que sale de la meta y se expande por el tablero.
+          Por eso hicieron falta 6 barridos: 5 para que la onda alcance $(2,0)$, la casilla más lejana,
+          y uno más para confirmar que ya nada cambia.
+        </p>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            <strong>(1) Pon <code>GAMMA = 0.5</code>.</strong> El mapa cambia por completo: $(0,0)$ pasa
+            de valer $6{,}2$ a valer $1$, y la esquina $(2,0)$ se hunde de $3{,}122$ a $-1{,}25$. Y sin
+            embargo las flechas salen <em>exactamente iguales</em> (de hecho, en este tablero no cambian
+            para <em>ningún</em> $\gamma$). El descuento cambia <em>cuánto</em> vale cada casilla, pero
+            aquí no cambia <em>qué</em> conviene hacer: haya prisa o no, el camino más corto a la meta
+            sigue siendo el mejor plan. Ojo, que no es una ley general: en cuanto hay que elegir entre un
+            premio pequeño y cercano y otro grande y lejano, bajar $\gamma$ <em>sí</em> cambia la política
+            óptima.
+          </p>
+          <p>
+            <strong>(2) Pon <code>R_PASO = -6.5</code>.</strong> Ahora vivir duele tanto que la política
+            sí cambia: la casilla $(2,3)$ deja de rodear la trampa y se tira de cabeza a ella. Búscale el
+            umbral a mano. Desde $(2,3)$ hay cuatro pasos hasta la meta, así que rodear vale
+            $r(1+\gamma+\gamma^2) + \gamma^3\cdot 10$, mientras que saltar a la trampa vale $-10$ y se
+            acabó. Iguala y despeja: $r \approx -6{,}38$. Compruébalo: con $-6{,}3$ la flecha aún rodea;
+            con $-6{,}4$ ya se suicida.
+          </p>
+          <p>
+            <strong>(3) Sube <code>theta</code> de <code>1e-8</code> a <code>1e-2</code>.</strong> La
+            iteración de valor sigue necesitando 6 barridos (aquí converge de golpe, sin cola de
+            decimales), pero la iteración de política baja de <strong>536</strong> barridos internos a
+            <strong>143</strong> y devuelve la misma política. Ahí ves de un vistazo dónde estaba el
+            desperdicio.
+          </p>
+          <p>
+            <strong>(4) Cambia <code>pol_inicial</code>.</strong> Con
+            <code>np.random.default_rng(2)</code> la iteración de política tarda 6 iteraciones y 541
+            barridos; arrancando con «siempre derecha» (<code>np.full(len(estados), 1)</code>) le bastan
+            4 iteraciones y 532 barridos. Siempre llega a la misma política: la óptima es única, el
+            camino hasta ella no.
           </p>
         </div>
 
@@ -637,7 +852,7 @@ dibujar(idx, V_vi, pol_vi, terminal)
 
 Evaluación de 'siempre derecha': V del inicio (2, 0) = -10.00  (se atasca y suma -1 sin fin)
 
-Iteración de política: convergió en 5 iteraciones (evaluar + mejorar).
+Iteración de política: convergió en 5 iteraciones = 536 barridos de evaluación en total.
  &gt;  &gt;  &gt;  G
  ^  #  ^  X
  ^  &gt;  ^  &lt;
@@ -671,9 +886,15 @@ Diferencia máxima entre las dos V*: 0.00e+00</span></pre>
               garantiza una política igual o mejor.</li>
             <li><strong>Iteración de política</strong> alterna evaluar y mejorar;
               <strong>iteración de valor</strong> los funde en un barrido con $\max_a$. Ambas son
-              casos de <strong>GPI</strong> y llegan a $(\pi^*, V^*)$.</li>
-            <li>El coste crece con el número de estados: barreremos <em>todo</em> el espacio, algo que
-              en problemas gigantes será el cuello de botella.</li>
+              casos de <strong>GPI</strong> y llegan a $(\pi^*, V^*)$. Cuidado con contar iteraciones
+              en vez de barridos: en nuestro gridworld la iteración de política gasta 536 barridos
+              donde la de valor gasta 6.</li>
+            <li>Tampoco hace falta barrer en orden: la <strong>DP asíncrona</strong> actualiza los
+              estados como le conviene, con tal de no abandonar ninguno para siempre.</li>
+            <li>El coste crece con el número de estados y el número de estados crece de forma
+              exponencial con las variables del problema: es la <strong>maldición de la
+              dimensionalidad</strong>, y será el cuello de botella en cuanto salgamos de los tableros
+              de juguete.</li>
           </ul>
         </div>
 

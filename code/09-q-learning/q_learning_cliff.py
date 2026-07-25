@@ -10,6 +10,9 @@ del Capitulo 9 del Manual de RL sobre el mismo problema:
     forma OPTIMA, aunque durante el entrenamiento explore.
   * SARSA: control TD *on-policy*. En el objetivo usa Q(S', A'), donde A' es la
     accion que realmente tomara la politica exploratoria (epsilon-greedy).
+  * Expected SARSA (la variante del Capitulo 8): tambien on-policy, pero en vez
+    de muestrear A' promedia Q(S', .) bajo la politica epsilon-greedy. Se activa
+    llamando a entrena() con algoritmo="expected-sarsa".
 
 La leccion clasica (Sutton & Barto, ejemplo 6.6): Q-Learning aprende el camino
 OPTIMO pegado al acantilado (recompensa -13), pero durante el entrenamiento se
@@ -72,7 +75,10 @@ def epsilon_greedy(Q, estado, epsilon, rng):
 
 
 def entrena(algoritmo, n_episodios, alpha, gamma, epsilon, semilla, max_pasos=1000):
-    """Entrena 'q-learning' o 'sarsa'. Devuelve (Q, recompensa_por_episodio)."""
+    """Entrena 'q-learning', 'sarsa' o 'expected-sarsa'.
+
+    Devuelve (Q, recompensa_por_episodio).
+    """
     rng = np.random.default_rng(semilla)
     Q = np.zeros((N_ESTADOS, N_ACCIONES))
     retornos = np.zeros(n_episodios)
@@ -82,13 +88,28 @@ def entrena(algoritmo, n_episodios, alpha, gamma, epsilon, semilla, max_pasos=10
         total = 0.0
         for _ in range(max_pasos):
             s2, r, fin = paso(estado, accion)
-            # Misma politica de comportamiento en ambos: la accion que se tomara en s2.
+            # Misma politica de comportamiento en todos: la accion que se tomara en s2.
+            # SARSA NECESITA sortearla ahora, porque su objetivo la usa. Q-Learning
+            # podria actualizar primero y elegir despues (es lo que dice su
+            # pseudocodigo), pero aqui la sorteamos antes a proposito: asi los dos
+            # algoritmos consumen la misma secuencia de numeros aleatorios y recogen
+            # la misma experiencia, que es lo que hace limpia la comparacion.
             a2 = epsilon_greedy(Q, s2, epsilon, rng)
-            # La UNICA diferencia entre SARSA y Q-Learning esta en el objetivo TD:
+            # La UNICA diferencia entre los tres algoritmos esta en el objetivo TD:
             if algoritmo == "sarsa":
                 bootstrap = Q[s2, a2]        # on-policy: Q(S', A') con la accion real
+            elif algoritmo == "expected-sarsa":
+                # on-policy sin muestrear: media de Q(S', .) ponderada por la
+                # probabilidad que la politica epsilon-greedy da a cada accion.
+                q2 = Q[s2]
+                mejores = np.flatnonzero(q2 == q2.max())
+                pi = np.full(N_ACCIONES, epsilon / N_ACCIONES)
+                pi[mejores] += (1.0 - epsilon) / len(mejores)
+                bootstrap = float(pi @ q2)
             else:                            # q-learning
                 bootstrap = Q[s2].max()      # off-policy: max_a Q(S', a), la MEJOR accion
+            # El factor (0.0 if fin else 1.0) es V(terminal) = 0: si el episodio ha
+            # acabado no queda futuro que estimar y el objetivo es solo la recompensa.
             objetivo = r + gamma * bootstrap * (0.0 if fin else 1.0)
             Q[estado, accion] += alpha * (objetivo - Q[estado, accion])
             estado, accion = s2, a2

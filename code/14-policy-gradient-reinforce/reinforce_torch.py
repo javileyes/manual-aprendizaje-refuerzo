@@ -9,10 +9,14 @@ acciones (empujar el carro a izquierda o derecha). Muestreamos la accion de esa
 distribucion categorica, jugamos el episodio completo y actualizamos la red por
 ascenso de gradiente de la funcion objetivo J(theta) = E[G_0].
 
-Como baseline para reducir la varianza usamos la normalizacion de los retornos
-del episodio (les restamos su media y dividimos por su desviacion). Restar una
-media es un baseline valido: no cambia la direccion esperada del gradiente
-(no introduce sesgo) pero si reduce mucho su varianza.
+Para reducir la varianza usamos la normalizacion de los retornos del episodio
+(les restamos su media y los dividimos por su desviacion tipica). OJO: esto NO
+es una linea base en el sentido estricto del teorema. La media se calcula con
+los mismos G_t que multiplica, asi que esta correlacionada con ellos e
+introduce un sesgo pequeno; y dividir por la desviacion no resta nada,
+reescala el gradiente entero (actua como una tasa de aprendizaje adaptativa).
+Es un truco de ingenieria muy habitual, no el teorema: el baseline honesto es
+el V_w(s) del ejemplo en NumPy de este mismo capitulo.
 
 Este ejemplo necesita PyTorch y Gymnasium, demasiado pesados para el navegador:
 se ejecuta en tu terminal.
@@ -88,9 +92,9 @@ def entrena(n_episodios=600, gamma=0.99, lr=1e-2, semilla=0):
             recompensas.append(r)
             terminado = term or trunc
 
-        # --- Retornos y baseline (normalizacion) ---
+        # --- Retornos y normalizacion (reductor de varianza, no baseline) ---
         G = retornos_descontados(recompensas, gamma)
-        G = (G - G.mean()) / (G.std() + 1e-8)     # baseline que reduce varianza
+        G = (G - G.mean()) / (G.std() + 1e-8)     # centra y reescala; ver docstring
 
         # --- Perdida de policy gradient: -sum_t log pi(a_t|s_t) * ventaja_t ---
         log_probs = torch.stack(log_probs)

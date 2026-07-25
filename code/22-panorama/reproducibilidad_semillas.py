@@ -7,9 +7,10 @@ Q-Learning en el MISMO gridworld estocastico, pero con 20 semillas
 aleatorias distintas, y dibuja dos paneles:
 
   * Izquierda: las 20 curvas de aprendizaje individuales (tenues) y UNA de
-    ellas resaltada. Fijate en lo distintas que son entre si: si solo
-    hubieras ejecutado la semilla resaltada, sacarias conclusiones
-    equivocadas sobre "como de rapido/bien" aprende el algoritmo.
+    ellas resaltada: la MAS RAPIDA en alcanzar un retorno de -11. Todas
+    acaban en el mismo sitio, pero tardan entre 21 y 49 episodios en llegar;
+    si solo hubieras ejecutado la resaltada, creerias que el algoritmo es el
+    doble de eficiente de lo que realmente es.
   * Derecha: la MEDIA de las 20 curvas con una banda de +/- una desviacion
     tipica. Ese es el resumen honesto: una tendencia central y su
     incertidumbre.
@@ -54,8 +55,8 @@ def paso(estado, accion, rng):
     col = min(max(col + dcol, 0), GRID - 1)
     nuevo = fila * GRID + col
     if nuevo == META:
-        return nuevo, 0.0, True          # llegar a la meta termina el episodio
-    return nuevo, -1.0, False            # cada paso cuesta -1 (queremos llegar rapido)
+        return nuevo, 0.0, True          # el paso que entra en la meta es gratis y acaba el episodio
+    return nuevo, -1.0, False            # cualquier otro paso cuesta -1 (queremos llegar rapido)
 
 
 def epsilon_greedy(Q, estado, epsilon, rng):
@@ -118,8 +119,19 @@ def main():
     media = suaves.mean(axis=0)
     desv = suaves.std(axis=0, ddof=1)   # desviacion tipica MUESTRAL (divide por N-1)
 
-    # Una semilla "cualquiera" (la que un incauto podria haber ejecutado una vez).
-    elegida = int(np.random.default_rng(0).integers(n_semillas))
+    # ¿Cuantos episodios tarda cada semilla en llegar a un retorno decente?
+    # Esta es la metrica donde SI hay dispersion (el retorno final apenas varia),
+    # y es justo el tipo de criterio con el que se comparan algoritmos.
+    umbral = -11.0
+    n_ep = suaves.shape[1]
+    # Ojo con argmax: si una curva NUNCA llegara al umbral devolveria 0, es decir,
+    # "lo consiguio en el primer episodio". Le asignamos el total de episodios.
+    ep_umbral = np.array([int(np.argmax(c >= umbral)) if (c >= umbral).any() else n_ep
+                          for c in suaves])
+
+    # La curva que resaltamos NO se elige al azar: es la MAS RAPIDA de las 20,
+    # es decir, la que te haria creer que el metodo es mejor de lo que es.
+    elegida = int(np.argmin(ep_umbral))
 
     # --- Resumen numerico por pantalla ---
     finales = curvas[:, -50:].mean(axis=1)   # retorno medio de los ultimos 50 episodios
@@ -131,10 +143,17 @@ def main():
     print(f"  mejor semilla        : {finales.max():7.2f}")
     print(f"  peor  semilla        : {finales.min():7.2f}")
     print("-" * 60)
-    print(f"Entre la mejor y la peor semilla hay "
-          f"{finales.max() - finales.min():.1f} puntos de retorno de diferencia.")
-    print("Una sola ejecucion puede caer en cualquier punto de ese rango: por")
-    print("eso se reporta la MEDIA +/- dispersion, no una unica semilla.")
+    print(f"Episodios hasta alcanzar un retorno de {umbral:.0f} (en media movil):")
+    print(f"  mas rapida (semilla {elegida:2d}) : {ep_umbral.min():7d}")
+    print(f"  mediana                 : {int(np.median(ep_umbral)):7d}")
+    print(f"  mas lenta               : {ep_umbral.max():7d}")
+    print("-" * 60)
+    print(f"Todas las semillas acaban practicamente en el mismo sitio (rango de "
+          f"{finales.max() - finales.min():.1f} puntos),")
+    print(f"pero la mas lenta tarda {ep_umbral.max() / ep_umbral.min():.1f} veces "
+          f"mas que la mas rapida en llegar.")
+    print("Si comparas dos metodos con UNA semilla cada uno, esa diferencia de")
+    print("velocidad es toda tuya: por eso se reporta MEDIA +/- dispersion.")
 
     # --- Grafica de dos paneles ---
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.3), sharey=True)
@@ -143,7 +162,7 @@ def main():
     for c in suaves:
         ax1.plot(ejex, c, color="#94a3b8", lw=0.8, alpha=0.5)
     ax1.plot(ejex, suaves[elegida], color="#dc2626", lw=2.0,
-             label=f"una sola semilla (#{elegida})")
+             label=f"una sola semilla (#{elegida}, la mas rapida)")
     ax1.set_title(f"Las {n_semillas} ejecuciones individuales")
     ax1.set_xlabel("episodio")
     ax1.set_ylabel("retorno (media movil)")

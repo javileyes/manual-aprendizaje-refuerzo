@@ -81,6 +81,11 @@ def main():
     np.random.seed(semilla)
 
     env = gym.make("CartPole-v1")
+    # Sembrar el entorno, no solo torch y numpy: el estado inicial de CartPole es
+    # aleatorio y la semilla va en reset(), no en el constructor. Sin esto, dos
+    # ejecuciones del mismo script dan trazas distintas. Es la receta del cap. 22.
+    env.reset(seed=semilla)
+    env.action_space.seed(semilla)
     dim_obs = env.observation_space.shape[0]
     n_acciones = env.action_space.n
 

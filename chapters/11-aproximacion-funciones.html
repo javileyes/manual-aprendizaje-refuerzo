@@ -169,6 +169,32 @@
           </p>
         </div>
 
+        <div class="callout math">
+          <div class="callout-title">🔢 Un paso, a mano (y la sorpresa que trae)</div>
+          <p>
+            Dos features nada más. Estamos en $S_t$, con $\mathbf{x}(S_t) = (1;\ 0{,}5)$, y pasamos a
+            $S_{t+1}$, con $\mathbf{x}(S_{t+1}) = (0;\ 1)$. Los pesos valen $\mathbf{w} = (2;\ 0)$, la
+            recompensa es $R_{t+1} = 1$, $\gamma = 0{,}9$ y $\alpha = 0{,}1$. Como objetivo $U_t$ usamos
+            el de <a href="07-td-aprendizaje.html">TD(0)</a>, el mismo del capítulo 7:
+            $U_t = R_{t+1} + \gamma\,\hat v(S_{t+1})$. Primero, las dos estimaciones:
+          </p>
+          <p>$$\hat v(S_t) = 2\cdot 1 + 0\cdot 0{,}5 = 2, \qquad \hat v(S_{t+1}) = 2\cdot 0 + 0\cdot 1 = 0$$</p>
+          <p>El objetivo TD y el error:</p>
+          <p>$$U_t = 1 + 0{,}9\cdot 0 = 1, \qquad \delta_t = 1 - 2 = -1$$</p>
+          <p>Y la actualización, que en el caso lineal es sencillamente $\alpha\,\delta_t\,\mathbf{x}(S_t)$:</p>
+          <p>$$\mathbf{w} \leftarrow (2;\ 0) + 0{,}1\cdot(-1)\cdot(1;\ 0{,}5) = (1{,}9;\ -0{,}05)$$</p>
+          <p class="math-note">
+            Sobreestimábamos el estado en una unidad y hemos bajado los pesos. Hasta aquí, nada nuevo.
+            <strong>Ahora mira el segundo peso.</strong> Ha pasado de $0$ a $-0{,}05$, así que
+            $\hat v(S_{t+1})$, que valía $0$, ahora vale $-0{,}05$ —y eso que no lo hemos actualizado, ni
+            lo hemos visitado, ni nada—. Con una tabla, esto era sencillamente imposible: cada casilla se
+            movía sola. Acabas de mover el valor de un estado que no estabas tocando. Eso es
+            <strong>generalizar</strong>… y es también la semilla de todos los problemas de estabilidad
+            que veremos en este capítulo y en el siguiente: si al corregir un estado mueves su propio
+            objetivo, ¿quién asegura que la persecución termina?
+          </p>
+        </div>
+
         <p>
           ¿Qué ponemos en $U_t$? Si usáramos el retorno real completo $U_t = G_t$ (estilo
           <a href="06-monte-carlo.html">Monte Carlo</a>), este sí sería el gradiente de verdad de un
@@ -205,10 +231,48 @@
           <p>
             Si derivásemos también el término bootstrap tendríamos el llamado <em>gradiente residual</em>,
             que sí minimiza un objetivo bien definido pero aprende <strong>lento</strong> y persigue el
-            objetivo equivocado (acaba «encontrándose a medio camino» con su propia predicción). El
-            semi-gradiente no es el gradiente de ninguna función de error, así que <strong>no</strong>
-            tiene garantías de convergencia tan limpias… pero en la práctica aprende mucho mejor y es lo
-            que se usa. Es un atajo que casi siempre sale bien.
+            objetivo equivocado (acaba «encontrándose a medio camino» con su propia predicción): en vez
+            de mover la estimación hacia el objetivo, mueve las dos hacia el centro.
+          </p>
+          <p>
+            Y hay una objeción todavía más incómoda, la del <strong>doble muestreo</strong>. Lo que el
+            gradiente residual quiere minimizar es $\big(\mathbb{E}[\delta]\big)^2$, el cuadrado del error
+            de Bellman <em>esperado</em>; lo único que tú puedes calcular con una transición es
+            $\delta^2$, y $\mathbb{E}[\delta^2] \neq \big(\mathbb{E}[\delta]\big)^2$ en cuanto el entorno
+            tiene algo de azar. Para
+            hacerlo bien harían falta <strong>dos muestras independientes de $S_{t+1}$ desde el mismo
+            $S_t$ con la misma acción</strong>: una para el error y otra para el gradiente. Con un
+            simulador que puedas rebobinar, vale; con un robot o con datos ya registrados, imposible. Si
+            no las tienes, el método penaliza también la <em>varianza</em> de la transición y acaba
+            prefiriendo estados aburridos y predecibles a estados buenos.
+          </p>
+          <p>
+            El semi-gradiente no es el gradiente de ninguna función de error, así que <strong>no</strong>
+            tiene garantías de convergencia tan limpias… pero no necesita dos muestras, aprende mucho
+            mejor y es lo que se usa. Es un atajo que casi siempre sale bien.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 ¿A qué converge, entonces?</div>
+          <p>
+            «Sin garantías tan limpias» no quiere decir «sin nada». Para el caso <em>lineal</em> y
+            <em>on-policy</em> hay un resultado clásico muy tranquilizador: TD(0) semi-gradiente converge
+            a un $\mathbf{w}_{\text{TD}}$ concreto —el <strong>punto fijo TD</strong>, el $\mathbf{w}$ que
+            se reproduce a sí mismo cuando lo pasas por la actualización— y ese punto no está lejos del
+            mejor $\mathbf{w}$ posible:
+          </p>
+          <p>$$\overline{VE}(\mathbf{w}_{\text{TD}}) \;\le\; \frac{1}{1-\gamma}\,\min_{\mathbf{w}}\overline{VE}(\mathbf{w})$$</p>
+          <p class="math-note">
+            A la derecha está lo mejor a lo que puede aspirar tu familia de features (lo que conseguiría
+            un oráculo que conociera $v_\pi$); a la izquierda, lo que consigue TD. Aquí se junta por fin
+            el $\overline{VE}$ de la sección anterior con la regla que acabamos de escribir: TD no
+            minimiza $\overline{VE}$, pero se queda dentro de un factor $1/(1-\gamma)$ del mínimo. Ojo a
+            ese factor, que no es inocente: con $\gamma = 0{,}9$ vale $10$ y con $\gamma = 0{,}99$ vale
+            $100$. Es una cota pesimista y en la práctica casi nunca se roza, pero deja claro que cuanto
+            más lejos mira el agente, más caro puede salir el atajo. Y guárdate las dos condiciones de la
+            letra pequeña —<em>lineal</em> y <em>on-policy</em>—, porque en cuanto quitas cualquiera de
+            las dos esta cota se evapora: de eso va «La tríada mortal», un par de secciones más abajo.
           </p>
         </div>
 
@@ -230,6 +294,74 @@
             \mathbf{x}(S_t,A_t)$. Como con tile coding las features son binarias, ese gradiente es un
             vector de ceros y unos: la actualización solo toca los pesos de los mosaicos activos. Si el
             estado es terminal, el término $\gamma\,\hat q(S_{t+1},A_{t+1},\mathbf{w})$ se sustituye por $0$.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 ¿Y cómo se construye $\mathbf{x}(s,a)$?</div>
+          <p>
+            Con el truco más simple que existe: <strong>replicar</strong> las features del estado, un
+            bloque por acción. Si $\mathbf{x}(s)$ ocupa $d$ posiciones y hay $|\mathcal{A}|$ acciones,
+            $\mathbf{x}(s,a)$ tiene $d\cdot|\mathcal{A}|$ posiciones, todas a cero salvo las del bloque
+            que le toca a la acción $a$, donde copiamos $\mathbf{x}(s)$. Así cada acción tiene sus
+            propios pesos y aprender sobre «empujar a la derecha» no contamina a «empujar a la
+            izquierda»… pero sí se comparte entre estados parecidos, que es lo que queríamos.
+          </p>
+          <p>
+            En el código de más abajo lo verás literalmente en una línea:
+            <code>accion * self.bloque + self.activos(estado)</code>. Con 3 acciones, 8 rejillas y
+            $9\times 9$ celdas por rejilla, $\mathbf{w}$ acaba teniendo $3\times 8\times 81 = 1944$
+            componentes… de las que en cada paso solo hay <strong>8</strong> distintas de cero. Por eso
+            nunca construimos el vector entero: basta con la lista de los 8 índices activos, y sumar
+            ocho números sale igual de barato que consultar una tabla.
+          </p>
+        </div>
+
+        <h3 id="sarsa-lambda">SARSA(λ) con features</h3>
+        <p>
+          En el <a href="10-td-lambda.html">capítulo 10</a> prometimos que las trazas de elegibilidad se
+          combinan con las funciones aproximadas «casi sin cambios». Es hora de cobrar la promesa, porque
+          el cambio, aunque cabe en dos líneas de código, tiene mucha miga. La traza deja de ser <em>un número por
+          estado</em> y pasa a ser <strong>un vector del mismo tamaño que $\mathbf{w}$</strong>:
+        </p>
+        <div class="callout math">
+          <div class="callout-title">➗ SARSA(λ) semi-gradiente</div>
+          <p>$$\mathbf{z}_t \;=\; \gamma\lambda\,\mathbf{z}_{t-1} \;+\; \nabla_{\mathbf{w}}\hat q(S_t,A_t,\mathbf{w}), \qquad \mathbf{w} \;\leftarrow\; \mathbf{w} + \alpha\,\delta_t\,\mathbf{z}_t$$</p>
+          <p class="math-note">
+            $\mathbf{z}_t$ es la <strong>traza</strong>, un vector exactamente del mismo tamaño que
+            $\mathbf{w}$ que se reinicia a $\mathbf{0}$ al empezar cada episodio. En el caso lineal el
+            gradiente son las features, así que la traza se limita a acumular las features visitadas,
+            desvaneciéndolas por $\gamma\lambda$ en cada paso. Esa es la versión <em>acumulativa</em>; la
+            de <strong>reemplazo</strong>, que es la que usa el código y la que conviene con features
+            binarias, cambia la suma por una asignación: pone $z_i = 1$ en las componentes activas en vez
+            de sumarles $1$. Fíjate en el cambio de tipo: lo «elegible» ya no son los estados,
+            <strong>son los pesos</strong>. Con tile coding es aún más fácil de leer: cada mosaico que pisas se enciende
+            y se va apagando poco a poco, y el próximo error TD corregirá todos los mosaicos que sigan
+            encendidos, no solo los del paso actual.
+          </p>
+        </div>
+        <p>
+          ¿Compensa? En el ejemplo de este capítulo, mucho. El código de más abajo ya lo trae puesto:
+          llama a <code>entrenar(lam=0.9)</code> en lugar de <code>entrenar()</code> y compáralo. Con
+          traza de <em>reemplazo</em> (<code>z[idx] = 1.0</code>) y $\lambda = 0{,}9$, la media de los
+          diez primeros episodios baja de $617$ a $502$ pasos y la de los diez últimos, de $170$ a
+          $135$ —promediando tres semillas—. Tiene todo el sentido: en Mountain Car el premio llega al
+          final de una cadena larguísima de pasos, y la traza reparte esa noticia hacia atrás de golpe
+          en lugar de esperar a que se propague episodio a episodio. Con $\lambda = 0$ la traza se borra
+          entera en cada paso y recuperas exactamente el SARSA de antes: por eso ese es el valor por
+          defecto.
+        </p>
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Con features, la traza acumulativa es aún más peligrosa</div>
+          <p>
+            Si en el código cambias <code>z[idx] = 1.0</code> por <code>z[idx] += 1.0</code>
+            (traza <strong>acumulativa</strong>) con $\lambda = 0{,}9$ y $\gamma = 1$, este mismo ejemplo
+            se rompe: la media de los diez últimos episodios pasa de $135$ a $1706$ pasos porque casi
+            todos se agotan en el tope de $2000$, o sea, ya ni terminan. Es el mismo accidente que viste en el
+            <a href="10-td-lambda.html">capítulo 10</a> con $\lambda$ cerca de $1$, y aquí es peor,
+            porque con ocho mosaicos activos por paso el paso efectivo sobre un peso muy pisado se
+            multiplica sin freno. Con features, <strong>traza de reemplazo</strong> salvo que tengas un
+            motivo muy bueno.
           </p>
         </div>
 
@@ -255,6 +387,83 @@
             para domesticar el off-policy cuando la función sea una red neuronal.
           </p>
         </div>
+
+        <p>
+          «Pueden divergir» suena a advertencia de folleto. Vamos a verlo con el contraejemplo más
+          pequeño que existe: <strong>dos estados y un solo peso</strong>. Del estado $s_1$ solo se puede
+          ir a $s_2$, todas las recompensas valen $0$ y la feature es un único número: $x(s_1)=1$ y
+          $x(s_2)=2$. Es decir, $\hat v(s_1)=w$ y $\hat v(s_2)=2w$; con un peso para dos estados, tocar
+          uno mueve el otro por fuerza.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Divergencia con todas las recompensas a cero</div>
+          <p>
+            Actualizamos <em>solo</em> la transición $s_1 \to s_2$ (eso es el ingrediente off-policy: la
+            política que genera los datos nunca nos hace actualizar $s_2$). Con $\gamma = 0{,}99$:
+          </p>
+          <p>$$w \;\leftarrow\; w + \alpha\big[\,0 + \gamma\cdot 2w - w\,\big]\cdot 1 \;=\; \big[\,1 + \alpha(2\gamma - 1)\,\big]\,w$$</p>
+          <p class="math-note">
+            Con $\alpha = 0{,}1$ el factor vale $1{,}098$: cada actualización multiplica $w$ por
+            $1{,}098$. Empezando en $w = 1$ salen $1{,}098 \to 1{,}206 \to 1{,}324 \to 1{,}454 \to
+            1{,}596\dots$ y de ahí al infinito. Y no hay ninguna recompensa engañosa que lo explique:
+            <strong>todas valen cero</strong>, así que el valor verdadero de los dos estados es $0$ y
+            $w = 0$ es la solución perfecta. El proceso huye de ella. Lo único que hace falta para que
+            esto ocurra es que $2\gamma > 1$, o sea, casi cualquier $\gamma$ razonable.
+          </p>
+        </div>
+
+        <p>
+          Cuenta los tres ingredientes con el dedo y comprueba que quitando cualquiera de ellos el
+          desastre desaparece:
+        </p>
+        <ul>
+          <li><strong>Sin bootstrapping</strong> (Monte Carlo): el objetivo es el retorno real, que vale
+              $0$. La regla pasa a ser $w \leftarrow w + \alpha(0 - w) = (1-\alpha)\,w$, que se apaga
+              hacia $0$. Perfecto.</li>
+          <li><strong>Sin aproximación</strong> (tabla): $s_1$ y $s_2$ tienen su propia casilla.
+              Actualizar $s_1$ ya no mueve a $s_2$, se rompe el lazo y $V(s_1)$ converge tranquilamente
+              a $\gamma V(s_2)$.</li>
+          <li><strong>Sin off-policy</strong>: si los datos vienen de la política que evaluamos, tarde o
+              temprano hay que actualizar también <em>saliendo</em> de $s_2$. Supón que desde ahí se acaba
+              el episodio: $\delta = 0 - 2w$ y el gradiente es $x(s_2)=2$, así que
+              $w \leftarrow w + \alpha(-2w)\cdot 2 = (1-4\alpha)w = 0{,}6\,w$. Alternando las dos
+              actualizaciones, el factor por vuelta es $1{,}098 \times 0{,}6 = 0{,}659 < 1$ y $w$ se apaga
+              hacia $0$, que es la respuesta correcta. Ese es exactamente el motivo de que SARSA
+              semi-gradiente sea seguro y de que Q-Learning con features no lo sea.</li>
+        </ul>
+        <p>
+          Guárdate este ejemplo: es literalmente el mismo mecanismo —cada actualización sube la diana a
+          la que apunta— que en el <a href="12-dqn.html">capítulo 12</a> obligará a inventar la
+          <em>red objetivo</em>.
+        </p>
+
+        <p>
+          Con todo esto ya se puede resumir en una tabla qué garantías tiene cada uno de los métodos que
+          conoces, según cómo representes el valor:
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Método</th><th>Tabla</th><th>Aproximación lineal</th><th>No lineal (red)</th></tr></thead>
+            <tbody>
+              <tr><td>Monte Carlo on-policy</td><td>converge al valor exacto</td><td>converge al mínimo de $\overline{VE}$</td><td>converge a un mínimo local</td></tr>
+              <tr><td>TD(0) semi-gradiente on-policy</td><td>converge al valor exacto</td><td>converge al <strong>punto fijo TD</strong></td><td>sin garantía</td></tr>
+              <tr><td>SARSA semi-gradiente</td><td>converge</td><td>oscila cerca de la solución (<em>chattering</em>)</td><td>sin garantía</td></tr>
+              <tr><td>Q-Learning (off-policy)</td><td>converge</td><td><strong>puede divergir</strong></td><td><strong>puede divergir</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Lee la tabla en diagonal y verás el drama del capítulo. La única <em>columna</em> entera segura
+          es la de la tabla, justo lo que acabamos de abandonar porque no escala. La única <em>fila</em>
+          entera segura es la de Monte Carlo, justo lo que abandonamos al hacer bootstrapping para no
+          esperar al final del episodio. Y la casilla peligrosa de abajo a la derecha —Q-Learning
+          off-policy con una red— es exactamente donde se va a instalar DQN en el
+          <a href="12-dqn.html">capítulo 12</a>. Que funcione tan bien como funciona no es un teorema:
+          es ingeniería.
+        </p>
 
         <h2 id="tile-coding">Tile coding, en detalle</h2>
         <p>
@@ -329,7 +538,10 @@
         </ol>
         <p class="math-note">
           Dividir la tasa por el número de rejillas $n$ es habitual: como se activan $n$ features a la
-          vez, así el paso efectivo no depende de cuántas rejillas uses.
+          vez, así el paso efectivo no depende de cuántas rejillas uses. En el código encontrarás además
+          un vector <code>z</code>: es la traza de <a href="#sarsa-lambda">SARSA(λ)</a>, que con el valor
+          por defecto <code>lam=0</code> se reduce exactamente a esta actualización (se borra entera en
+          cada paso y solo deja encendidos los mosaicos actuales).
         </p>
 
         <h2 id="ejemplo">Ejemplo: Mountain Car en numpy</h2>
@@ -368,6 +580,8 @@ Este script implementa DESDE CERO, usando solo numpy:
      y la actualización
          w &lt;- w + (alpha / n_mosaicos) * [R + gamma * q_hat(s',a') - q_hat(s,a)] * grad_w q_hat
      donde grad_w q_hat es el propio vector de características (features binarias).
+     Con lam &gt; 0 la actualización usa una traza de elegibilidad de reemplazo:
+     es SARSA(lambda) con features. Prueba entrenar(lam=0.9).
 
 Al terminar dibuja dos gráficas:
   - La curva de aprendizaje (pasos por episodio), que debe DESCENDER.
@@ -475,7 +689,7 @@ def eps_greedy(qs, epsilon, rng, n_acciones):
 # ---------------------------------------------------------------------------
 # 4) SARSA semi-gradiente
 # ---------------------------------------------------------------------------
-def entrenar(n_episodios=50, alpha=0.5, gamma=1.0, epsilon=0.0,
+def entrenar(n_episodios=50, alpha=0.5, gamma=1.0, epsilon=0.0, lam=0.0,
              max_pasos=2000, semilla=0):
     rng = np.random.default_rng(semilla)
     env = MountainCar(rng)
@@ -487,21 +701,24 @@ def entrenar(n_episodios=50, alpha=0.5, gamma=1.0, epsilon=0.0,
     pasos_por_ep = np.zeros(n_episodios, dtype=int)
 
     for ep in range(n_episodios):
+        z = np.zeros(tc.n_features)       # traza de elegibilidad: un vector del tamaño de w
         s = env.reset()
         a = eps_greedy(tc.q_todas(s, w), epsilon, rng, tc.n_acciones)
         for t in range(max_pasos):
             s2, r, terminado = env.step(a)
             idx = tc.indices(s, a)                 # features activas de (s, a)
             q_sa = w[idx].sum()
+            z *= gamma * lam                       # la traza se desvanece
+            z[idx] = 1.0                           # traza de REEMPLAZO (prueba z[idx] += 1.0)
             if terminado:
                 delta = r - q_sa
-                w[idx] += paso_alpha * delta
+                w += paso_alpha * delta * z
                 pasos_por_ep[ep] = t + 1
                 break
             a2 = eps_greedy(tc.q_todas(s2, w), epsilon, rng, tc.n_acciones)
             q_s2a2 = tc.q_todas(s2, w)[a2]
             delta = r + gamma * q_s2a2 - q_sa      # error TD (bootstrapping)
-            w[idx] += paso_alpha * delta
+            w += paso_alpha * delta * z
             s, a = s2, a2
         else:
             pasos_por_ep[ep] = max_pasos           # episodio truncado
@@ -583,18 +800,54 @@ if __name__ == "__main__":
           Pulsa <strong>▶ Ejecutar</strong> (la primera vez tarda unos segundos en descargar Python).
           Verás que el primer episodio se agota explorando —el coche vaga sin llegar a la meta— y que, a
           partir de ahí, los pasos por episodio caen en picado a medida que $\mathbf{w}$ aprende a valorar
-          el impulso. La política final resuelve el valle en unas pocas centenas de pasos. En el mapa de
-          coste por ir se aprecia la típica «espiral»: el valor crece siguiendo la trayectoria que
-          acumula velocidad.
+          el impulso. La política final resuelve el valle en unas pocas centenas de pasos.
+        </p>
+        <p>
+          En el mapa de coste por ir verás una <strong>colina</strong> que se levanta sobre el fondo del
+          valle (posición $\approx -0{,}5$, velocidad $\approx 0$), con una cima de unos $75$: son los
+          estados desde los que todavía quedan unos 75 pasos de trabajo, y por eso son los más «caros».
+          Y verás algo que despista: la superficie se hunde hasta cero en las esquinas y en el borde
+          derecho —casi el $8\,\%$ de la rejilla marca exactamente $0$—. Eso
+          <strong>no</strong> significa que sean estados baratos, sino que el coche no ha pasado nunca por
+          ahí y los pesos de esos mosaicos siguen valiendo $0$ —es la inicialización optimista, que aún
+          no se ha corregido—. Conviene grabarse la lección: donde no hay datos, $\hat q$ no dice la
+          verdad, dice lo que le pusiste al empezar. De hecho, la frontera entre la colina y la zona plana
+          dibuja, más o menos, el conjunto de estados que el agente ha visitado de verdad.
         </p>
 
         <div class="callout intuition">
           <div class="callout-title">🧪 Experimenta</div>
           <p>
-            Cambia <code>n_bins</code> a $4$ (celdas más grandes): generaliza más y aprende antes, pero
-            afina peor. Sube <code>n_mosaicos</code> o baja <code>alpha</code> y observa cómo cambia la
-            velocidad de aprendizaje. Si pones <code>epsilon=0.1</code>, verás que ya no hace falta el
-            inicio optimista para explorar, pero la curva queda algo más ruidosa.
+            Toca <code>n_bins</code>, que fija el tamaño de las celdas (está en la llamada a
+            <code>TileCoder</code>, dentro de <code>entrenar</code>), y mira los dos extremos
+            (los números de abajo son medias de tres semillas, para que no te engañe una ejecución
+            afortunada). Con <code>n_bins=4</code>, celdas grandes, se generaliza mucho y el arranque
+            es fulgurante: los diez primeros episodios bajan de unos $617$ pasos de media a unos
+            $370$. Con <code>n_bins=16</code>, celdas pequeñas, cada estado es casi único, apenas se
+            comparte nada y el arranque es lentísimo (unos $1019$ pasos): es volver hacia la tabla, y
+            a los 50 episodios la política todavía anda por los $299$ pasos frente a los $170$ del
+            original.
+          </p>
+          <p>
+            Fíjate en que las celdas grandes tampoco pagan peaje a corto plazo: con
+            <code>n_bins=4</code> los diez últimos episodios salen incluso algo mejor ($158$ pasos).
+            Su límite es otro y solo asoma si dejas correr el entrenamiento mucho más allá de 50
+            episodios: pon <code>n_episodios=500</code> y verás que <code>n_bins=4</code> se estanca
+            en unos $162$ pasos mientras el original sigue bajando hasta $117$. Con celdas tan bastas
+            hay detalles de la frontera de decisión que <em>no se pueden representar</em>, hagas los
+            ajustes que hagas.
+          </p>
+          <p>
+            Prueba también <code>epsilon=0.1</code>: la curva se vuelve claramente más ruidosa —la
+            desviación típica de los 20 últimos episodios sube de $27{,}9$ a $33{,}7$ pasos— sin
+            ganar nada a cambio. Con todas las recompensas a $-1$ y $\mathbf{w} = \mathbf{0}$, el
+            inicio optimista ya explora solo; aquí la $\varepsilon$ únicamente añade ruido.
+          </p>
+          <p>
+            Y para terminar, enciende las trazas: cambia <code>entrenar()</code> por
+            <code>entrenar(lam=0.9)</code> en la última parte del programa. Es el cambio que más mejora
+            de todos los que puedes probar aquí —de $170$ a $135$ pasos en los diez últimos episodios—,
+            y ya lo tienes explicado en la sección de <a href="#sarsa-lambda">SARSA(λ)</a>.
           </p>
         </div>
 
@@ -614,9 +867,9 @@ if __name__ == "__main__":
 <span class="comment"># 3) ejecuta el ejemplo</span>
 <span class="prompt">$</span> python code/11-aproximacion-funciones/aprox_funciones_mountaincar.py
 <span class="comment">Episodio 1  :  2000 pasos (aún explorando)
-Último ep.  :   ~200 pasos
-Mejor ep.   :   ~120 pasos
-Política greedy final: ~175 pasos de media en 5 arranques</span></pre>
+Último ep.  :   199 pasos
+Mejor ep.   :   115 pasos
+Política greedy final: 174.6 pasos de media en 5 arranques</span></pre>
         </div>
         <p class="pyodide-banner">
           💡 Este ejemplo corre entero en el navegador (solo numpy y matplotlib). Los ejemplos con
@@ -647,8 +900,9 @@ Política greedy final: ~175 pasos de media en 5 arranques</span></pre>
             <li>La <strong>tabla no escala</strong>: la sustituimos por $\hat v(s,\mathbf{w})=\mathbf{w}^{\top}\mathbf{x}(s)$, que <strong>generaliza</strong> entre estados parecidos.</li>
             <li>Las <strong>features</strong> $\mathbf{x}(s)$ describen el estado con números; <strong>tile coding</strong> es una elección barata, dispersa y robusta.</li>
             <li>Optimizamos el <strong>error cuadrático medio ponderado</strong> $\overline{VE}$ con <strong>SGD</strong>; en el caso lineal el gradiente son las propias features.</li>
-            <li>La actualización TD es <strong>semi-gradiente</strong>: tratamos el objetivo bootstrap como una constante y no lo derivamos.</li>
-            <li>Cuidado con la <strong>tríada mortal</strong> (bootstrapping + aproximación + off-policy): puede divergir. SARSA on-policy es seguro.</li>
+            <li>La actualización TD es <strong>semi-gradiente</strong>: tratamos el objetivo bootstrap como una constante y no lo derivamos. En el caso lineal on-policy converge al <strong>punto fijo TD</strong>, dentro de un factor $1/(1-\gamma)$ del mejor $\mathbf{w}$ posible.</li>
+            <li>Las <strong>trazas</strong> del <a href="10-td-lambda.html">capítulo 10</a> se trasladan casi tal cual: solo cambia el tipo, de un número por estado a un vector del tamaño de $\mathbf{w}$.</li>
+            <li>Cuidado con la <strong>tríada mortal</strong> (bootstrapping + aproximación + off-policy): puede divergir, y basta un ejemplo de dos estados y un peso para verlo. SARSA on-policy es seguro.</li>
             <li>Si la función es una <strong>red neuronal</strong>, esto es <strong>deep RL</strong>: el puente al <a href="12-dqn.html">capítulo 12 (DQN)</a>.</li>
           </ul>
         </div>

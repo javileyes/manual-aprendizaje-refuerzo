@@ -16,7 +16,8 @@ desde los bandidos multibrazo hasta PPO y el RLHF que hay detrás de los grandes
 modelos de lenguaje— apoyándote siempre en explicaciones intuitivas y ejemplos.
 
 - **22 capítulos** en 5 partes, del bucle agente-entorno a RLHF.
-- **28 scripts de Python**, todos ejecutados y verificados.
+- **29 scripts de Python**, todos ejecutados y verificados: cada cifra y cada salida
+  de terminal que aparece en el manual sale de una ejecución real, nunca escrita a mano.
 - Los algoritmos profundos van en **doble versión**: una *desde cero* en NumPy
   (ejecutable en el navegador) y otra idiomática con **PyTorch + Gymnasium**.
 

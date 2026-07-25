@@ -10,6 +10,8 @@ Este script implementa DESDE CERO, usando solo numpy:
      y la actualización
          w <- w + (alpha / n_mosaicos) * [R + gamma * q_hat(s',a') - q_hat(s,a)] * grad_w q_hat
      donde grad_w q_hat es el propio vector de características (features binarias).
+     Con lam > 0 la actualización usa una traza de elegibilidad de reemplazo:
+     es SARSA(lambda) con features. Prueba entrenar(lam=0.9).
 
 Al terminar dibuja dos gráficas:
   - La curva de aprendizaje (pasos por episodio), que debe DESCENDER.
@@ -117,7 +119,7 @@ def eps_greedy(qs, epsilon, rng, n_acciones):
 # ---------------------------------------------------------------------------
 # 4) SARSA semi-gradiente
 # ---------------------------------------------------------------------------
-def entrenar(n_episodios=50, alpha=0.5, gamma=1.0, epsilon=0.0,
+def entrenar(n_episodios=50, alpha=0.5, gamma=1.0, epsilon=0.0, lam=0.0,
              max_pasos=2000, semilla=0):
     rng = np.random.default_rng(semilla)
     env = MountainCar(rng)
@@ -129,21 +131,24 @@ def entrenar(n_episodios=50, alpha=0.5, gamma=1.0, epsilon=0.0,
     pasos_por_ep = np.zeros(n_episodios, dtype=int)
 
     for ep in range(n_episodios):
+        z = np.zeros(tc.n_features)       # traza de elegibilidad: un vector del tamaño de w
         s = env.reset()
         a = eps_greedy(tc.q_todas(s, w), epsilon, rng, tc.n_acciones)
         for t in range(max_pasos):
             s2, r, terminado = env.step(a)
             idx = tc.indices(s, a)                 # features activas de (s, a)
             q_sa = w[idx].sum()
+            z *= gamma * lam                       # la traza se desvanece
+            z[idx] = 1.0                           # traza de REEMPLAZO (prueba z[idx] += 1.0)
             if terminado:
                 delta = r - q_sa
-                w[idx] += paso_alpha * delta
+                w += paso_alpha * delta * z
                 pasos_por_ep[ep] = t + 1
                 break
             a2 = eps_greedy(tc.q_todas(s2, w), epsilon, rng, tc.n_acciones)
             q_s2a2 = tc.q_todas(s2, w)[a2]
             delta = r + gamma * q_s2a2 - q_sa      # error TD (bootstrapping)
-            w[idx] += paso_alpha * delta
+            w += paso_alpha * delta * z
             s, a = s2, a2
         else:
             pasos_por_ep[ep] = max_pasos           # episodio truncado

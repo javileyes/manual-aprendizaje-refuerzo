@@ -161,11 +161,74 @@
             </ul>
           </li>
         </ol>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Dos trampas al implementarlo</div>
+          <p>
+            <strong>1. Sortear $A'$ dos veces.</strong> El último paso del bucle es «avanza
+            $S \leftarrow S'$ <em>y</em> $A \leftarrow A'$» —en el programa de más abajo,
+            <code>s, a = s_sig, a_sig</code> y no solo <code>s = s_sig</code>—: la acción con la que
+            construimos el objetivo es la que <em>ejecutamos</em> a continuación. Si la tiras y vuelves
+            a sortear al empezar la vuelta siguiente, no explota nada: el segundo sorteo sale de la
+            misma distribución, así que estimas la misma esperanza. De hecho, en el problema que
+            montaremos dentro de un momento esa versión saca hasta un pelín mejor ($-24{,}1$ de
+            recompensa media frente a $-28{,}6$, promediando seis semillas) y con la semilla del
+            ejemplo aprende exactamente el mismo camino. Pero ya no
+            estás evaluando la acción que tomas, y ese «ya no» es justo lo que le da nombre y sentido a
+            SARSA. Q-learning sí puede permitirse volver a sortear, porque su objetivo no depende de
+            $A'$.
+          </p>
+          <p>
+            <strong>2. Olvidar que el valor de un estado terminal es cero.</strong> Cuando $S'$ es
+            terminal no hay futuro que arrastrar y el objetivo debe ser $R_{t+1}$ a secas; en el código
+            lo verás como el factor <code>(0.0 if fin else 1.0)</code> que multiplica al valor siguiente.
+            En <em>este</em> programa concreto da igual —lo hemos comprobado: como llegar a la meta corta
+            el episodio, $Q(\text{meta}, \cdot)$ se queda en cero para siempre y nadie la actualiza
+            nunca—, pero en cuanto una red neuronal generalice de unos estados a otros,
+            $Q(\text{terminal}, \cdot)$ valdrá lo que le apetezca y ese factor será la diferencia entre
+            que el agente aprenda o no.
+          </p>
+          <p>
+            Y ahí viene el matiz traicionero: si cortas el episodio por <strong>límite de pasos</strong>
+            (nuestro <code>max_pasos</code>), eso <em>no</em> es un estado terminal. El mundo sigue
+            existiendo, solo se te acabó el tiempo de mirarlo, así que ahí sí hay que seguir haciendo
+            <em>bootstrapping</em>. Confundir «se acabó el tiempo» con «se acabó el mundo» es un error
+            que reaparece en cuanto los entornos traen su propio límite de pasos; lo verás escrito como
+            <code>(1.0 - term)</code>, y con la distinción entre «terminado» y «truncado» hecha
+            explícita, en el <a href="12-dqn.html#matematicas">capítulo 12</a>.
+          </p>
+        </div>
+
         <p>
           A medida que $Q$ mejora, la política $\varepsilon$-greedy derivada de ella también mejora:
           es la GPI en acción, un paso de TD cada vez. Con el tiempo suele reducirse $\varepsilon$ para
           converger hacia una política casi codiciosa.
         </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 ¿SARSA encuentra la política óptima?</div>
+          <p>
+            Sí, pero con dos condiciones, y conviene separarlas porque se cumplen por caminos distintos.
+            La primera es sobre la <strong>política</strong>: hay que explorar infinitamente y, a la vez,
+            volverse codicioso en el límite. Es la condición <strong>GLIE</strong> (<em>Greedy in the
+            Limit with Infinite Exploration</em>) que ya apareció en el
+            <a href="06-monte-carlo.html#control">control de Monte Carlo</a>: cada par $(s, a)$ se visita
+            infinitas veces y $\varepsilon \to 0$. Con $\varepsilon$ clavado en $0{,}1$, como en nuestro
+            código, la segunda mitad no se cumple; por eso lo que aprendemos no es $\pi^*$, sino la mejor
+            política de entre las $\varepsilon$-greedy. Ojo, que esto no es un defecto del programa: es
+            exactamente lo que hace que SARSA rodee el acantilado.
+          </p>
+          <p>
+            La segunda es sobre el <strong>paso</strong>: son las condiciones de Robbins-Monro,
+            $\sum_t \alpha_t = \infty$ y $\sum_t \alpha_t^2 &lt; \infty$. La primera dice «que quede
+            cuerda suficiente para llegar a cualquier sitio desde donde arrancaste»; la segunda, «que el
+            ruido se acabe apagando». Un $\alpha$ constante, como el $0{,}5$ del ejemplo, cumple la
+            primera y viola la segunda: por eso $Q$ nunca se queda del todo quieta y sigue temblando
+            alrededor del valor bueno. Es el mismo compromiso del
+            <a href="02-bandido-multibrazo.html#paso-constante">paso constante del bandido</a>: se
+            renuncia a converger a cambio de poder seguir adaptándose.
+          </p>
+        </div>
 
         <h2 id="expected-sarsa">Una variante: Expected SARSA</h2>
         <p>
@@ -186,7 +249,9 @@
             $\varepsilon$-greedy). Al usar el valor esperado en lugar de una muestra, el objetivo tiene
             <strong>menor varianza</strong>, lo que suele traducirse en un aprendizaje más estable y a
             veces permite tasas $\alpha$ mayores. El coste es un poco más de cálculo por paso (recorrer
-            todas las acciones). Curiosidad: si la política objetivo fuese la codiciosa, Expected SARSA
+            todas las acciones). No te lo creas todavía: <a href="#expected-sarsa-medido">al final del
+            capítulo lo mediremos</a> sobre el acantilado, y la diferencia es mayor de lo que suena.
+            Curiosidad: si la política objetivo fuese la codiciosa, Expected SARSA
             coincidiría con Q-learning; ese puente lo cruzaremos en el próximo capítulo.
           </p>
         </div>
@@ -254,13 +319,39 @@
           aprende a rodearlo. Es literalmente miedo a caerse mientras exploras.
         </p>
 
+        <div class="callout math">
+          <div class="callout-title">➗ El miedo, con números</div>
+          <p>$$\underbrace{0{,}975}_{\text{no te caes}} \cdot (-1) \;+\; \underbrace{0{,}025}_{\text{te caes}} \cdot (-100) \;=\; -3{,}475$$</p>
+          <p class="math-note">
+            Hagamos la cuenta con $\varepsilon = 0{,}1$ para una casilla pegada al borde. La política
+            quiere ir a la derecha, pero con probabilidad $\varepsilon / |\mathcal{A}| = 0{,}1/4 =
+            0{,}025$ el sorteo elige «abajo» y te manda al vacío. El coste esperado de pisar esa casilla
+            no es $-1$: es $-3{,}475$. Y hay <strong>diez</strong> casillas así entre la salida y la
+            meta, así que ir por el borde lleva un recargo de $10 \times (-2{,}475) = -24{,}75$ sobre el
+            precio de los pasos. ¿Y cuánto cuesta rodear? Subir dos filas y volver a bajarlas son cuatro
+            pasos de más: $-4$. Veinticinco contra cuatro. No hay color, y por eso SARSA se aparta.
+          </p>
+        </div>
+
+        <p>
+          La cuenta predice la <em>dirección</em>, no la fila exacta —para eso habría que encadenar el
+          riesgo de varios pasos seguidos—, pero aguanta sorprendentemente bien: con
+          $\varepsilon = 0{,}01$ el recargo se queda en $-2{,}475$, apenas por encima de los $-2$ que
+          cuesta apartarse <em>una sola</em> fila, y eso es exactamente lo que aprende SARSA cuando lo
+          pruebas. Lo verás medido en unas líneas. Y es una estimación por lo bajo, porque caerse no
+          solo cuesta $-100$: además te devuelve a la salida y hay que rehacer el camino entero.
+        </p>
+
         <h2 id="ejemplo">SARSA en Python, sobre el acantilado</h2>
         <p>
           Vamos a implementar el entorno a mano con numpy (sin librerías de RL) y entrenar SARSA durante
           500 episodios. Al final dibujaremos dos cosas: la <strong>recompensa por episodio</strong>
           (suavizada, para ver cómo mejora) y la <strong>política aprendida</strong> como flechas sobre
-          la rejilla. Este mismo entorno <code>CliffWalking</code> lo reutilizaremos en el capítulo 9
-          para comparar con Q-learning.
+          la rejilla. El mismo problema del acantilado reaparecerá en el
+          <a href="09-q-learning.html">capítulo 9</a> para comparar SARSA con Q-learning; allí lo verás
+          escrito de forma más compacta, con funciones sueltas en lugar de una clase, para que las dos
+          reglas de actualización queden una al lado de la otra dentro de la misma función y compruebes
+          de un vistazo que entre los dos algoritmos solo cambia una línea.
         </p>
 
         <div class="code-example" data-packages="numpy,matplotlib">
@@ -463,12 +554,26 @@ if __name__ == "__main__":
         <div class="callout intuition">
           <div class="callout-title">🧪 Experimenta</div>
           <p>
-            Cambia $\varepsilon$ (parámetro <code>epsilon</code>) a un valor mayor, como $0{,}3$, y
-            vuelve a ejecutar. Con más exploración, SARSA se vuelve <em>aún más</em> conservador: se aleja
-            todavía más del acantilado, porque el riesgo de un paso aleatorio fatal es mayor. Y si pones
-            $\varepsilon$ muy pequeño (por ejemplo $0{,}01$), la política aprendida se pegará más al
-            borde, acercándose al camino óptimo. Esa sensibilidad a la exploración es la firma del
-            aprendizaje on-policy.
+            Baja $\varepsilon$ (parámetro <code>epsilon</code>) a $0{,}01$ y vuelve a ejecutar. Con casi
+            nada de exploración, acercarse al borde deja de dar miedo: SARSA aprende un camino de
+            <strong>15 pasos</strong> que deja una sola fila de margen con el borde, y la recompensa media
+            de los últimos 50 episodios sube de $-28{,}8$ a $-15{,}3$. Con $\varepsilon = 0{,}1$ eran
+            $17$ pasos por la fila de arriba del todo. La política aprendida ha cambiado <em>sin que
+            haya cambiado el entorno</em>: eso es la firma del aprendizaje on-policy.
+          </p>
+          <p>
+            Ahora prueba lo contrario, $\varepsilon = 0{,}3$, y prepárate para una sorpresa: no es que
+            SARSA se vuelva <em>aún más</em> prudente —ya iba por la fila más alta, no hay dónde huir—,
+            es que la cosa se rompe. La recompensa media se desploma hasta $-107{,}3$ y la política
+            greedy que imprime el programa ni siquiera llega a la meta: desde la casilla de salida
+            apunta a la izquierda, contra la pared. Con tanta exploración el agente se pasa media vida
+            despeñándose, la señal de aprendizaje queda ahogada bajo el ruido de los $-100$ y un
+            $\alpha = 0{,}5$ es demasiado agresivo para digerirla. Que la culpa es de los dos
+            parámetros a la vez lo delata una prueba rápida: deja $\varepsilon = 0{,}3$ pero baja
+            $\alpha$ a $0{,}2$ y el agente vuelve a encontrar su camino de 17 pasos, con una media de
+            $-27{,}3$. Es una lección honesta: $\varepsilon$ no es un dial de «prudencia», es un dial
+            de <em>cuánta basura metes en tus propios datos</em>, y cuanta más metes, más pequeño
+            tiene que ser el paso con el que la digieres.
           </p>
         </div>
 
@@ -502,6 +607,43 @@ Politica greedy (0=arriba 1=derecha 2=abajo 3=izquierda):
           mismo con la semilla fijada.
         </p>
 
+        <h2 id="expected-sarsa-medido">Y Expected SARSA, ¿cuánto mejora?</h2>
+        <p>
+          Prometimos más arriba que promediar sobre las acciones en vez de muestrear una reduce la
+          varianza del objetivo. Toca cobrar la promesa. El cambio en el programa son cuatro líneas: en
+          lugar de <code>objetivo = r + gamma * Q[s_sig, a_sig] * (...)</code>, construyes el vector de
+          probabilidades $\varepsilon$-greedy en <code>s_sig</code> (un $\varepsilon/4$ para todas, más
+          el $1-\varepsilon$ repartido entre las que empatan a máximo) y lo multiplicas por
+          <code>Q[s_sig]</code>. El resto del bucle no se toca: <code>a_sig</code> se sigue sorteando,
+          porque hace falta para <em>actuar</em>; lo que desaparece es su papel en el objetivo.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>$\alpha$</th><th>SARSA</th><th>Expected SARSA</th></tr></thead>
+            <tbody>
+              <tr><td>$0{,}5$</td><td>$-28{,}8$ · camino de 17 pasos</td><td>$-23{,}6$ · camino de 15 pasos</td></tr>
+              <tr><td>$1{,}0$</td><td>$-124{,}6$ · <strong>no llega a la meta</strong></td><td>$-21{,}5$ · camino de 15 pasos</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          La cifra es la recompensa media de los últimos 50 episodios tras entrenar 500, con
+          $\varepsilon = 0{,}1$ y la semilla $0$; al lado, la longitud del camino que sigue la política
+          greedy resultante. Con $\alpha = 0{,}5$ Expected SARSA ya va algo mejor. Con $\alpha = 1$ —una
+          tasa brutal, que reescribe entera cada estimación en cada paso— SARSA se desmorona hasta
+          $-124{,}6$ y su política greedy ni siquiera llega a la meta, mientras que Expected SARSA sigue
+          tan tranquilo en $-21{,}5$. Y no es cosa de la semilla: promediando seis (de la $0$ a la $5$),
+          SARSA da $-28{,}6$ y $-126{,}1$, y Expected SARSA $-19{,}9$ y $-18{,}8$, con el mismo camino de
+          15 pasos en las seis. Eso es lo que compra quitarle al objetivo el ruido del muestreo: poder
+          ser mucho más agresivo con $\alpha$ sin pagarlo.
+        </p>
+        <p>
+          Fíjate además en que Expected SARSA se conforma con apartarse <em>una</em> fila del borde en
+          vez de dos. Sigue siendo on-policy y sigue teniendo miedo, pero es un miedo mejor calibrado:
+          le sale de promediar exactamente sobre la política, no de la mala suerte de unos cuantos
+          sorteos.
+        </p>
+
         <h2 id="sarsa-vs-q">Lo que viene: SARSA frente a Q-learning</h2>
         <p>
           SARSA aprende el valor de <em>su</em> política, la que realmente sigue. Eso tiene una
@@ -533,7 +675,7 @@ Politica greedy (0=arriba 1=derecha 2=abajo 3=izquierda):
             <li>SARSA actualiza $Q(S_t, A_t)$ hacia $R_{t+1} + \gamma\,Q(S_{t+1}, A_{t+1})$ usando la quíntupla $(S, A, R, S', A')$.</li>
             <li>Es <strong>on-policy</strong>: evalúa y mejora la misma política $\varepsilon$-greedy que usa para actuar, exploración incluida.</li>
             <li>Por eso aprende conductas <strong>prudentes</strong>: en el acantilado, rodea el borde para no caerse al explorar.</li>
-            <li><strong>Expected SARSA</strong> reemplaza la acción muestreada por su esperanza bajo $\pi$, reduciendo la varianza del objetivo.</li>
+            <li><strong>Expected SARSA</strong> reemplaza la acción muestreada por su esperanza bajo $\pi$, reduciendo la varianza del objetivo: en el acantilado aguanta $\alpha = 1$ sin despeinarse, donde SARSA se desmorona.</li>
           </ul>
         </div>
 

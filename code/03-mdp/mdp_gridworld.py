@@ -105,6 +105,43 @@ class GridWorld:
         return self._a_estado(self.pos), -1.0, False
 
 
+def dinamica(env, s, a):
+    """La función P del MDP: devuelve p(s', r | s, a) como {(s', r): prob}.
+
+    step() TIRA LOS DADOS; esta función DESCRIBE los dados. Recorre las
+    direcciones reales posibles (la elegida con probabilidad 1-slip, cada
+    perpendicular con slip/2), calcula a dónde llevan y con qué recompensa,
+    y acumula la probabilidad de cada par (s', r).
+    """
+    pos = divmod(s, env.cols)
+    if pos == env.meta:
+        # Estado terminal absorbente: se queda donde está y no cobra nada más.
+        return {(s, 0.0): 1.0}
+
+    # Probabilidad de que la dirección REAL sea cada una.
+    reales = {a: 1.0 - env.slip}
+    for perp in PERPENDICULARES[a]:
+        reales[perp] = reales.get(perp, 0.0) + env.slip / 2.0
+
+    p = {}
+    for accion_real, prob in reales.items():
+        if prob == 0.0:      # con slip=0 las perpendiculares no llegan a ocurrir
+            continue
+        destino = env._mover(pos, accion_real)
+        s2 = destino[0] * env.cols + destino[1]
+        r = 10.0 if destino == env.meta else -1.0
+        p[(s2, r)] = p.get((s2, r), 0.0) + prob
+    return p
+
+
+def mostrar_dinamica(env, s, a):
+    """Imprime la tabla p(s', r | s, a) de un par (s, a) y comprueba que suma 1."""
+    p = dinamica(env, s, a)
+    for (s2, r), prob in p.items():
+        print(f"  p(s'={s2:>2}, r={r:>3.0f} | s={s}, a={NOMBRES[a]}) = {prob:.2f}")
+    print(f"  suma = {sum(p.values()):.2f}")
+
+
 def politica_aleatoria(rng):
     """Política pi(a|s) uniforme: elige una de las 4 acciones al azar."""
     return int(rng.integers(4))
@@ -189,12 +226,19 @@ if __name__ == "__main__":
     env = GridWorld(slip=0.1, seed=0)
     rng = np.random.default_rng(0)   # semilla fija: resultados reproducibles
 
-    print("=== Una trayectoria bajo política aleatoria pi(a|s) uniforme ===")
+    print("=== La dinámica p(s', r | s, a), con números ===")
+    print("Desde la casilla 0, hacia el Este:")
+    mostrar_dinamica(env, 0, 2)
+    print("Desde la casilla 23, hacia el Este (la meta está al lado):")
+    mostrar_dinamica(env, 23, 2)
+
+    print("\n=== Una trayectoria bajo política aleatoria pi(a|s) uniforme ===")
     muestrear_trayectoria(env, rng, max_pasos=30)
 
     print("\n=== Retorno medio por Monte Carlo (política aleatoria) ===")
-    retornos = estimar_retorno(env, rng, gamma=0.95, episodios=300, max_pasos=200)
-    print(f"gamma = 0.95   episodios = {len(retornos)}")
+    gamma = 0.95
+    retornos = estimar_retorno(env, rng, gamma=gamma, episodios=300, max_pasos=200)
+    print(f"gamma = {gamma}   episodios = {len(retornos)}")
     print(f"Retorno medio G_0 ≈ {retornos.mean():.2f}"
           f"   (desviación {retornos.std():.2f})")
 

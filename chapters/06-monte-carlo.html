@@ -239,7 +239,8 @@
         <h2 id="control">Control de Monte Carlo (GPI)</h2>
         <p>
           Ya tenemos las piezas para <strong>aprender la política óptima sin modelo</strong>. La receta
-          es la <strong>iteración generalizada de política</strong> (GPI) que viste en el capítulo 5:
+          es la <strong>iteración generalizada de política</strong> (GPI) que viste en el
+          <a href="05-programacion-dinamica.html">capítulo 5</a>:
           alternar <em>evaluación</em> (estimar $Q$ de la política actual) y <em>mejora</em> (hacer la
           política más greedy respecto a $Q$). La novedad es que ahora la evaluación se hace con Monte
           Carlo, episodio a episodio.
@@ -264,14 +265,130 @@
           </ol>
         </div>
 
+        <h3>El recorrido hacia atrás, con números</h3>
         <p>
           El recorrido <em>hacia atrás</em> es un detalle precioso: como $G_t = R_{t+1} + \gamma\,G_{t+1}$,
           calcular los retornos de fin a principio nos deja acumular $G$ con una sola multiplicación por
-          paso, sin recalcular sumas. Sobre la convergencia, un resultado clásico (llamado
-          <strong>GLIE</strong>, <em>Greedy in the Limit with Infinite Exploration</em>) garantiza que si
-          $\varepsilon$ decae poco a poco hacia $0$ mientras se siguen visitando todos los pares, el
-          control MC converge a la política óptima. Por eso, en el código, iremos <strong>reduciendo
-          $\varepsilon$</strong> a medida que el agente aprende.
+          paso, sin recalcular sumas. Hagámoslo a mano una vez, porque verlo con cifras vale más que
+          cualquier explicación.
+        </p>
+        <p>
+          Tomamos un episodio de <strong>7 pasos</strong> en el gridworld que usaremos en el ejemplo:
+          una cuadrícula 4×4 con paredes en $(1,1)$ y $(2,2)$, salida en $(0,0)$, meta en $(3,3)$, cada
+          paso $-1$ y la meta $+10$, con $\gamma = 0{,}95$. El agente sale hacia la derecha, en $(0,1)$
+          intenta bajar y <strong>choca con la pared</strong> (se queda donde está, pero el paso le cuesta
+          igual), y a partir de ahí ya va directo. Rellenamos la columna $G_t$ de abajo arriba:
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>$t$</th><th>$S_t$</th><th>$A_t$</th><th>$R_{t+1}$</th><th>$G_t = R_{t+1} + \gamma\,G_{t+1}$</th></tr></thead>
+            <tbody>
+              <tr><td>0</td><td>$(0,0)$</td><td>derecha</td><td>$-1$</td><td>$-1 + 0{,}95\cdot 3{,}21 = \mathbf{2{,}05}$</td></tr>
+              <tr><td>1</td><td>$(0,1)$</td><td>abajo <em>(choca)</em></td><td>$-1$</td><td>$-1 + 0{,}95\cdot 4{,}44 = \mathbf{3{,}21}$</td></tr>
+              <tr><td>2</td><td>$(0,1)$</td><td>derecha</td><td>$-1$</td><td>$-1 + 0{,}95\cdot 5{,}72 = \mathbf{4{,}44}$</td></tr>
+              <tr><td>3</td><td>$(0,2)$</td><td>derecha</td><td>$-1$</td><td>$-1 + 0{,}95\cdot 7{,}08 = \mathbf{5{,}72}$</td></tr>
+              <tr><td>4</td><td>$(0,3)$</td><td>abajo</td><td>$-1$</td><td>$-1 + 0{,}95\cdot 8{,}50 = \mathbf{7{,}08}$</td></tr>
+              <tr><td>5</td><td>$(1,3)$</td><td>abajo</td><td>$-1$</td><td>$-1 + 0{,}95\cdot 10{,}00 = \mathbf{8{,}50}$</td></tr>
+              <tr><td>6</td><td>$(2,3)$</td><td>abajo</td><td>$+10$</td><td>$+10 + 0{,}95\cdot 0 = \mathbf{10{,}00}$</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Fíjate en que la tabla se rellena <strong>de la última fila a la primera</strong>: cada $G_t$
+          reutiliza el $G_{t+1}$ que acabas de escribir justo debajo. Ese es literalmente el bucle
+          <code>for t in range(len(estados) - 1, -1, -1)</code> del código. Y observa cómo el $+10$ del
+          final se va propagando hacia arriba, perdiendo un $5\,\%$ en cada escalón hacia atrás: eso es
+          $\gamma$ repartiendo el mérito. (En la última columna multiplicamos por el valor
+          <em>exacto</em> de la fila de abajo, no por su versión redondeada a dos decimales; si rehaces
+          las cuentas con la calculadora, el último dígito puede bailarte una unidad.)
+        </p>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ «Primera visita» ¿de qué, exactamente?</div>
+          <p>
+            La casilla $(0,1)$ aparece <strong>dos veces</strong> en el episodio, en $t=1$ y en $t=2$.
+            Si estuviéramos estimando $V$, el MC de <em>primera visita</em> se quedaría solo con
+            $G_1 = 3{,}21$, y el de <em>cada visita</em> promediaría $3{,}21$ y $4{,}44$, es decir,
+            $3{,}82$. Ahí está la diferencia entre las dos convenciones, en dos números.
+          </p>
+          <p>
+            Pero el código no estima $V$, estima $Q$, y eso cambia el reparto: la primera visita se
+            comprueba sobre el <strong>par $(S_t, A_t)$</strong>, no sobre el estado. Y aquí los dos
+            pares son distintos —$\bigl((0,1),\text{abajo}\bigr)$ y $\bigl((0,1),\text{derecha}\bigr)$—,
+            así que <strong>ambos cuentan como primera visita</strong> y el episodio actualiza los dos.
+            Míralo en el código: el diccionario <code>primera</code> se indexa por
+            <code>zip(estados, acciones)</code>, no por <code>estados</code>. Es lo correcto —queremos
+            una muestra para cada acción probada—, pero explica por qué un mismo episodio puede tocar la
+            misma casilla varias veces sin dejar de ser «de primera visita».
+          </p>
+        </div>
+
+        <h3>¿Y esto mejora de verdad? La versión $\varepsilon$-greedy del teorema de mejora</h3>
+        <p>
+          El <a href="05-programacion-dinamica.html#mejora">teorema de mejora de política</a> del
+          capítulo 5 nos garantizaba que volverse greedy respecto a $Q^\pi$ nunca empeora. Pero aquí no
+          nos volvemos greedy: nos volvemos $\varepsilon$-greedy, que es una versión <em>deliberadamente
+          torpe</em> de la greedy. ¿Sigue valiendo la garantía? Sí, y la cuenta es corta y bonita.
+        </p>
+        <p>
+          Sea $\pi$ cualquier política $\varepsilon$-soft y sea $\pi'$ la $\varepsilon$-greedy respecto a
+          $Q^\pi$. Basta comprobar que $\pi'$ pasa el examen del teorema, es decir, que
+          $\sum_a \pi'(a\mid s)\,Q^\pi(s,a) \ge V^\pi(s)$. (En el capítulo 5 escribimos el teorema para
+          una $\pi'$ <em>determinista</em>, con el término $Q^\pi\bigl(s,\pi'(s)\bigr)$; para una $\pi'$
+          estocástica la cadena de desigualdades es exactamente la misma cambiando ese término por la
+          media $\sum_a \pi'(a\mid s)\,Q^\pi(s,a)$.)
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La cuenta, en cuatro líneas</div>
+          <p>$$\begin{aligned}
+          \sum_a \pi'(a\mid s)\,Q^\pi(s,a)
+          &amp;= \frac{\varepsilon}{|\mathcal{A}|}\sum_a Q^\pi(s,a) \;+\; (1-\varepsilon)\,\max_a Q^\pi(s,a) \\[0.4em]
+          &amp;\ge \frac{\varepsilon}{|\mathcal{A}|}\sum_a Q^\pi(s,a) \;+\; (1-\varepsilon)\sum_a \frac{\pi(a\mid s) - \varepsilon/|\mathcal{A}|}{1-\varepsilon}\,Q^\pi(s,a) \\[0.4em]
+          &amp;= \frac{\varepsilon}{|\mathcal{A}|}\sum_a Q^\pi(s,a) \;+\; \sum_a \pi(a\mid s)\,Q^\pi(s,a) \;-\; \frac{\varepsilon}{|\mathcal{A}|}\sum_a Q^\pi(s,a) \\[0.4em]
+          &amp;= \sum_a \pi(a\mid s)\,Q^\pi(s,a) \;=\; V^\pi(s)
+          \end{aligned}$$</p>
+          <p class="math-note">
+            Toda la gracia está en el paso de la desigualdad, y descansa en una perogrullada: <strong>un
+            máximo nunca es menor que una media ponderada</strong>. Los pesos que hemos elegido son
+            $w_a = \frac{\pi(a\mid s) - \varepsilon/|\mathcal{A}|}{1-\varepsilon}$, y son unos pesos
+            legítimos porque (a) <strong>no son negativos</strong> —justo porque $\pi$ es
+            $\varepsilon$-soft, o sea $\pi(a\mid s)\ge\varepsilon/|\mathcal{A}|$— y (b)
+            <strong>suman 1</strong>: $\sum_a w_a = \frac{1 - \varepsilon}{1-\varepsilon} = 1$. Elegidos
+            así, las dos últimas líneas se cancelan solas y aparece $V^\pi(s)$. Con eso, el teorema de
+            mejora del capítulo 5 concluye $V^{\pi'}(s) \ge V^\pi(s)$ en todos los estados.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La letra pequeña: converge, pero ¿a qué?</div>
+          <p>
+            Vuelve al paso de la desigualdad: cuando se convierte en igualdad, la mejora se ha agotado
+            y $V^{\pi'} = V^\pi$… pero solo <em>dentro de la familia $\varepsilon$-soft</em>. Es decir, el
+            control MC $\varepsilon$-greedy con $\varepsilon$ fija converge a la <strong>mejor política
+            $\varepsilon$-soft</strong>, no a $\pi^*$. Y no puede ser de otro modo: una política obligada
+            a tirar el dado una fracción $\varepsilon$ de las veces nunca podrá igualar a una que juega
+            siempre lo mejor. La exploración que nos permite aprender es la misma que nos impide ser
+            óptimos. Solo se recupera $\pi^*$ si $\varepsilon$ se va apagando poco a poco.
+          </p>
+        </div>
+
+        <p>
+          Ese apagado tiene nombre: <strong>GLIE</strong> (<em>Greedy in the Limit with Infinite
+          Exploration</em>). Son dos exigencias a la vez: que todo par $(s,a)$ se visite
+          <strong>infinitas veces</strong>, y que la política acabe siendo <strong>greedy en el
+          límite</strong>. Si se cumplen las dos, el control MC converge a $Q^*$ y a la política óptima.
+          Por eso, en el código, iremos <strong>reduciendo $\varepsilon$</strong> a medida que el agente
+          aprende… aunque con truco: verás que la línea
+          <code>epsilon = max(0.05, 1.0 - ep / (0.8 * num_episodios))</code> deja un suelo de $0{,}05$ y
+          nunca llega a cero, así que estrictamente <strong>eso no es GLIE</strong>. Lo hacemos así por
+          dos motivos. Uno práctico: un mínimo de exploración protege de quedarse encerrado en una ruta
+          mediocre. Y otro más interesante: al final leemos la política como $\arg\max_a Q(s,a)$, de modo
+          que ese $0{,}05$ de ruido se usa para <em>aprender</em>, no para <em>actuar</em>. Ese divorcio
+          entre la política con la que exploro y la que me llevo puesta es ya un primer aroma del
+          <strong>off-policy</strong>, que veremos en la siguiente sección.
         </p>
 
         <h2 id="off-policy">Un vistazo al off-policy: muestreo por importancia</h2>
@@ -296,8 +413,73 @@
             acción bajo la política objetivo $\pi$ que bajo la de comportamiento $b$. Con él, el retorno
             corregido cumple $\mathbb{E}_b[\rho_{t:T-1}\,G_t \mid S_t=s] = V^\pi(s)$: podemos estimar el
             valor de $\pi$ ¡sin haberla ejecutado nunca! El único requisito es la <strong>cobertura</strong>:
-            $b(a\mid s) > 0$ siempre que $\pi(a\mid s) > 0$, para no dividir por cero. Este mecanismo es el
-            germen conceptual del <a href="09-q-learning.html">Q-Learning</a> (capítulo 9).
+            $b(a\mid s) > 0$ siempre que $\pi(a\mid s) > 0$, para no dividir por cero.
+          </p>
+        </div>
+
+        <h3>Ordinario o ponderado: elegir entre sesgo y varianza</h3>
+        <p>
+          Con los retornos corregidos ya se puede promediar. Pero hay <strong>dos</strong> formas de
+          hacerlo, y la diferencia entre ellas no es cosmética:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Los dos estimadores</div>
+          <p>$$V_{\text{ordinario}}(s) = \frac{\sum_i \rho^{(i)}\,G^{(i)}}{N(s)}
+          \qquad\qquad
+          V_{\text{ponderado}}(s) = \frac{\sum_i \rho^{(i)}\,G^{(i)}}{\sum_i \rho^{(i)}}$$</p>
+          <p class="math-note">
+            El <strong>ordinario</strong> divide entre el número de muestras: es
+            <strong>insesgado</strong>, pero su varianza puede ser <em>infinita</em>. El
+            <strong>ponderado</strong> divide entre la suma de los pesos, o sea, es una media ponderada
+            de los retornos observados: es <strong>sesgado</strong> (el sesgo se va a cero conforme
+            crecen las muestras) pero su varianza es muchísimo menor. En la práctica se usa casi
+            siempre el ponderado.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Intuición: el caso de una sola muestra</div>
+          <p>
+            La forma más rápida de ver la diferencia es imaginar que solo tienes <em>un</em> episodio.
+            El ponderado devuelve $\rho G / \rho = G$: se limita a darte el retorno que has visto,
+            ignorando la corrección. Está claramente sesgado —es una estimación de $V^b$, no de
+            $V^\pi$—, pero al menos es un número <em>plausible</em>. El ordinario devuelve $\rho G$,
+            y ahí $\rho$ puede ser cualquier cosa, porque es un <strong>producto</strong> a lo largo de
+            toda la trayectoria.
+          </p>
+          <p>
+            Con números de nuestro propio gridworld: toma como $\pi$ la política greedy aprendida
+            (determinista) y como $b$ una $\varepsilon$-greedy con $\varepsilon = 0{,}5$. En cada paso,
+            $b$ da probabilidad $0{,}5 + 0{,}5/4 = 0{,}625$ a la acción greedy, así que el cociente de
+            ese paso vale $1/0{,}625 = 1{,}6$. Si $b$ acierta las 6 acciones del camino óptimo,
+            $\rho = 1{,}6^{6} = 16{,}78$ y el retorno de esa trayectoria es $G_0 = 3{,}21$. El
+            estimador ordinario, con esa única muestra, te dice
+            $16{,}78 \times 3{,}21 = \mathbf{53{,}91}$ — un valor que este entorno <em>no puede dar
+            jamás</em>, porque el retorno máximo posible es $10$. Y el 94 % de los episodios de $b$ se
+            desvían al menos una vez, de modo que su $\rho$ es $0$ y aportan un cero pelado. El
+            ordinario alterna, pues, entre ceros y disparates: promedia bien (su media es $3{,}21$,
+            el valor verdadero), pero necesita <em>muchísimas</em> muestras para hacerlo. El ponderado
+            clava el $3{,}21$ en cuanto aparece la primera trayectoria con $\rho > 0$ — aquí de forma
+            algo tramposa, porque en un entorno determinista con $\pi$ determinista <em>todas</em> las
+            trayectorias que sobreviven son la misma. Pero la moraleja aguanta en general: el ponderado
+            solo puede devolverte valores que estén dentro del rango de los retornos que has visto de
+            verdad, y el ordinario no.
+          </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El cociente no es «el germen del Q-Learning»</div>
+          <p>
+            Es tentador decir que de aquí sale el <a href="09-q-learning.html">Q-Learning</a>, y no es
+            cierto: el Q-Learning (capítulo 9) es off-policy y aun así <strong>no usa ningún cociente
+            de importancia</strong>. Consigue esquivarlo porque su política objetivo es determinista y
+            el $\max$ ya selecciona por sí solo la acción que esa política tomaría: no queda nada que
+            reponderar. Lo que sí es germen de esto es <strong>todo el aprendizaje off-policy</strong>
+            como familia, y el cociente reaparece casi idéntico en
+            <a href="16-ppo.html#ratio">PPO</a> (capítulo 16), donde el ratio
+            $r_t(\theta) = \pi_\theta(a_t\mid s_t)\,/\,\pi_{\theta_{\text{old}}}(a_t\mid s_t)$ es
+            exactamente el $\rho$ de aquí en su versión de un solo paso.
           </p>
         </div>
 
@@ -537,13 +719,59 @@ if __name__ == "__main__":
           las reglas del entorno.
         </p>
 
+        <div class="callout warn">
+          <div class="callout-title">⚠️ El <code>max_pasos=50</code> que quizá se te ha pasado</div>
+          <p>
+            En <code>generar_episodio</code> hay un tope de 50 pasos. Es imprescindible: en los primeros
+            episodios $\varepsilon$ vale casi $1$, el agente deambula al azar y puede no llegar nunca a la
+            meta; sin ese tope el programa se colgaría. Pero no es gratis, y merece la pena entender por qué.
+          </p>
+          <p>
+            Cuando el episodio se corta a la fuerza, el bucle hacia atrás arranca igualmente con
+            $G \leftarrow 0$, es decir, trata el corte <strong>como si fuera un estado terminal de valor
+            cero</strong>. Y no lo es: el agente seguía vivo, con la meta y su $+10$ todavía por delante.
+            El retorno que promediamos es más bajo que el verdadero, así que $Q$ queda
+            <strong>sesgada hacia el pesimismo</strong> en esos casos. En esta ejecución concreta se truncan
+            <strong>128 de los 3000 episodios (el 4,3 %)</strong>, y ninguno a partir del episodio 906:
+            124 de ellos caen en los primeros 500. Por eso el sesgo se diluye — las medias posteriores lo
+            entierran — pero es suerte de un entorno pequeño, no una garantía.
+          </p>
+          <p>
+            Quédate con la idea general: Monte Carlo exige que la política de comportamiento
+            <strong>termine</strong> los episodios. Si no puedes garantizarlo, tienes que truncar y aceptar
+            el sesgo. Es una razón de peso más para pasarse a TD.
+          </p>
+        </div>
+
         <div class="callout intuition">
           <div class="callout-title">🧪 Experimenta</div>
           <p>
-            Prueba a fijar $\varepsilon = 0.05$ constante (borra la línea del decaimiento y usa
-            <code>epsilon = 0.05</code>). ¿Aprende igual de rápido? Y al revés: sube el paso por casilla a
-            $-0.1$ en lugar de $-1$. Con menos castigo por paso, ¿la política sigue teniendo tanta prisa
-            por llegar? Cambiar las recompensas es <em>diseñar</em> el problema.
+            <strong>Uno.</strong> Sustituye el decaimiento por $\varepsilon = 0{,}05$ constante
+            (<code>epsilon = 0.05</code>). Verás algo que quizá no esperabas: la curva de aprendizaje
+            <em>sube muchísimo antes</em>. Con el decaimiento, la media móvil no supera $+4$ hasta cerca
+            del episodio $2000$; con $\varepsilon$ fija lo hace en la primera decena. No es que
+            aprenda mejor: es que esa curva mide lo que gana la <strong>política de comportamiento</strong>,
+            y una política que explora el 100 % del tiempo gana poco aunque su $Q$ sea perfecta. La
+            política final es óptima ($+5$) en los dos casos. La diferencia real está en otro sitio:
+            con $\varepsilon$ decreciente el agente visita <strong>los 52 pares $(s,a)$</strong> del
+            tablero (13 casillas transitables $\times$ 4 acciones); con $\varepsilon = 0{,}05$ se deja
+            entre 2 y 6 sin visitar <em>ni una sola vez</em>,
+            según la semilla. Aquí no importa, porque son pares que caen fuera de la buena ruta. En un
+            entorno con un atajo escondido, sí importaría.
+          </p>
+          <p>
+            <strong>Dos.</strong> Baja el coste por paso de $-1$ a $-0{,}1$ (o incluso a $0$) en la
+            función <code>paso</code>. ¿Deja el agente de tener prisa? Pruébalo: la política aprendida
+            sigue llegando a la meta en <strong>6 pasos</strong>, el óptimo (con la semilla $0$ del
+            script salen incluso las mismas flechas casilla por casilla). El motivo es $\gamma = 0{,}95$: llegar
+            a la meta un paso más tarde ya multiplica el $+10$ por $0{,}95$, y ese descuento basta por sí
+            solo para premiar el camino corto. El castigo por paso y el descuento empujan en la misma
+            dirección, y aquí el segundo se basta. Si además pones $\gamma = 1$ tampoco cambia nada…
+            mientras dejes <code>max_pasos=50</code>: el truncamiento hace entonces de fecha límite
+            implícita. Sube el tope a $400$ <em>y</em> $\gamma$ a $1$ <em>y</em> el coste a $0$, y por fin
+            se relaja: la ruta greedy pasa a costar 6,9 / 7,9 / 7,1 pasos de media según la semilla. Han
+            hecho falta las tres cosas a la vez, y esa es la lección: <strong>la prisa del agente no vive
+            en la recompensa, vive en la combinación de recompensa, descuento y horizonte</strong>.
           </p>
         </div>
 
@@ -579,6 +807,41 @@ Politica aprendida (^ v &lt; &gt; , # pared, G meta):
           siempre el mismo.
         </p>
 
+        <h2 id="superpoderes">Dos superpoderes que la programación dinámica no tiene</h2>
+        <p>
+          El próximo capítulo va a dejar a Monte Carlo un poco en evidencia, así que conviene
+          reivindicarlo antes. Tiene dos propiedades que ningún otro método del manual comparte, y
+          las dos vienen del mismo sitio: MC <strong>no mira nunca el valor de otro estado</strong>,
+          solo retornos medidos.
+        </p>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Lo que solo Monte Carlo sabe hacer</div>
+          <p>
+            <strong>1. Puede estimar un solo estado y desentenderse del resto.</strong> La
+            <a href="05-programacion-dinamica.html">programación dinámica</a> barre <em>todos</em> los
+            estados en cada iteración, porque el valor de cada uno se calcula a partir del de sus
+            vecinos: no hay forma de evaluar una casilla sin evaluar el tablero entero. Monte Carlo
+            sí. Si lo único que quieres saber es cuánto vale una apertura concreta de ajedrez, juegas
+            mil partidas desde esa apertura y promedias. El coste de estimar un estado es
+            <strong>independiente del tamaño del espacio de estados</strong>; con $10^{40}$ estados,
+            eso deja de ser un detalle y pasa a ser la diferencia entre poder y no poder.
+          </p>
+          <p>
+            <strong>2. No necesita la propiedad de Markov.</strong> Toda la maquinaria del
+            <a href="05-programacion-dinamica.html">capítulo 5</a> descansa sobre la
+            <a href="03-mdp.html#propiedad-markov">propiedad de Markov</a>: escribir
+            $V(s) = \sum_{s'} p(s'\mid s)\,[\,\cdots + \gamma V(s')\,]$ solo es legal si el estado
+            resume de verdad todo el pasado. Monte Carlo no usa esa ecuación en ningún momento: el
+            retorno $G_t$ que promedia es un número que ocurrió, no una estimación construida sobre
+            otra estimación. Si tu «estado» es en realidad una observación parcial que se deja
+            información fuera, MC sigue estimando correctamente la media de los retornos que siguen a
+            esa observación; los métodos que hacen <em>bootstrapping</em> —los del capítulo 7 en
+            adelante— se apoyan en una ecuación que ha dejado de ser cierta y pueden converger a
+            cualquier cosa.
+          </p>
+        </div>
+
         <div class="callout key">
           <div class="callout-title">🔑 Resumen del capítulo</div>
           <ul>
@@ -588,7 +851,8 @@ Politica aprendida (^ v &lt; &gt; , # pared, G meta):
             <li>Sin modelo, mejoramos la política con los valores de <strong>acción</strong> $Q(s,a)$, no con $V(s)$: $\pi'(s)=\arg\max_a Q(s,a)$.</li>
             <li>Para no dejar de aprender hace falta <strong>exploración</strong>: inicios exploratorios o políticas <strong>$\varepsilon$-soft</strong> (como $\varepsilon$-greedy).</li>
             <li>El <strong>control MC</strong> es GPI: evaluar con Monte Carlo + mejorar $\varepsilon$-greedy, episodio tras episodio.</li>
-            <li>El <strong>muestreo por importancia</strong> corrige retornos para aprender <strong>off-policy</strong>, multiplicando por el cociente $\rho_{t:T-1}$.</li>
+            <li>El <strong>muestreo por importancia</strong> corrige retornos para aprender <strong>off-policy</strong>, multiplicando por el cociente $\rho_{t:T-1}$; en la práctica se usa la versión <strong>ponderada</strong>, sesgada pero de varianza mucho menor.</li>
+            <li>A cambio de su lentitud, MC tiene dos ventajas únicas: puede estimar <strong>un solo estado</strong> sin tocar los demás y <strong>no necesita la propiedad de Markov</strong>.</li>
           </ul>
         </div>
 

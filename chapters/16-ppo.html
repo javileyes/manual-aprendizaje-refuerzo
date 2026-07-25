@@ -86,6 +86,14 @@
           <strong>recortar</strong> (<em>clipping</em>) el objetivo para quitarle al optimizador el
           incentivo de alejarse demasiado. Sin restricciones, sin Hessianos: solo un $\min$ y un recorte.
         </p>
+        <p>
+          El artículo original de PPO propone en realidad <em>dos</em> respuestas. Una consiste en bajar la KL
+          de la restricción al propio objetivo y restarla con un peso $\beta$; se la conoce como PPO con
+          penalización. La otra es el recorte. En sus experimentos ganó el recorte, y es la que todo el mundo
+          llama hoy «PPO» a secas. Pero la penalización no se ha perdido por el camino: es exactamente la
+          forma que toma el freno cuando PPO se usa para afinar modelos de lenguaje, en el
+          <a href="21-rlhf.html">capítulo 21</a>.
+        </p>
 
         <div class="callout key">
           <div class="callout-title">🔑 La promesa de PPO</div>
@@ -93,8 +101,10 @@
             <li>Reutiliza cada lote durante <strong>varias épocas</strong> de descenso de gradiente.</li>
             <li>Limita cuánto cambia la política con un <strong>recorte</strong> barato, no con una
               restricción cara.</li>
-            <li>Es <strong>estable</strong> y poco sensible a los hiperparámetros: por eso se ha vuelto el
-              método por defecto.</li>
+            <li>Es <strong>estable</strong> y bastante tolerante con los hiperparámetros: por eso se ha
+              vuelto el método por defecto. Ojo, «tolerante» no es «indiferente»: en el ejemplo de este mismo
+              capítulo, tocar solo <code>epocas</code> y <code>lr_pi</code> mueve el retorno final de
+              $-13{,}6$ a $-8{,}5$.</li>
           </ul>
         </div>
 
@@ -119,11 +129,52 @@
         </div>
 
         <p>
-          El objetivo «ingenuo» del gradiente de política se puede escribir como
-          $\hat{\mathbb{E}}_t\!\left[r_t(\theta)\,\hat A_t\right]$: sube la probabilidad de las acciones con
-          ventaja positiva ($\hat A_t>0$) y bájala en las de ventaja negativa. El problema es que nada
-          impide que $r_t$ se dispare. Si una acción tuvo $\hat A_t$ muy grande, el optimizador querrá hacer
-          $r_t$ enorme, alejándose muchísimo de $\pi_{\text{old}}$… justo lo que queremos evitar.
+          Pero el ratio no es un invento <em>ad hoc</em> para medir distancias: aparece solo en cuanto te
+          preguntas cómo evaluar la política <em>nueva</em> con datos recogidos por la <em>vieja</em>. Y la
+          respuesta ya la conoces: es el <strong>muestreo por importancia</strong> del
+          <a href="06-monte-carlo.html#off-policy">capítulo 6</a>.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ De dónde sale el ratio</div>
+          <p>
+            Queremos la media de algo bajo $\pi_\theta$, pero solo tenemos acciones muestreadas de
+            $\pi_{\theta_{\text{old}}}$. Multiplicamos y dividimos por la vieja:
+          </p>
+          <p>$$\mathbb{E}_{a\sim\pi_\theta}\big[f(a)\big] = \sum_a \pi_\theta(a\mid s)\,f(a) = \sum_a \pi_{\theta_{\text{old}}}(a\mid s)\,\underbrace{\frac{\pi_\theta(a\mid s)}{\pi_{\theta_{\text{old}}}(a\mid s)}}_{r_t(\theta)}\,f(a) = \mathbb{E}_{a\sim\pi_{\theta_{\text{old}}}}\big[r_t(\theta)\,f(a)\big]$$</p>
+          <p class="math-note">
+            Fíjate en que es una <strong>igualdad exacta</strong>, no una aproximación: reponderando cada
+            muestra por $r_t$, los datos viejos sirven para estimar una media bajo la política nueva. El único
+            requisito es de <em>cobertura</em>: que $\pi_{\theta_{\text{old}}}$ no dé probabilidad cero a algo
+            que $\pi_\theta$ sí usa (con un <em>softmax</em> se cumple solo, porque nunca devuelve un cero
+            exacto). Poniendo $f = \hat A_t$ sale el objetivo «ingenuo»
+            $\hat{\mathbb{E}}_t[r_t(\theta)\hat A_t]$: sube la probabilidad de las acciones con ventaja
+            positiva y la baja en las de ventaja negativa. Y ojo, la igualdad es exacta pero la
+            <em>varianza</em> no: cuanto más se separen las dos políticas, más disparatados se vuelven los
+            pesos $r_t$ y más ruidosa la estimación. Ese es, en el fondo, el problema que PPO viene a
+            resolver.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La primera época de PPO es A2C</div>
+          <p>
+            Merece la pena hacer la cuenta, porque deja el algoritmo en su sitio. Al empezar las épocas
+            $\theta = \theta_{\text{old}}$, así que $r_t = 1$; y como
+            $\nabla_\theta r_t = r_t\,\nabla_\theta\log\pi_\theta(a_t\mid s_t)$, el gradiente del objetivo
+            ingenuo en ese primer instante vale
+            $\nabla_\theta\big[r_t\hat A_t\big] = \hat A_t\,\nabla_\theta\log\pi_\theta(a_t\mid s_t)$, que es
+            <em>exactamente</em> el gradiente actor-crítico del
+            <a href="15-actor-critico.html">capítulo 15</a>. Dicho de otro modo: la primera pasada de PPO
+            sobre el lote es literalmente A2C. Todo lo demás —el recorte, el $\min$— existe para que las
+            pasadas <em>segunda, tercera y siguientes</em> sobre esos mismos datos sigan siendo fiables.
+          </p>
+        </div>
+
+        <p>
+          El problema del objetivo ingenuo es que nada impide que $r_t$ se dispare. Si una acción tuvo
+          $\hat A_t$ muy grande, el optimizador querrá hacer $r_t$ enorme, alejándose muchísimo de
+          $\pi_{\text{old}}$… justo lo que queremos evitar.
         </p>
 
         <h2 id="clip">El objetivo recortado</h2>
@@ -163,6 +214,38 @@
           Queremos bajar su probabilidad, empujando $r_t$ por debajo de $1$. Ahora el recorte pone un
           <strong>suelo</strong> en $1-\epsilon$: por debajo, el objetivo se aplana y deja de premiar que
           hundamos aún más la probabilidad.
+        </p>
+
+        <h3>Las seis casillas, con números</h3>
+        <p>
+          El $\min$ de esa fórmula parece inofensivo hasta que lo evalúas. Hagámoslo: solo hay seis
+          situaciones posibles (dos signos de la ventaja × tres posiciones del ratio), y basta una
+          calculadora. Tomamos $\epsilon = 0{,}2$, y como ventaja $\hat A_t = +2$ en las tres primeras filas
+          y $\hat A_t = -2$ en las tres últimas.
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>$\hat A_t$</th><th>$r_t$</th><th>Sin recortar<br>$r_t\hat A_t$</th><th>Recortado<br>$\operatorname{clip}(r_t,0{,}8,1{,}2)\,\hat A_t$</th><th>Gana el $\min$</th><th>¿Hay gradiente?</th></tr></thead>
+            <tbody>
+              <tr><td>$+2$</td><td>$0{,}5$ (muy por debajo)</td><td>$+1{,}00$</td><td>$+1{,}60$</td><td>sin recortar</td><td><strong>Sí</strong>: tira de $r_t$ hacia arriba</td></tr>
+              <tr><td>$+2$</td><td>$1{,}0$ (dentro)</td><td>$+2{,}00$</td><td>$+2{,}00$</td><td>empatan</td><td><strong>Sí</strong>: el gradiente normal</td></tr>
+              <tr><td>$+2$</td><td>$1{,}5$ (muy por encima)</td><td>$+3{,}00$</td><td>$+2{,}40$</td><td>recortado</td><td><strong>No</strong>: meseta</td></tr>
+              <tr><td>$-2$</td><td>$0{,}5$ (muy por debajo)</td><td>$-1{,}00$</td><td>$-1{,}60$</td><td>recortado</td><td><strong>No</strong>: meseta</td></tr>
+              <tr><td>$-2$</td><td>$1{,}0$ (dentro)</td><td>$-2{,}00$</td><td>$-2{,}00$</td><td>empatan</td><td><strong>Sí</strong>: el gradiente normal</td></tr>
+              <tr><td>$-2$</td><td>$1{,}5$ (muy por encima)</td><td>$-3{,}00$</td><td>$-2{,}40$</td><td>sin recortar</td><td><strong>Sí</strong>: tira de $r_t$ hacia abajo</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Quédate con las dos filas de $r_t = 1{,}5$, que son la clave de todo. Con $\hat A_t = +2$ el mínimo
+          es $2{,}4$: hemos aterrizado en la meseta y el gradiente es cero, porque subir todavía más una
+          acción que <em>ya</em> hemos subido un $50\,\%$ no nos aporta nada. Con $\hat A_t = -2$, en cambio,
+          el mínimo es $-3$ y gana la rama <strong>sin recortar</strong>, que sigue teniendo pendiente: aquí
+          $r_t = 1{,}5$ significa que hemos subido la probabilidad de una acción <em>mala</em>, y eso hay que
+          corregirlo cuanto antes. Mismo $r_t$, mismo $\epsilon$, comportamientos opuestos: <strong>el recorte
+          no mira dónde estás, mira si moverte más te beneficia</strong>.
         </p>
 
         <figure class="figure">
@@ -234,6 +317,28 @@
           </p>
         </div>
 
+        <div class="callout math">
+          <div class="callout-title">➗ Cómo se vigila esa KL, en una línea</div>
+          <p>
+            No hace falta calcular ninguna suma sobre acciones: con las mismas muestras del lote y el ratio
+            que ya tienes, el estimador que usa todo el mundo es
+          </p>
+          <p>$$\widehat{\mathrm{KL}} = \hat{\mathbb{E}}_t\big[(r_t - 1) - \log r_t\big]$$</p>
+          <p class="math-note">
+            Tiene dos propiedades que lo hacen el bueno. Es <strong>insesgado</strong>, porque
+            $\mathbb{E}[r_t - 1] = 0$ (la media del ratio bajo la política vieja es exactamente $1$), así que
+            ese sumando no cambia el valor esperado; en una muestra finita no es cero, y precisamente por eso
+            sirve para reducir la varianza. Y es
+            <strong>siempre $\ge 0$</strong>, porque $x - 1 - \log x \ge 0$ para todo $x>0$, que es justo lo
+            que uno espera de una divergencia. El estimador ingenuo, $\hat{\mathbb{E}}_t[-\log r_t]$, es
+            igual de insesgado pero con muestras finitas sale <em>negativo</em> mucho más a menudo de lo que
+            uno esperaría, y desconcierta a todo el mundo la primera vez. En la práctica se vigila con un
+            umbral: si $\widehat{\mathrm{KL}}$ supera algo así como $0{,}015$–$0{,}03$, se cortan las épocas
+            que quedaban de ese lote (<em>early stopping</em>). Nuestros dos ejemplos la sacan por consola
+            junto al retorno; en el gridworld, con los valores por defecto, se queda alrededor de $0{,}004$.
+          </p>
+        </div>
+
         <h2 id="gae">La ventaja con GAE</h2>
         <p>
           PPO necesita una estimación de la ventaja $\hat A_t$ que sea a la vez de baja varianza y poco
@@ -246,15 +351,21 @@
 
         <div class="callout math">
           <div class="callout-title">➗ Ventaja generalizada</div>
-          <p>Primero, el <strong>error TD</strong> de cada paso, donde $V$ es el crítico:</p>
-          <p>$$\delta_t = r_t + \gamma\, V(s_{t+1}) - V(s_t)$$</p>
+          <p>Primero, el <strong>error TD</strong> de cada paso, donde $V_w$ es el crítico:</p>
+          <p>$$\delta_t = R_{t+1} + \gamma\, V_w(S_{t+1}) - V_w(S_t)$$</p>
           <p>Y la ventaja GAE es una suma descontada de esos errores hacia el futuro:</p>
           <p>$$\hat A_t = \sum_{l=0}^{\infty} (\gamma\lambda)^l\, \delta_{t+l} = \delta_t + \gamma\lambda\,\hat A_{t+1}$$</p>
           <p class="math-note">
             $\gamma\in[0,1]$ es el descuento; $\lambda\in[0,1]$ regula el compromiso sesgo–varianza
             ($\lambda=0$ da el TD de un paso, $\lambda=1$ da Monte Carlo). La forma recursiva de la derecha
             es la que se implementa: se calcula hacia atrás en un solo barrido. El objetivo de regresión del
-            crítico es entonces $\hat G_t = \hat A_t + V(s_t)$.
+            crítico es entonces $\hat G_t = \hat A_t + V_w(S_t)$.
+          </p>
+          <p class="math-note">
+            <strong>Un aviso de notación.</strong> En este capítulo la letra $r$ ya está ocupada por el ratio
+            $r_t(\theta)$, así que la recompensa la escribimos siempre $R_{t+1}$, como en el resto del manual.
+            Si comparas esta fórmula con la del <a href="15-actor-critico.html#gae">capítulo 15</a> verás que
+            es exactamente la misma: PPO no cambia nada de cómo se estima la ventaja, solo qué hace con ella.
           </p>
         </div>
 
@@ -265,14 +376,18 @@
 
         <div class="callout math">
           <div class="callout-title">➗ Pérdida conjunta de PPO</div>
-          <p>$$L(\theta) = \underbrace{-\,L^{\text{CLIP}}(\theta)}_{\text{política}} \;+\; c_1\underbrace{\hat{\mathbb{E}}_t\!\big[(V_\theta(s_t) - \hat G_t)^2\big]}_{\text{valor}} \;-\; c_2\underbrace{\hat{\mathbb{E}}_t\!\big[H(\pi_\theta(\cdot\mid s_t))\big]}_{\text{entropía}}$$</p>
+          <p>$$L(\theta, w) = \underbrace{-\,L^{\text{CLIP}}(\theta)}_{\text{política}} \;+\; c_1\underbrace{\hat{\mathbb{E}}_t\!\big[(V_w(S_t) - \hat G_t)^2\big]}_{\text{valor}} \;-\; c_2\underbrace{\hat{\mathbb{E}}_t\!\big[\mathcal{H}(\pi_\theta(\cdot\mid S_t))\big]}_{\text{entropía}}$$</p>
           <p class="math-note">
             El primer término es el objetivo recortado con signo negativo (maximizar $L^{\text{CLIP}}$ =
-            minimizar $-L^{\text{CLIP}}$). El segundo hace que el crítico $V_\theta$ ajuste su predicción al
+            minimizar $-L^{\text{CLIP}}$). El segundo hace que el crítico $V_w$ ajuste su predicción al
             objetivo $\hat G_t$; $c_1$ pesa su importancia (típico $0{,}5$). El tercero es un
-            <strong>bonus de entropía</strong>: $H(\pi) = -\sum_a \pi(a\mid s)\log\pi(a\mid s)$ mide cuán
-            «indecisa» es la política; restarla (con $c_2$ pequeño, p. ej. $0{,}01$) premia mantener algo de
-            aleatoriedad y evita que la política colapse demasiado pronto en una sola acción.
+            <strong>bonus de entropía</strong>: $\mathcal{H}(\pi) = -\sum_a \pi(a\mid s)\log\pi(a\mid s)$ mide
+            cuán «indecisa» es la política; restarla (con $c_2$ pequeño, p. ej. $0{,}01$) premia mantener algo
+            de aleatoriedad y evita que la política colapse demasiado pronto en una sola acción. Como en el
+            <a href="15-actor-critico.html">capítulo 15</a>, los parámetros del actor son $\theta$ y los del
+            crítico $w$: en nuestros dos ejemplos son bloques separados, y por eso podemos actualizarlos uno
+            detrás de otro. Cuando comparten tronco —lo normal si la entrada son píxeles— hay que minimizar
+            de verdad la suma de los tres términos a la vez, que es de donde sale ese $c_1$.
           </p>
         </div>
 
@@ -291,9 +406,9 @@
         <ol>
           <li><strong>Recoge un rollout</strong>: con la política actual (que congelamos como
             $\pi_{\theta_{\text{old}}}$), juega $T$ pasos y guarda estados, acciones, recompensas, las
-            log-probabilidades $\log\pi_{\theta_{\text{old}}}(a_t\mid s_t)$ y los valores $V(s_t)$.</li>
+            log-probabilidades $\log\pi_{\theta_{\text{old}}}(a_t\mid s_t)$ y los valores $V_w(S_t)$.</li>
           <li><strong>Calcula las ventajas</strong> $\hat A_t$ con GAE y los objetivos del crítico
-            $\hat G_t = \hat A_t + V(s_t)$.</li>
+            $\hat G_t = \hat A_t + V_w(S_t)$.</li>
           <li><strong>Normaliza</strong> las ventajas del lote.</li>
           <li><strong>Optimiza $K$ épocas</strong> sobre el mismo lote, troceándolo en <em>minibatches</em>.
             En cada minibatch: recomputa $r_t(\theta)$, la pérdida recortada, la del valor y la entropía, y
@@ -313,7 +428,11 @@
           $\frac{\partial}{\partial\theta}\,r_t\hat A_t = \hat A_t\, r_t\, \nabla_\theta\log\pi_\theta(a_t\mid s_t)$,
           basta con anular ese gradiente exactamente en la región plana:
           $\hat A_t\ge 0$ con $r_t\gt 1+\epsilon$, o $\hat A_t\lt 0$ con $r_t\lt 1-\epsilon$. Fíjate en la variable
-          <code>plano</code> del código: es justo esa condición.
+          <code>plano</code> del código: es justo esa condición, las dos filas «meseta» de la tabla de antes.
+          Y fíjate también en que <code>epocas=20</code> y <code>lr_pi=0.5</code> no son valores tímidos: los
+          hemos elegido así <em>a propósito</em>, para que el recorte salte de verdad. Con parámetros más
+          suaves, <code>plano</code> sería siempre falso y estaríamos ejecutando un actor-crítico con el
+          recorte de adorno. El programa lo mide y te lo dice en cada línea.
         </p>
 
         <div class="code-example" data-packages="numpy,matplotlib">
@@ -353,6 +472,13 @@ el paso de aprendizaje del critico.
 Que veras al ejecutarlo:
   * Por consola, el retorno medio por iteracion sube (se hace menos negativo)
     hasta acercarse al optimo (el camino mas corto = 8 pasos, retorno -8).
+  * Dos diagnosticos en cada linea: "recortadas" es la fraccion de transiciones
+    que han caido en la zona plana del recorte (el clipfrac que mira todo el
+    mundo al depurar un PPO) y "KL ~" es la divergencia aproximada entre la
+    politica vieja y la nueva. Si "recortadas" fuese 0 %, el recorte no estaria
+    haciendo nada.
+  * Al final, el maximo |r-1| de todo el entrenamiento: cuanto se ha llegado a
+    alejar la politica nueva de la que recogio los datos.
   * Una grafica con el retorno por iteracion y su media movil, claramente
     creciente hacia la linea del optimo.
 
@@ -451,8 +577,8 @@ def entropia_por_fila(p, logp):
     return -(p * logp).sum(axis=1)
 
 
-def entrena(n_iteraciones=160, episodios_por_iter=8, epocas=6,
-            lr_pi=0.20, lr_v=0.30, gamma=0.99, lam=0.95,
+def entrena(n_iteraciones=160, episodios_por_iter=8, epocas=20,
+            lr_pi=0.50, lr_v=0.30, gamma=0.99, lam=0.95,
             eps=0.2, c2=0.01, semilla=0):
     """Bucle de PPO. Devuelve (historial_de_retornos, theta)."""
     rng = np.random.default_rng(semilla)
@@ -460,6 +586,7 @@ def entrena(n_iteraciones=160, episodios_por_iter=8, epocas=6,
     w = np.zeros(N_ESTADOS)                       # critico V_w(s)
     identidad = np.eye(N_ACCIONES)                # filas = one-hot de cada accion
     historial = np.zeros(n_iteraciones)
+    max_desvio = 0.0                              # max |r_t - 1| de todo el entreno
 
     for it in range(n_iteraciones):
         # ---------- 1) Recogida: varios episodios completos ----------
@@ -490,6 +617,12 @@ def entrena(n_iteraciones=160, episodios_por_iter=8, epocas=6,
             logp_a = logp[np.arange(len(b_a)), b_a]
             ratio = np.exp(logp_a - b_logp)       # r_t(theta)
 
+            # --- Diagnosticos (no afectan al aprendizaje, pero son los dos
+            #     numeros que se miran al depurar un PPO de verdad) ---
+            recortadas = np.mean(np.abs(ratio - 1.0) &gt; eps)              # "clipfrac"
+            kl_aprox = np.mean((ratio - 1.0) - np.log(ratio + 1e-12))    # KL(vieja||nueva)
+            max_desvio = max(max_desvio, float(np.abs(ratio - 1.0).max()))
+
             # --- Gradiente del objetivo recortado ---
             # d/dtheta [r_t A_t] = A_t * r_t * grad_log_pi.  El recorte anula el
             # gradiente solo cuando empujar mas ya no aporta (region plana):
@@ -517,10 +650,14 @@ def entrena(n_iteraciones=160, episodios_por_iter=8, epocas=6,
             np.add.at(grad_critico, b_s, err)
             w -= lr_v * grad_critico / len(b_s)            # DESCENSO de gradiente
 
+        # Los diagnosticos que imprimimos son los de la ULTIMA epoca, cuando la
+        # politica ya se ha alejado todo lo que se iba a alejar de la vieja.
         if (it + 1) % 20 == 0:
             print(f"Iteracion {it + 1:3d} | retorno medio = {historial[it]:7.2f}"
-                  f"   (optimo = {OPTIMO})")
+                  f" | recortadas = {100 * recortadas:5.1f}%"
+                  f" | KL ~ {kl_aprox:.4f}   (optimo = {OPTIMO})")
 
+    print(f"\nMaximo |r-1| de todo el entrenamiento: {max_desvio:.2f}")
     return historial, theta
 
 
@@ -571,15 +708,42 @@ if __name__ == "__main__":
           ese camino óptimo; el retorno <em>muestreado</em> se queda un poco por encima porque la política
           conserva algo de aleatoriedad (gracias, entre otras cosas, al bonus de entropía).
         </p>
+        <p>
+          Fíjate en la columna <em>recortadas</em>: es la fracción de transiciones que han caído en la zona
+          plana, lo que en el mundo real se llama <strong>clipfrac</strong> y es lo primero que mira
+          cualquiera que esté depurando un PPO. Si sale $0\,\%$, el recorte no está haciendo nada y podrías
+          haberlo borrado del código sin que se notara. Si sale muy alta (por encima del $30\,\%$), estás
+          dando pasos tan grandes que casi todo el lote está congelado y conviene bajar <code>lr_pi</code> o
+          <code>epocas</code>. La zona sana es la de en medio: en esta ejecución la verás bailar entre el
+          $2{,}9\,\%$ y el $22{,}4\,\%$ según la iteración, o sea que el freno trabaja sin ahogar el
+          aprendizaje. Y no te alarmes por lo mucho que salta de una línea a otra: lo que imprimimos es la
+          fracción recortada de la <em>última</em> época de cada lote, la que llega con la política ya más
+          alejada de la vieja; promediada sobre las veinte épocas se queda en un $3\,\%$. La columna
+          <em>KL</em> cuenta lo mismo desde otro ángulo, y al acabar el entrenamiento el programa remata con
+          el $\max|r_t-1|$ de todas las épocas: aquí, $0{,}38$.
+        </p>
 
         <div class="callout intuition">
           <div class="callout-title">🧪 Experimenta</div>
           <p>
-            Sube <code>epocas</code> de $6$ a $30$ dejando todo lo demás igual. Reutilizar tantísimo cada
-            lote hace que la política se aleje demasiado de la vieja y el aprendizaje se vuelve más ruidoso o
-            se estanca: exactamente el problema que el recorte intenta contener, pero llevado al límite.
-            Prueba también a poner $\epsilon$ enorme (<code>eps=100</code>): habrás desactivado el recorte y
-            recuperado un gradiente de política «ingenuo», más inestable.
+            <strong>Primero, comprueba que el freno hace falta de verdad.</strong> Baja <code>epocas</code> a
+            $6$ y <code>lr_pi</code> a $0{,}2$ —los valores tímidos con los que uno empieza—. El retorno final
+            se queda en $-13{,}6$, lejos del óptimo $-8$, y la columna <em>recortadas</em> marca $0{,}0\,\%$
+            en todas las iteraciones. Con pasos tan cortos el ratio nunca se aleja de $1$ (el
+            $\max|r_t-1|$ de todo el entrenamiento es $0{,}07$) y este PPO es, literalmente, un
+            actor-crítico normal: podrías borrar el recorte y no notarlo.
+          </p>
+          <p>
+            <strong>Ahora al revés: quítale el freno.</strong> Vuelve a los valores por defecto y desactiva el
+            recorte con <code>eps=1e9</code>. El retorno final apenas cambia (incluso sale un pelín mejor,
+            $-8{,}0$ frente a $-8{,}5$): este gridworld es demasiado fácil para castigarnos. Pero mira el
+            $\max|r_t-1|$: con recorte se queda en $0{,}38$ y sin recorte sube a $2{,}4$. Y si además
+            exprimes el lote a lo bruto (<code>epocas=40, lr_pi=1.0, eps=1e9</code>), se dispara a
+            <strong>$38{,}6$</strong>. Un ratio de casi $40$ significa que la política nueva le da a esa
+            acción cuarenta veces más probabilidad que la política que recogió los datos: las ventajas
+            $\hat A_t$ que estamos usando ya no describen en absoluto a la política que estamos optimizando.
+            En un gridworld de $25$ casillas se sobrevive; en un robot o en un modelo de lenguaje, ese es
+            exactamente el momento en que el entrenamiento descarrila.
           </p>
         </div>
 
@@ -598,8 +762,8 @@ if __name__ == "__main__":
           <p>
             Usa <code>torch</code> y <code>gymnasium</code>, demasiado pesados para el navegador. No tiene
             botón «Ejecutar»: cópialo o descárgalo y lánzalo en tu máquina con las instrucciones de más
-            abajo. En pocas decenas de miles de pasos deberías ver cómo la recompensa media se dispara hasta
-            resolver CartPole (media $\ge 475$ sobre $500$).
+            abajo. En unas pocas decenas de miles de pasos verás la recompensa media dispararse, y en torno
+            a los cien mil el entorno queda resuelto del todo (media $\ge 475$ sobre $500$).
           </p>
         </div>
 
@@ -625,6 +789,9 @@ todas las piezas del capitulo:
   * VARIAS EPOCAS de SGD por lote, dividiendo el lote en MINIBATCHES.
   * Perdida total = perdida_politica(clip) + c1*perdida_valor - c2*entropia,
     con recorte de la norma del gradiente para mayor estabilidad.
+  * Los dos diagnosticos que se miran siempre al depurar un PPO: la KL
+    aproximada entre la politica vieja y la nueva, y la fraccion de
+    transiciones recortadas (el "clipfrac").
 
 Este ejemplo necesita PyTorch y Gymnasium, demasiado pesados para el navegador:
 se ejecuta en tu terminal.
@@ -634,8 +801,9 @@ Como ejecutarlo:
     python code/16-ppo/ppo_torch.py
 
 CartPole se considera "resuelto" cuando la recompensa media (= numero de pasos
-que el poste aguanta en pie) supera ~475 sobre 500 posibles. PPO suele resolverlo
-en unas decenas de miles de pasos.
+que el poste aguanta en pie) supera ~475 sobre 500 posibles. La recompensa se
+dispara en unas decenas de miles de pasos y el entorno queda resuelto en torno a
+los cien mil.
 """
 
 import numpy as np
@@ -779,6 +947,7 @@ def entrena():
 
         # ---------- 3) Optimizacion: EPOCAS x MINIBATCHES ----------
         indices = np.arange(TAM_LOTE)
+        kls, recortadas = [], []                   # diagnosticos del lote
         for _ in range(EPOCAS):
             np.random.shuffle(indices)
             for arranque in range(0, TAM_LOTE, TAM_MINIBATCH):
@@ -788,6 +957,13 @@ def entrena():
                     obs[mb], acciones[mb])
                 log_ratio = nueva_logp - logprobs[mb]
                 ratio = log_ratio.exp()            # r_t(theta)
+
+                # --- Diagnosticos (no entran en la perdida) ---
+                # (r-1) - log r es el estimador barato de KL(vieja||nueva):
+                # insesgado y, a diferencia del ingenuo -log r, nunca negativo.
+                with torch.no_grad():
+                    kls.append((((ratio - 1) - log_ratio).mean()).item())
+                    recortadas.append(((ratio - 1).abs() &gt; CLIP_EPS).float().mean().item())
 
                 # Ventajas normalizadas por minibatch (media 0, desviacion 1).
                 mb_adv = ventajas[mb]
@@ -813,7 +989,8 @@ def entrena():
 
         media = np.mean(ventana) if ventana else float("nan")
         print(f"Iter {it:3d} | pasos {paso_global:6d} | "
-              f"recompensa media (ult. 20) = {media:6.1f}")
+              f"recompensa media (ult. 20) = {media:6.1f} | "
+              f"KL ~ {np.mean(kls):.4f} | recortadas = {100 * np.mean(recortadas):4.1f}%")
 
         if len(ventana) &gt;= 20 and media &gt;= OBJETIVO_RESUELTO:
             print(f"\n¡Resuelto! Recompensa media (ult. 20) = {media:.1f} "
@@ -830,11 +1007,26 @@ if __name__ == "__main__":
         </div>
 
         <p>
-          Es prácticamente el mismo esqueleto que usa la industria. Al leerlo, fíjate en tres decisiones que
+          Es prácticamente el mismo esqueleto que usa la industria. Al leerlo, fíjate en cinco decisiones que
           ya no te sorprenderán: (1) la política vieja se «congela» guardando <code>logprobs</code> durante
           la recogida y comparando contra ellas en cada época; (2) las ventajas se normalizan por minibatch;
-          y (3) se recorta la norma del gradiente con <code>clip_grad_norm_</code>, otra salvaguarda de
-          estabilidad muy típica en PPO.
+          (3) se recorta la norma del gradiente con <code>clip_grad_norm_</code>, otra salvaguarda de
+          estabilidad muy típica en PPO; (4) los pesos se inicializan de forma <strong>ortogonal</strong>
+          (la función <code>init_capa</code>), con ganancia $\sqrt{2}$ en las capas ocultas y $0{,}01$ en la
+          última del actor, para que al arrancar los logits sean casi iguales y la política salga casi
+          uniforme; y (5) la tasa de aprendizaje <strong>decae linealmente</strong> hasta cero
+          (<code>ANNEAL_LR</code>): pasos grandes mientras hay mucho que aprender, retoques al final. Los
+          detalles (4) y (5) parecen cosmética y no lo son: están en casi todas las implementaciones serias
+          de PPO porque, quitándolos, el algoritmo se vuelve notablemente más caprichoso.
+        </p>
+        <p>
+          Y fíjate en las dos últimas columnas que imprime: la KL aproximada y la fracción de transiciones
+          recortadas, los mismos dos diagnósticos que ya usaste en el ejemplo de NumPy. Míralos antes que a
+          la pérdida, que —como en cualquier método de gradiente de política— no significa gran cosa. En la
+          ejecución que verás más abajo la fracción recortada no llega en ningún momento al $3\,\%$ y la KL
+          se queda en $0{,}002$ como mucho: con una tasa de $2{,}5\cdot 10^{-4}$ y solo $4$ épocas, este PPO
+          es de los prudentes. Sabiendo leer esas dos columnas ya puedes decidir tú mismo si te sobra freno
+          o te falta.
         </p>
 
         <h2 id="terminal">Ejecutarlo en tu terminal</h2>
@@ -852,16 +1044,24 @@ if __name__ == "__main__":
 
 <span class="comment"># 3a) PPO desde cero en numpy (rápido, abre una gráfica)</span>
 <span class="prompt">$</span> python code/16-ppo/ppo_desde_cero.py
-<span class="comment">Iteracion  20 | retorno medio =  -60.75   (optimo = -8)
+<span class="comment">Iteracion  20 | retorno medio =  -17.12 | recortadas =   5.8% | KL ~ 0.0046   (optimo = -8)
+Iteracion  40 | retorno medio =   -8.62 | recortadas =  13.0% | KL ~ 0.0043   (optimo = -8)
 ...
-Iteracion 160 | retorno medio =  -13.62   (optimo = -8)
+Iteracion 120 | retorno medio =   -8.38 | recortadas =  22.4% | KL ~ 0.0067   (optimo = -8)
+Iteracion 160 | retorno medio =   -8.50 | recortadas =   2.9% | KL ~ 0.0029   (optimo = -8)
+
+Maximo |r-1| de todo el entrenamiento: 0.38
+
+Camino mas corto posible: 8 pasos (retorno -8).
 Pasos de la politica aprendida (voraz): 8.</span>
 
 <span class="comment"># 3b) PPO con PyTorch sobre CartPole-v1 (entrena unos minutos)</span>
 <span class="prompt">$</span> python code/16-ppo/ppo_torch.py
-<span class="comment">Iter   1 | pasos    512 | recompensa media (ult. 20) =   23.9
+<span class="comment">Iter   1 | pasos    512 | recompensa media (ult. 20) =   23.9 | KL ~ 0.0002 | recortadas =  0.0%
 ...
-¡Resuelto! Recompensa media (ult. 20) = 479.1 tras 88064 pasos.</span></pre>
+Iter 179 | pasos  91648 | recompensa media (ult. 20) =  258.4 | KL ~ 0.0020 | recortadas =  2.3%
+...
+¡Resuelto! Recompensa media (ult. 20) = 479.4 tras 131584 pasos.</span></pre>
         </div>
         <p class="pyodide-banner">
           💡 Los números concretos pueden variar un poco entre versiones de las librerías o de una ejecución

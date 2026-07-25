@@ -129,6 +129,10 @@ def entrena(pasos_totales=20000, inicio_aprendizaje=1000, batch=256,
     torch.manual_seed(semilla)
 
     env = gym.make("Pendulum-v1")
+    # reset(seed=...) siembra el entorno, pero NO el espacio de acciones: sin esta
+    # línea, el arranque aleatorio de abajo cambia en cada ejecución y la traza no
+    # es reproducible aunque hayas fijado todas las demás semillas.
+    env.action_space.seed(semilla)
     dim_s = env.observation_space.shape[0]
     dim_a = env.action_space.shape[0]
     a_high = env.action_space.high              # [2.0] en Pendulum

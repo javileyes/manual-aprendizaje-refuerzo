@@ -153,6 +153,29 @@
           </p>
         </div>
 
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Dos despistes clásicos con las funciones de valor</div>
+          <p>
+            <strong>1. El valor de un estado terminal es $0$. Siempre.</strong> Y no por convenio
+            cómodo: desde un terminal ya no llega ninguna recompensa más, así que $G_t = 0$ en todas
+            las trayectorias y su esperanza también. Como además no se sale de ahí, ese cero
+            <em>no se actualiza nunca</em>. Si algún día tu implementación te devuelve un valor
+            distinto de cero en un estado terminal, tienes un bug garantizado, y casi siempre es el
+            mismo: has hecho <em>bootstrapping</em> sobre el estado siguiente sin comprobar antes que
+            el episodio había terminado. Volveremos a ello en el
+            <a href="07-td-aprendizaje.html">capítulo 7</a>, donde ese cero es justo lo que corta la
+            cadena de estimaciones y deja entrar un número real.
+          </p>
+          <p>
+            <strong>2. $R_{t+1}$ o $R_t$: mira el reloj antes de comparar libros.</strong> Aquí, como
+            en Sutton y Barto, la recompensa que provoca la acción $A_t$ se llama $R_{t+1}$, porque
+            la produce el entorno <em>después</em> de que hayas decidido. Otros textos la llaman
+            $R_t$. Las fórmulas resultantes son las mismas, pero todos los índices bailan un puesto:
+            cuando pegues una ecuación de otra fuente en tu código, comprueba primero qué convenio
+            usa o acabarás desplazando la recompensa un paso.
+          </p>
+        </div>
+
         <h2 id="bellman">La ecuación de Bellman de esperanza</h2>
         <p>
           Aquí ocurre lo bonito. Vamos a meter la recursión $G_t = R_{t+1} + \gamma\,G_{t+1}$
@@ -164,13 +187,43 @@
           + \gamma\, \mathbb{E}_{\pi}\!\left[\,G_{t+1} \mid S_t = s\,\right].$$
         </p>
         <p>
-          Ahora desarrollamos las dos esperanzas condicionando sobre lo que puede pasar: primero
-          la acción $a$ (según $\pi$), y luego el estado siguiente $s'$ (según la dinámica del MDP
-          $p(s' \mid s, a)$ que definimos en el <a href="03-mdp.html">capítulo 3</a>). La clave es
-          que $\mathbb{E}_\pi[G_{t+1} \mid S_{t+1} = s'] = V^\pi(s')$: ¡el mismo tipo de objeto,
-          pero un paso más adelante! Escribiendo $r(s,a)$ para la recompensa esperada inmediata,
-          obtenemos la estrella del capítulo.
+          Ahora hay que desarrollar esas dos esperanzas. Se hace en tres pasos, y vale la pena
+          verlos por separado, porque el segundo es —sin exagerar— el que sostiene todo el manual.
         </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La derivación, en tres pasos</div>
+          <p>
+            <strong>(1) Abrir el árbol.</strong> Desde $s$ ocurren dos sorteos: primero la política
+            elige una acción $a$, después el entorno decide el estado siguiente $s'$ según
+            $p(s'\mid s,a)$. Condicionamos sobre los dos y escribimos $r(s,a)$ para la recompensa
+            esperada inmediata:
+          </p>
+          <p>$$V^{\pi}(s) = \sum_{a} \pi(a\mid s)\left[\, r(s,a) + \gamma \sum_{s'} p(s'\mid s,a)\;
+          \mathbb{E}_{\pi}\!\left[\,G_{t+1} \mid S_t=s,\, A_t=a,\, S_{t+1}=s'\,\right] \right]$$</p>
+          <p>
+            <strong>(2) Tachar el pasado.</strong> Esa esperanza arrastra tres condicionantes, y son
+            demasiados: mientras estén ahí, no es ninguna función conocida. Pero $G_{t+1}$ solo
+            depende de lo que venga <em>después</em>, y por la
+            <a href="03-mdp.html#propiedad-markov">propiedad de Markov</a> lo que venga después solo
+            depende de dónde estás ahora, que es $s'$. Así que $s$ y $a$ sobran, y los tachamos:
+          </p>
+          <p>$$\mathbb{E}_{\pi}\!\left[\,G_{t+1} \mid S_t=s,\, A_t=a,\, S_{t+1}=s'\,\right]
+          \;\overset{\text{Markov}}{=}\; \mathbb{E}_{\pi}\!\left[\,G_{t+1} \mid S_{t+1}=s'\,\right]$$</p>
+          <p>
+            <strong>(3) Reconocer lo que ha quedado.</strong> Y lo que ha quedado es, palabra por
+            palabra, la definición de $V^{\pi}(s')$: el mismo objeto que estábamos calculando, pero
+            un paso más adelante. Sustituyéndolo en (1) aparece la estrella del capítulo.
+          </p>
+          <p class="math-note">
+            El paso (2) es donde se cobra la factura del <a href="03-mdp.html">capítulo 3</a>.
+            <strong>Sin la propiedad de Markov ese tachón sería ilegal</strong>: el valor de mañana
+            dependería también de por dónde pasaste ayer, no habría ninguna función $V^\pi(s')$ que
+            reconocer en el paso (3) y sencillamente <em>no habría ecuación de Bellman</em>. Toda la
+            maquinaria que viene después —programación dinámica, TD, SARSA, Q-Learning, DQN— cuelga
+            de esa única línea.
+          </p>
+        </div>
 
         <div class="callout math">
           <div class="callout-title">➗ Bellman de esperanza para $V^\pi$</div>
@@ -181,6 +234,24 @@
             $\gamma$ el descuento. En palabras: <strong>el valor de hoy es la recompensa inmediata
             esperada más el valor descontado de mañana</strong>. Es una ecuación de consistencia
             que $V^\pi$ cumple en <em>todos</em> los estados a la vez.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 La misma ecuación, dos vestidos</div>
+          <p>
+            En muchos libros —y en el <a href="05-programacion-dinamica.html">capítulo 5</a> de este
+            mismo manual, desde su primera fórmula— verás esta ecuación escrita así:
+          </p>
+          <p>$$V^{\pi}(s) = \sum_{a} \pi(a \mid s) \sum_{s',\,r} p(s', r \mid s, a)\,\big[\, r + \gamma\, V^{\pi}(s') \,\big]$$</p>
+          <p>
+            No es otra ecuación: es <em>esta</em>, con la dinámica conjunta $p(s', r\mid s,a)$ del
+            <a href="03-mdp.html">capítulo 3</a> en lugar de sus dos resúmenes. Lo que las une son
+            las dos identidades que ya viste allí:
+            $r(s,a) = \sum_{s',r} r\; p(s',r\mid s,a)$ y $p(s'\mid s,a) = \sum_{r} p(s',r\mid s,a)$.
+            La versión larga es más general —vale también cuando la recompensa depende de dónde
+            aterrices—; la corta es mucho más cómoda para hacer cuentas, y es la que usaremos aquí.
+            <strong>No te asustes cuando la ecuación cambie de traje: es la misma persona.</strong>
           </p>
         </div>
 
@@ -229,6 +300,107 @@
         </div>
 
         <p>
+          Las tres ecuaciones que llevamos —$V^\pi$, $Q^\pi$ y $V^*$— se dibujan siempre igual, y
+          ese dibujo tiene nombre: <strong>diagrama de <em>backup</em></strong>. Se lee de arriba
+          abajo: arriba lo que quieres calcular, abajo aquello a partir de lo cual lo calculas.
+        </p>
+
+        <figure class="figure">
+          <svg viewBox="0 0 660 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Tres diagramas de backup: para V de pi, para Q de pi y para V óptima. En los dos primeros la primera capa promedia; en el tercero toma el máximo y descarta una rama.">
+            <!-- ================= Panel 1: V^pi ================= -->
+            <text x="110" y="20" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="700" style="fill:var(--text)"><tspan font-style="italic">V</tspan><tspan font-size="11" dy="-6">π</tspan><tspan font-size="15" dy="6">(s)</tspan></text>
+            <path d="M110,67 L70,112" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+            <path d="M110,67 L150,112" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+            <path d="M70,124 L48,173" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+            <path d="M70,124 L92,173" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+            <path d="M150,124 L128,173" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+            <path d="M150,124 L172,173" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+            <circle cx="110" cy="54" r="13" stroke-width="2" style="fill:var(--bg-elev);stroke:var(--text)" />
+            <circle cx="70" cy="118" r="6.5" style="fill:var(--text)" />
+            <circle cx="150" cy="118" r="6.5" style="fill:var(--text)" />
+            <circle cx="48" cy="184" r="11" stroke-width="2" style="fill:var(--bg-elev);stroke:var(--text)" />
+            <circle cx="92" cy="184" r="11" stroke-width="2" style="fill:var(--bg-elev);stroke:var(--text)" />
+            <circle cx="128" cy="184" r="11" stroke-width="2" style="fill:var(--bg-elev);stroke:var(--text)" />
+            <circle cx="172" cy="184" r="11" stroke-width="2" style="fill:var(--bg-elev);stroke:var(--text)" />
+            <text x="110" y="216" text-anchor="middle" font-family="sans-serif" font-size="10.5" style="fill:var(--text-soft)">① promedio con π(a | s)</text>
+            <text x="110" y="232" text-anchor="middle" font-family="sans-serif" font-size="10.5" style="fill:var(--text-soft)">② promedio con p(s′ | s,a)</text>
+
+            <!-- ================= Panel 2: Q^pi ================= -->
+            <text x="330" y="20" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="700" style="fill:var(--text)"><tspan font-style="italic">Q</tspan><tspan font-size="11" dy="-6">π</tspan><tspan font-size="15" dy="6">(s, a)</tspan></text>
+            <path d="M330,63 L290,108" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+            <path d="M330,63 L370,108" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+            <path d="M290,130 L268,177" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+            <path d="M290,130 L312,177" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+            <path d="M370,130 L348,177" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+            <path d="M370,130 L392,177" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+            <circle cx="330" cy="54" r="7" style="fill:var(--text)" />
+            <circle cx="290" cy="118" r="12" stroke-width="2" style="fill:var(--bg-elev);stroke:var(--text)" />
+            <circle cx="370" cy="118" r="12" stroke-width="2" style="fill:var(--bg-elev);stroke:var(--text)" />
+            <circle cx="268" cy="184" r="6.5" style="fill:var(--text)" />
+            <circle cx="312" cy="184" r="6.5" style="fill:var(--text)" />
+            <circle cx="348" cy="184" r="6.5" style="fill:var(--text)" />
+            <circle cx="392" cy="184" r="6.5" style="fill:var(--text)" />
+            <text x="330" y="216" text-anchor="middle" font-family="sans-serif" font-size="10.5" style="fill:var(--text-soft)">① promedio con p(s′ | s,a)</text>
+            <text x="330" y="232" text-anchor="middle" font-family="sans-serif" font-size="10.5" style="fill:var(--text-soft)">② promedio con π(a′ | s′)</text>
+
+            <!-- ================= Panel 3: V* ================= -->
+            <text x="550" y="20" text-anchor="middle" font-family="sans-serif" font-size="15" font-weight="700" style="fill:var(--text)"><tspan font-style="italic">V</tspan><tspan font-size="15" dy="-5">*</tspan><tspan font-size="15" dy="5">(s)</tspan></text>
+            <g opacity="0.25">
+              <path d="M550,67 L590,112" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+              <path d="M590,124 L568,173" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+              <path d="M590,124 L612,173" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+              <circle cx="590" cy="118" r="6.5" style="fill:var(--text)" />
+              <circle cx="568" cy="184" r="11" stroke-width="2" style="fill:var(--bg-elev);stroke:var(--text)" />
+              <circle cx="612" cy="184" r="11" stroke-width="2" style="fill:var(--bg-elev);stroke:var(--text)" />
+            </g>
+            <path d="M550,67 L510,112" fill="none" stroke-width="2.4" style="stroke:var(--accent)" />
+            <path d="M510,124 L488,173" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+            <path d="M510,124 L532,173" fill="none" stroke-width="1.6" style="stroke:var(--text-faint)" />
+            <circle cx="550" cy="54" r="13" stroke-width="2" style="fill:var(--bg-elev);stroke:var(--text)" />
+            <circle cx="510" cy="118" r="6.5" style="fill:var(--text)" />
+            <circle cx="488" cy="184" r="11" stroke-width="2" style="fill:var(--bg-elev);stroke:var(--text)" />
+            <circle cx="532" cy="184" r="11" stroke-width="2" style="fill:var(--bg-elev);stroke:var(--text)" />
+            <text x="512" y="90" text-anchor="end" font-family="sans-serif" font-size="12" font-weight="700" style="fill:var(--accent)">máx</text>
+            <text x="550" y="216" text-anchor="middle" font-family="sans-serif" font-size="10.5" style="fill:var(--text-soft)">① MÁXIMO sobre las acciones</text>
+            <text x="550" y="232" text-anchor="middle" font-family="sans-serif" font-size="10.5" style="fill:var(--text-soft)">② promedio con p(s′ | s,a)</text>
+          </svg>
+          <figcaption>
+            Los <strong>círculos huecos son estados</strong> (ahí decide el <em>agente</em>) y los
+            <strong>puntos rellenos son pares estado–acción</strong> (ahí decide el <em>entorno</em>).
+            Cada diagrama dice cómo se calcula lo de arriba a partir de lo de abajo. Compara el
+            primero con el tercero: son el mismo árbol, y <strong>la única diferencia entre
+            <em>evaluar</em> una política y <em>ser óptimo</em> es cambiar el promedio de la primera
+            capa por un máximo</strong> —lo que descarta ramas en vez de promediarlas—. Ese dibujo
+            es, literalmente, toda la teoría de este capítulo.
+          </figcaption>
+        </figure>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ La pregunta que casi todos los libros se saltan</div>
+          <p>
+            Al escribir $V^{*}(s) = \max_\pi V^{\pi}(s)$ hemos hecho una trampa sin avisar: ese
+            máximo se toma <strong>estado por estado</strong>. ¿Y si la política que gana en $s$ no
+            es la misma que gana en $s'$? Entonces $V^*$ sería un collage de políticas distintas y
+            no el valor de ninguna política real, y la ecuación de optimalidad no describiría nada
+            que se pueda jugar.
+          </p>
+          <p>
+            No ocurre, y ese es el <strong>teorema fundamental</strong> de los MDP: en todo MDP
+            finito con $\gamma &lt; 1$ existe al menos una política $\pi^{*}$ que es óptima en
+            <strong>todos los estados a la vez</strong>; se puede tomar <strong>determinista</strong>
+            (no hace falta sortear nada) y <strong>estacionaria</strong> (la misma regla siempre, sin
+            mirar el reloj); y la ecuación de optimalidad tiene <strong>solución única</strong>. Por
+            eso tiene sentido hablar de «la» función de valor óptima y de «la» política óptima.
+          </p>
+          <p>
+            La razón profunda es que el operador de Bellman es una <em>contracción</em>: aplicarlo
+            acerca entre sí dos estimaciones cualesquiera, y algo que acerca todo no puede tener dos
+            puntos fijos. Esa es exactamente la propiedad que verás demostrada —y convertida en
+            algoritmo— en el <a href="05-programacion-dinamica.html#coste">capítulo 5</a>.
+          </p>
+        </div>
+
+        <p>
           Y de $Q^*$ sale la mejor forma de jugar casi gratis. Como $Q^*(s,a)$ ya te dice cuánto
           vale cada acción suponiendo comportamiento óptimo después, basta con
           quedarse con la mejor en cada estado:
@@ -259,8 +431,53 @@
           <p>$$\mathbf{V} = \mathbf{r}_\pi + \gamma\, P_\pi \mathbf{V} \quad\Longrightarrow\quad (\mathbf{I} - \gamma P_\pi)\,\mathbf{V} = \mathbf{r}_\pi \quad\Longrightarrow\quad \mathbf{V} = (\mathbf{I} - \gamma P_\pi)^{-1} \mathbf{r}_\pi$$</p>
           <p class="math-note">
             Donde $r_\pi(s) = \sum_a \pi(a\mid s)\, r(s,a)$ y $(P_\pi)_{s s'} = \sum_a \pi(a\mid s)\, p(s'\mid s, a)$.
-            Con $\gamma &lt; 1$ la matriz $\mathbf{I} - \gamma P_\pi$ siempre es invertible (sus valores
-            propios no pueden ser cero), así que <strong>hay solución única</strong>.
+          </p>
+        </div>
+
+        <p>
+          ¿Y por qué se puede invertir siempre? No es un accidente. $P_\pi$ es una matriz
+          <strong>estocástica</strong>: cada fila es una distribución de probabilidad y suma $1$.
+          Eso obliga a que todos sus valores propios cumplan $|\lambda| \le 1$. Los valores propios
+          de $\mathbf{I} - \gamma P_\pi$ son entonces $1 - \gamma\lambda$, y con $\gamma &lt; 1$
+          ninguno puede anularse, porque $|\gamma\lambda| \le \gamma &lt; 1$. La matriz nunca es
+          singular: <strong>hay solución única</strong>, siempre.
+        </p>
+        <p>
+          Y esa inversa esconde un regalo. Por el mismo motivo ($\gamma P_\pi$ «encoge»), vale el
+          desarrollo en serie geométrica de matrices, la llamada <em>serie de Neumann</em>:
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ La inversa, abierta en serie</div>
+          <p>$$(\mathbf{I} - \gamma P_\pi)^{-1} = \sum_{k=0}^{\infty} \gamma^{k} P_\pi^{k}
+          \quad\Longrightarrow\quad
+          \mathbf{V} = \mathbf{r}_\pi + \gamma P_\pi \mathbf{r}_\pi + \gamma^{2} P_\pi^{2} \mathbf{r}_\pi + \cdots$$</p>
+          <p class="math-note">
+            Léela despacio, porque cierra el círculo del capítulo. $P_\pi^{k}$ dice dónde estarás
+            dentro de $k$ pasos; multiplicado por $\mathbf{r}_\pi$, cuánto cobrarás allí; y
+            $\gamma^k$ lo descuenta. O sea que el término $k$-ésimo es $\mathbb{E}[\gamma^k R_{t+k+1}]$.
+            <strong>La fórmula matricial es literalmente la definición del retorno esperado</strong>,
+            $\mathbb{E}_\pi\big[\sum_k \gamma^k R_{t+k+1}\big]$, escrita con matrices en vez de con
+            esperanzas. No hemos inventado nada nuevo: hemos aprendido a sumarlo de golpe.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Lo que acabas de resolver es un MRP</div>
+          <p>
+            Mira otra vez $P_\pi$ y $\mathbf{r}_\pi$. Son exactamente el $P_\pi(s'\mid s)$ y el
+            $R_\pi(s)$ de <a href="03-mdp.html#familia">la familia de Markov</a> del capítulo 3: la
+            dinámica y la recompensa del MDP promediadas por la política. Allí quedó dicho que fijar
+            una $\pi$ «apaga» las acciones y deja un <strong>proceso de recompensa de Markov</strong>,
+            $\langle \mathcal{S}, P_\pi, R_\pi, \gamma\rangle$. Pues bien: al escribir Bellman en
+            forma matricial no estamos haciendo álgebra por gusto, estamos
+            <strong>resolviendo el MRP que $\pi$ induce</strong>. Eso, y nada más, es evaluar una
+            política.
+          </p>
+          <p>
+            (Nota tipográfica, para que no te despiste el cambio de letra: allí era $R_\pi(s)$, una
+            función; aquí es $\mathbf{r}_\pi$, el vector con esos mismos $|\mathcal{S}|$ números
+            apilados. Mismo objeto, distinta ropa.)
           </p>
         </div>
 
@@ -279,8 +496,8 @@
         <h2 id="ejemplo">Ejemplo: $V^\pi$ en un gridworld, dos formas</h2>
         <p>
           Vamos a hacerlo de verdad. El entorno es un <strong>gridworld de 4×4</strong>: 16
-          casillas numeradas de $0$ a $15$. Las dos esquinas opuestas ($0$ y $15$) son
-          <strong>terminales</strong>. Desde cualquier otra casilla el agente se mueve
+          casillas numeradas de $0$ a $15$. Las esquinas superior izquierda e inferior derecha
+          ($0$ y $15$) son <strong>terminales</strong>. Desde cualquier otra casilla el agente se mueve
           arriba/abajo/izquierda/derecha; si choca con la pared, se queda donde está. Cada paso
           cuesta $-1$ (queremos salir cuanto antes). La política a evaluar es la más tonta posible:
           <strong>moverse al azar</strong>, con probabilidad $1/4$ en cada dirección.
@@ -470,22 +687,76 @@ if __name__ == "__main__":
         <p>
           Pulsa <strong>▶ Ejecutar</strong>. En la tabla verás, columna a columna, la $V^\pi$
           exacta de Bellman y la estimada por Monte Carlo: son prácticamente idénticas (el error
-          máximo es de apenas unas centésimas, y bajaría más con más episodios). El mapa de calor
-          muestra lo que la intuición predice: las casillas <strong>cerca de una salida</strong>
-          valen más (retorno menos negativo, colores claros) y las <strong>más alejadas de ambas
-          salidas</strong> —las dos esquinas opuestas y el interior— valen menos (colores oscuros).
-          El diagrama de la derecha pone cada punto casi
-          exactamente sobre la recta $y = x$: <strong>Bellman y la simulación cuentan la misma
-          historia</strong>.
+          máximo es de $0{,}093$, y bajaría más con más episodios). El diagrama de dispersión de la
+          derecha pone cada punto casi exactamente sobre la recta $y = x$: <strong>Bellman y la
+          simulación cuentan la misma historia</strong>.
         </p>
+        <p>
+          El mapa de calor confirma lo que dicta la intuición: lo que manda es lo cerca que estés de
+          una salida. Las cuatro casillas pegadas a una terminal —los estados $1$, $4$, $11$ y
+          $14$— son las mejores, con $V^\pi = -5{,}278$. Las peores son las <em>otras</em> dos
+          esquinas, los estados $3$ y $12$, con $V^\pi = -7{,}651$: desde ahí hay que cruzar el
+          tablero entero. Y la simetría del problema se lee a simple vista:
+          $V^\pi(1) = V^\pi(4) = V^\pi(11) = V^\pi(14)$ y $V^\pi(3) = V^\pi(12)$, como debe ser.
+        </p>
+        <p>
+          Ahora una sorpresa que merece la pena mirar despacio: <strong>el interior no es
+          uniformemente malo</strong>. Los estados $5$ y $10$, los dos que caen sobre la diagonal
+          que une las salidas, valen $-6{,}606$, bastante <em>mejor</em> que casillas de borde como
+          la $2$ o la $7$ ($-7{,}128$). Pero los otros dos interiores, el $6$ y el $9$, valen
+          $-7{,}181$, algo peor que ellas. Hay dos efectos superpuestos:
+        </p>
+        <ul>
+          <li><strong>La pared cuesta dinero.</strong> Compara el $5$ con el $2$: los dos están a
+            dos pasos de la salida más cercana, y sin embargo el $5$ gana. Desde el $5$ ninguna de
+            las cuatro acciones choca contra el borde, así que los cuatro movimientos te llevan a
+            alguna parte; en el $2$, que está pegado al borde superior, una de cada cuatro acciones
+            se desperdicia rebotando y te deja donde estabas, con su $-1$ cobrado igual.</li>
+          <li><strong>Entre iguales, decide la distancia.</strong> El $5$ y el $6$ son los dos
+            interiores y ninguno toca la pared, así que ese efecto se cancela; lo que los separa es
+            que el $5$ está a dos pasos de la salida $0$ y el $6$ a tres de cualquiera de las dos.</li>
+        </ul>
+        <p>
+          Junta los dos efectos y sale el orden completo: el $6$ no rebota nunca contra la pared,
+          pero está un paso más lejos de la salida que el $2$, y esa distancia le cuesta más de lo
+          que le ahorra no rebotar. Por eso acaba $0{,}05$ por debajo.
+        </p>
+
+        <div class="callout math">
+          <div class="callout-title">➗ Comprobémoslo a mano en una casilla</div>
+          <p>
+            No te fíes del programa: haz una de las dieciséis ecuaciones tú mismo. Toma el estado
+            $1$, la casilla $(0,1)$. Sus cuatro acciones llevan a: <em>arriba</em> → choca con el
+            borde y se queda en $1$; <em>abajo</em> → $5$; <em>izquierda</em> → $0$ (¡terminal!);
+            <em>derecha</em> → $2$. Con la política uniforme cada una tiene probabilidad $1/4$, el
+            paso cuesta $-1$ pase lo que pase y $\gamma = 0{,}9$:
+          </p>
+          <p>$$V^{\pi}(1) \;=\; -1 + 0{,}9\left[\tfrac14 V^{\pi}(1) + \tfrac14 V^{\pi}(5) + \tfrac14 V^{\pi}(0) + \tfrac14 V^{\pi}(2)\right]$$</p>
+          <p>
+            Metemos los números que acaba de imprimir el programa —$V^\pi(1) = -5{,}278$,
+            $V^\pi(5) = -6{,}606$, $V^\pi(0) = 0$ (terminal) y $V^\pi(2) = -7{,}128$—, cuya suma es
+            $-19{,}012$:
+          </p>
+          <p>$$-1 + 0{,}225 \cdot (-19{,}012) \;=\; -1 - 4{,}278 \;=\; \mathbf{-5{,}278}$$</p>
+          <p class="math-note">
+            Sale clavado el número que imprime la tabla. Y fíjate en el detalle que lo cambia todo: <strong>$V^\pi(1)$ aparece a los dos lados de
+            la igualdad</strong>. Bellman no es una fórmula que se evalúa, es una ecuación que se
+            <em>resuelve</em>; y con 16 estados son 16 ecuaciones acopladas entre sí. Por eso hizo
+            falta el sistema lineal $(\mathbf{I}-\gamma P_\pi)\mathbf{V}=\mathbf{r}_\pi$: no es un
+            adorno de álgebra, es la única forma de despejar.
+          </p>
+        </div>
 
         <div class="callout intuition">
           <div class="callout-title">🧪 Experimenta</div>
           <p>
             Cambia <code>GAMMA = 0.9</code> a <code>0.99</code> y vuelve a ejecutar: como el agente
             se vuelve más «paciente», los costes lejanos pesan más y todos los valores se hacen
-            más negativos. Prueba también <code>0.5</code>: el mapa se aplana, porque el futuro
-            lejano casi no cuenta. Estás viendo, en directo, cómo $\gamma$ moldea el significado
+            más negativos (el estado $1$ pasa de $-5{,}28$ a $-11{,}95$, y el $12$ de $-7{,}65$ a
+            $-18{,}61$). Prueba también <code>0.5</code>: el mapa se aplana, porque el futuro
+            lejano casi no cuenta —todas las casillas no terminales caen entre $-1{,}69$ y
+            $-1{,}98$, tres décimas de diferencia entre la mejor y la peor frente a las $2{,}37$
+            que había con $0{,}9$—. Estás viendo, en directo, cómo $\gamma$ moldea el significado
             de «valor».
           </p>
         </div>

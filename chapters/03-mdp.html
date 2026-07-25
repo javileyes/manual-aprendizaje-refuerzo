@@ -134,6 +134,47 @@
           </p>
         </div>
 
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Cuando no puedes ver el estado: los POMDP</div>
+          <p>
+            Acabamos de nombrar el caso peligroso de pasada, así que vale la pena sacarlo del
+            paréntesis. Hasta ahora hemos supuesto que el agente <strong>ve el estado</strong>. En la
+            práctica, casi nunca: lo que recibe es una <strong>observación</strong> $o$ —una imagen,
+            la lectura de unos sensores, el texto de una conversación— que es una función
+            (posiblemente ruidosa, posiblemente incompleta) del estado real $s$. A eso se le llama
+            <strong>MDP parcialmente observable</strong>, o <strong>POMDP</strong>.
+          </p>
+          <p>
+            El error tentador es tratar $o$ como si fuera $s$ y seguir adelante. Si $o$ no resume el
+            pasado, <strong>la propiedad de Markov se rompe</strong>, y con ella se cae todo lo que
+            construiremos encima: las ecuaciones de Bellman del
+            <a href="04-retornos-y-valor.html">capítulo 4</a>, las garantías de convergencia del
+            <a href="05-programacion-dinamica.html">5</a>, todo. Y lo peor es que el programa no
+            protesta: sencillamente aprende peor de lo que debería y nadie sabe por qué.
+          </p>
+          <p>Hay dos remedios, y los dos consisten en fabricarse un estado mejor:</p>
+          <ul>
+            <li>
+              <strong>Apilar historia.</strong> El truco de las dos fotos del coche, generalizado:
+              si una observación no basta, usa las $k$ últimas. Es barato, es aproximado y funciona
+              sorprendentemente bien: es literalmente lo que hace el DQN de Atari del
+              <a href="12-dqn.html">capítulo 12</a>, que apila cuatro fotogramas.
+            </li>
+            <li>
+              <strong>Recordar.</strong> Mantener un resumen de todo lo visto —una red recurrente, o
+              formalmente un <strong>estado de creencia</strong>: la distribución de probabilidad
+              sobre en qué estado real crees que estás—. Es más caro y más potente; el estado de
+              creencia sí es markoviano, pero vive en un espacio continuo aunque los estados
+              originales sean cuatro.
+            </li>
+          </ul>
+          <p>
+            Quédate con esto, que es de lo más rentable del capítulo: la mayoría de los fracasos
+            «inexplicables» del RL en problemas reales son <strong>estados mal diseñados</strong>,
+            no algoritmos malos. Antes de cambiar de algoritmo, cambia de estado.
+          </p>
+        </div>
+
         <h2 id="mdp-formal">El MDP, formalmente</h2>
         <p>
           Un <strong>Proceso de Decisión de Markov</strong> es la formalización de un entorno con
@@ -157,6 +198,31 @@
               <tr><td>$\gamma$</td><td>Descuento</td><td>Cuánto pesan las recompensas futuras, $\gamma \in [0, 1]$.</td></tr>
             </tbody>
           </table>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Cuatro cosas que se escriben con la letra R (y no son la misma)</div>
+          <p>
+            Antes de seguir, media página de tipografía que te ahorrará muchos disgustos. En este
+            capítulo —y en el resto del manual— la letra erre aparece con cuatro papeles distintos:
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Símbolo</th><th>Qué es</th><th>En el GridWorld</th></tr></thead>
+              <tbody>
+                <tr><td>$R$</td><td>El <strong>ingrediente</strong> de la tupla: «hay recompensas y así se reparten».</td><td>$-1$ por paso, $+10$ al pisar la meta.</td></tr>
+                <tr><td>$R_{t+1}$</td><td>La <strong>variable aleatoria</strong>: la recompensa concreta que llega tras actuar en el instante $t$.</td><td>El número que imprime cada línea de la trayectoria.</td></tr>
+                <tr><td>$\mathcal{R}$</td><td>El <strong>conjunto</strong> de valores que esa variable puede tomar (es sobre él sobre lo que suman los $\sum_{r \in \mathcal{R}}$).</td><td>$\mathcal{R} = \{-1, +10\}$ (más el $0$ del bucle terminal, si lo cuentas).</td></tr>
+                <tr><td>$r(s, a)$</td><td>La <strong>función</strong> de recompensa esperada: un número por cada par estado–acción.</td><td>Casi siempre $-1$; sube al acercarse a la meta.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            La regla mnemotécnica: <strong>mayúscula suelta = el ingrediente; mayúscula con
+            subíndice = la variable aleatoria; caligráfica = el conjunto; minúscula = la
+            función</strong>. La misma convención vale para los estados: $\mathcal{S}$ es el
+            conjunto, $S_t$ la variable aleatoria y $s$ un valor concreto.
+          </p>
         </div>
 
         <h3>La dinámica $p(s', r \mid s, a)$</h3>
@@ -217,23 +283,31 @@
                 <path d="M0,0 L8,3 L0,6 Z" fill="#0ea5e9" />
               </marker>
             </defs>
-            <circle cx="90" cy="125" r="38" fill="#4f46e5" />
-            <text x="90" y="132" text-anchor="middle" fill="#fff" font-size="22" font-family="sans-serif" font-weight="700">$s$</text>
-            <text x="90" y="200" text-anchor="middle" fill="#4a5568" font-size="14" font-family="sans-serif">acción $a$ = Este</text>
+            <circle cx="86" cy="125" r="38" fill="#4f46e5" />
+            <text x="86" y="133" text-anchor="middle" fill="#fff" font-size="24" font-family="sans-serif" font-weight="700" font-style="italic">s</text>
+            <text x="86" y="196" text-anchor="middle" style="fill:var(--text-soft)" font-size="14" font-family="sans-serif">acción <tspan font-style="italic">a</tspan><tspan>&#160;= Este</tspan></text>
 
-            <circle cx="500" cy="60" r="34" fill="#0ea5e9" />
-            <text x="500" y="67" text-anchor="middle" fill="#fff" font-size="18" font-family="sans-serif" font-weight="700">$s'_1$</text>
-            <circle cx="500" cy="190" r="34" fill="#0ea5e9" opacity="0.85" />
-            <text x="500" y="197" text-anchor="middle" fill="#fff" font-size="18" font-family="sans-serif" font-weight="700">$s'_2$</text>
+            <circle cx="512" cy="42" r="30" fill="#0ea5e9" opacity="0.8" />
+            <text x="512" y="49" text-anchor="middle" fill="#fff" font-size="17" font-family="sans-serif" font-weight="700"><tspan font-style="italic">s</tspan><tspan>′</tspan><tspan font-size="11" dy="4">2</tspan></text>
+            <circle cx="512" cy="125" r="33" fill="#0ea5e9" />
+            <text x="512" y="132" text-anchor="middle" fill="#fff" font-size="18" font-family="sans-serif" font-weight="700"><tspan font-style="italic">s</tspan><tspan>′</tspan><tspan font-size="11" dy="4">1</tspan></text>
+            <circle cx="512" cy="208" r="30" fill="#0ea5e9" opacity="0.8" />
+            <text x="512" y="215" text-anchor="middle" fill="#fff" font-size="17" font-family="sans-serif" font-weight="700"><tspan font-style="italic">s</tspan><tspan>′</tspan><tspan font-size="11" dy="4">3</tspan></text>
 
-            <path d="M128,110 C280,70 340,60 464,62" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow)" />
-            <text x="300" y="60" text-anchor="middle" fill="#4a5568" font-size="14" font-family="sans-serif">$p(s'_1|s,a)=0{,}9$</text>
-            <path d="M128,142 C280,180 340,190 464,190" fill="none" stroke="#0ea5e9" stroke-width="2.5" marker-end="url(#arrow2)" />
-            <text x="300" y="215" text-anchor="middle" fill="#4a5568" font-size="14" font-family="sans-serif">$p(s'_2|s,a)=0{,}1$ (resbalón)</text>
+            <path d="M124,125 L471,125" fill="none" stroke="#4f46e5" stroke-width="3" marker-end="url(#arrow)" />
+            <text x="298" y="115" text-anchor="middle" style="fill:var(--text-soft)" font-size="14" font-family="sans-serif" font-weight="700"><tspan font-style="italic">p</tspan><tspan>(</tspan><tspan font-style="italic">s</tspan><tspan>′</tspan><tspan font-size="10" dy="3">1</tspan><tspan font-size="14" dy="-3">&#160;|&#160;</tspan><tspan font-style="italic">s</tspan><tspan>,&#160;</tspan><tspan font-style="italic">a</tspan><tspan>) = 0,90</tspan></text>
+
+            <path d="M116,90 C230,45 330,32 478,42" fill="none" stroke="#0ea5e9" stroke-width="2" marker-end="url(#arrow2)" />
+            <text x="290" y="30" text-anchor="middle" style="fill:var(--text-faint)" font-size="13" font-family="sans-serif"><tspan font-style="italic">p</tspan><tspan>(</tspan><tspan font-style="italic">s</tspan><tspan>′</tspan><tspan font-size="9" dy="3">2</tspan><tspan font-size="13" dy="-3">&#160;|&#160;</tspan><tspan font-style="italic">s</tspan><tspan>,&#160;</tspan><tspan font-style="italic">a</tspan><tspan>) = 0,05 (resbalón)</tspan></text>
+
+            <path d="M116,160 C230,205 330,218 478,208" fill="none" stroke="#0ea5e9" stroke-width="2" marker-end="url(#arrow2)" />
+            <text x="290" y="238" text-anchor="middle" style="fill:var(--text-faint)" font-size="13" font-family="sans-serif"><tspan font-style="italic">p</tspan><tspan>(</tspan><tspan font-style="italic">s</tspan><tspan>′</tspan><tspan font-size="9" dy="3">3</tspan><tspan font-size="13" dy="-3">&#160;|&#160;</tspan><tspan font-style="italic">s</tspan><tspan>,&#160;</tspan><tspan font-style="italic">a</tspan><tspan>) = 0,05 (resbalón)</tspan></text>
           </svg>
           <figcaption>
             Transición <strong>estocástica</strong>: la misma acción puede llevar a estados distintos
-            con distintas probabilidades. En nuestro GridWorld esto será el «resbalón» del suelo.
+            con distintas probabilidades. Estos son exactamente los tres resultados del «resbalón» de
+            nuestro GridWorld —$0{,}90$ recto y $0{,}05$ a cada lado—, y son las tres líneas que
+            imprimirá el programa del final del capítulo. Suman $1$, como manda la normalización.
           </figcaption>
         </figure>
 
@@ -311,6 +385,41 @@
             una recompensa <strong>determinista que depende de $s'$</strong>: un caso particular
             perfectamente válido de este marco general.
           </p>
+        </div>
+
+        <div class="callout warn">
+          <div class="callout-title">⚠️ La recompensa dice QUÉ quieres, no CÓMO conseguirlo</div>
+          <p>
+            Diseñar $R$ es la parte del MDP que nadie te va a comprobar, y donde se cometen los
+            errores más caros. Tres reglas que valen para siempre:
+          </p>
+          <ul>
+            <li>
+              <strong>El signo importa muchísimo.</strong> Si en una tarea episódica pones por
+              descuido una recompensa <em>positiva</em> por paso, habrás creado un agente que
+              <strong>evita la meta</strong>: terminar le corta la nómina. Y no es una metáfora.
+              Cambia el $-1$ del GridWorld por $+1$, calcula la política óptima y sale un agente que
+              se dedica a dar vueltas para siempre; desde la casilla pegada a la meta, su mejor
+              acción es <strong>alejarse</strong> de ella. (Unas páginas más abajo, cuando tengamos
+              el descuento, podrás poner los números: con $\gamma = 0{,}95$ vagar eternamente
+              cobrando $+1$ vale $20$, y lanzarse a la meta desde la casilla de al lado, $11$.)
+              El programa no da ningún error: simplemente aprende otra cosa.
+            </li>
+            <li>
+              <strong>No premies subobjetivos.</strong> Si le das recompensa a un agente de ajedrez
+              por comer peones, aprenderá a comer peones aunque le cueste la partida. La recompensa
+              es <em>qué</em> quieres (ganar); <em>cómo</em> conseguirlo es justo lo que el agente
+              tiene que descubrir. Cada pista que le metas en $R$ es una hipótesis tuya sobre la
+              solución, y si te equivocas, la optimizará igual de bien.
+            </li>
+            <li>
+              <strong>Escalar es gratis; desplazar, no.</strong> Multiplicar todas las recompensas
+              por una constante $c &gt; 0$ multiplica todos los valores por $c$ y deja la política
+              óptima <em>intacta</em>. Pero <strong>sumar</strong> una constante sí la cambia en
+              cuanto los episodios puedan durar distinto: cobrar $+k$ por paso premia durar, cobrar
+              $-k$ premia acabar. Es exactamente el error del primer punto, en versión suave.
+            </li>
+          </ul>
         </div>
 
         <h2 id="politicas">Políticas: cómo decide el agente</h2>
@@ -408,6 +517,55 @@
             Aquí usamos que $\sum_{k=0}^{\infty} \gamma^k = \tfrac{1}{1-\gamma}$ cuando
             $0 \le \gamma &lt; 1$. Por eso en tareas continuas exigimos $\gamma &lt; 1$: sin descuento
             (con $\gamma = 1$) la cota se rompe y el retorno puede diverger.
+          </p>
+        </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 Qué significa $\gamma$ de verdad: dos lecturas</div>
+          <p>
+            $\gamma$ se suele presentar como «cuánto te importa el futuro», que es verdad pero no
+            dice gran cosa. Hay dos lecturas mucho más operativas.
+          </p>
+          <p>
+            <strong>(1) $\gamma$ es un horizonte.</strong> Los pesos $1, \gamma, \gamma^2, \dots$
+            suman $1/(1-\gamma)$, así que el agente se comporta, más o menos, como si mirara
+            $1/(1-\gamma)$ pasos hacia delante: con $\gamma = 0{,}9$, unos $10$ pasos; con
+            $0{,}99$, unos $100$; con $0{,}999$, unos $1000$. Esto convierte a $\gamma$ en algo que
+            puedes <em>elegir con criterio</em> en vez de a ojo: si el efecto de tu acción tarda
+            $200$ pasos en verse y pones $\gamma = 0{,}9$, tu agente será literalmente incapaz de
+            aprenderlo, porque a los $200$ pasos $\gamma^{200} \approx 7 \cdot 10^{-10}$ y esa
+            recompensa ya no existe para él.
+          </p>
+          <p>
+            <strong>(2) $\gamma$ es una probabilidad de seguir vivo.</strong> Imagina un mundo que,
+            en cada paso, se acaba de golpe con probabilidad $1-\gamma$. La probabilidad de llegar a
+            cobrar la recompensa de dentro de $k$ pasos es $\gamma^k$… que es exactamente su peso en
+            $G_t$. Dicho de otro modo: <em>el retorno descontado es el retorno sin descontar de un
+            mundo que puede terminar en cualquier momento</em>. Una recompensa lejana no vale menos
+            porque sí: vale menos porque a lo mejor nunca llegas a cobrarla.
+          </p>
+        </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Una sola fórmula para los dos tipos de tarea</div>
+          <p>
+            Hemos presentado el retorno con suma finita (episódica) y con suma infinita
+            (continua) como si fueran dos casos. En realidad se unifican con un truco tan simple que
+            parece trampa: <strong>convierte el estado terminal en un bucle sobre sí mismo con
+            recompensa $0$</strong>. Es decir, $p(s_T, 0 \mid s_T, a) = 1$ para toda acción —justo lo
+            que significa «absorbente»—.
+          </p>
+          <p>
+            A partir de $T$ todos los sumandos son cero, así que la suma infinita se corta sola en
+            $T$ y da el mismo número que la suma finita:
+          </p>
+          <p>$$G_t = \sum_{k=0}^{\infty} \gamma^k R_{t+k+1} = \sum_{k=0}^{T-t-1} \gamma^k R_{t+k+1}.$$</p>
+          <p>
+            Por eso <strong>la fórmula del retorno descontado sirve para los dos tipos de tarea a la
+            vez</strong>, y es la única que usaremos en el resto del manual. Y no es un adorno
+            teórico: es exactamente lo que hace el código cuando ejecuta un <code>break</code> al
+            recibir <code>terminado = True</code>. Deja de sumar porque a partir de ahí ya no hay
+            nada que sumar.
           </p>
         </div>
 
@@ -534,10 +692,20 @@
           conceptualmente, en los próximos capítulos.
         </p>
         <p>
-          El programa hace tres cosas: (1) muestrea una <strong>trayectoria</strong> bajo la
-          política aleatoria e imprime cada transición $(s, a, r, s')$; (2) estima por
+          Y fíjate sobre todo en la función <code>dinamica(env, s, a)</code>: es la $P$ de la tupla
+          escrita tal cual, con nombres y apellidos. Devuelve el diccionario de todos los pares
+          $(s', r)$ posibles con su probabilidad. <code>step()</code> <em>tira</em> los dados;
+          <code>dinamica()</code> <em>describe</em> los dados. Son las dos caras del mismo MDP, y a
+          partir del <a href="05-programacion-dinamica.html">capítulo 5</a> trabajaremos con la
+          segunda para calcular políticas óptimas sin ejecutar ni un solo episodio.
+        </p>
+        <p>
+          El programa hace cuatro cosas: (1) imprime la <strong>dinámica</strong>
+          $p(s', r \mid s, a)$ de un par de casillas concretas y comprueba que suma $1$;
+          (2) muestrea una <strong>trayectoria</strong> bajo la
+          política aleatoria e imprime cada transición $(s, a, r, s')$; (3) estima por
           <strong>Monte Carlo</strong> el retorno medio desde el inicio (promediando el retorno
-          descontado de muchos episodios); y (3) dibuja el tablero con <code>matplotlib</code>.
+          descontado de muchos episodios); y (4) dibuja el tablero con <code>matplotlib</code>.
         </p>
 
         <div class="code-example" data-packages="numpy,matplotlib">
@@ -656,6 +824,43 @@ class GridWorld:
         return self._a_estado(self.pos), -1.0, False
 
 
+def dinamica(env, s, a):
+    """La función P del MDP: devuelve p(s', r | s, a) como {(s', r): prob}.
+
+    step() TIRA LOS DADOS; esta función DESCRIBE los dados. Recorre las
+    direcciones reales posibles (la elegida con probabilidad 1-slip, cada
+    perpendicular con slip/2), calcula a dónde llevan y con qué recompensa,
+    y acumula la probabilidad de cada par (s', r).
+    """
+    pos = divmod(s, env.cols)
+    if pos == env.meta:
+        # Estado terminal absorbente: se queda donde está y no cobra nada más.
+        return {(s, 0.0): 1.0}
+
+    # Probabilidad de que la dirección REAL sea cada una.
+    reales = {a: 1.0 - env.slip}
+    for perp in PERPENDICULARES[a]:
+        reales[perp] = reales.get(perp, 0.0) + env.slip / 2.0
+
+    p = {}
+    for accion_real, prob in reales.items():
+        if prob == 0.0:      # con slip=0 las perpendiculares no llegan a ocurrir
+            continue
+        destino = env._mover(pos, accion_real)
+        s2 = destino[0] * env.cols + destino[1]
+        r = 10.0 if destino == env.meta else -1.0
+        p[(s2, r)] = p.get((s2, r), 0.0) + prob
+    return p
+
+
+def mostrar_dinamica(env, s, a):
+    """Imprime la tabla p(s', r | s, a) de un par (s, a) y comprueba que suma 1."""
+    p = dinamica(env, s, a)
+    for (s2, r), prob in p.items():
+        print(f"  p(s'={s2:&gt;2}, r={r:&gt;3.0f} | s={s}, a={NOMBRES[a]}) = {prob:.2f}")
+    print(f"  suma = {sum(p.values()):.2f}")
+
+
 def politica_aleatoria(rng):
     """Política pi(a|s) uniforme: elige una de las 4 acciones al azar."""
     return int(rng.integers(4))
@@ -740,12 +945,19 @@ if __name__ == "__main__":
     env = GridWorld(slip=0.1, seed=0)
     rng = np.random.default_rng(0)   # semilla fija: resultados reproducibles
 
-    print("=== Una trayectoria bajo política aleatoria pi(a|s) uniforme ===")
+    print("=== La dinámica p(s', r | s, a), con números ===")
+    print("Desde la casilla 0, hacia el Este:")
+    mostrar_dinamica(env, 0, 2)
+    print("Desde la casilla 23, hacia el Este (la meta está al lado):")
+    mostrar_dinamica(env, 23, 2)
+
+    print("\n=== Una trayectoria bajo política aleatoria pi(a|s) uniforme ===")
     muestrear_trayectoria(env, rng, max_pasos=30)
 
     print("\n=== Retorno medio por Monte Carlo (política aleatoria) ===")
-    retornos = estimar_retorno(env, rng, gamma=0.95, episodios=300, max_pasos=200)
-    print(f"gamma = 0.95   episodios = {len(retornos)}")
+    gamma = 0.95
+    retornos = estimar_retorno(env, rng, gamma=gamma, episodios=300, max_pasos=200)
+    print(f"gamma = {gamma}   episodios = {len(retornos)}")
     print(f"Retorno medio G_0 ≈ {retornos.mean():.2f}"
           f"   (desviación {retornos.std():.2f})")
 
@@ -754,7 +966,26 @@ if __name__ == "__main__":
         </div>
 
         <p>
-          Pulsa <strong>▶ Ejecutar</strong>. En la trayectoria verás que la política aleatoria
+          Pulsa <strong>▶ Ejecutar</strong>. Lo primero que aparece es la dinámica en carne y hueso.
+          Hasta ahora $p(s', r \mid s, a)$ era una letra; aquí la tienes con números. Desde la casilla
+          $0$, yendo al Este: el $90\,\%$ de las veces acabas en la $1$; el $5\,\%$ resbalas al norte,
+          chocas con el borde y <strong>te quedas donde estabas</strong> (por eso $s'=0$ tiene
+          probabilidad no nula: quedarse quieto también es una transición); el otro $5\,\%$ resbalas
+          al sur, a la casilla $5$. Las tres suman exactamente $1$, que es la condición de
+          normalización de más arriba. <strong>Eso</strong> —y no el simulador— es el MDP:
+          <code>step()</code> se limita a tirar los dados que esta tabla describe.
+        </p>
+        <p>
+          El segundo bloque, desde la casilla $23$, enseña la otra mitad: ahí la recompensa
+          <strong>depende de a qué $s'$ llegas</strong>. Con probabilidad $0{,}9$ entras en la meta y
+          cobras $+10$; con $0{,}1$ resbalas contra el muro o contra el borde, te quedas en la $23$ y
+          cobras $-1$. Dos parejas $(s', r)$ distintas para una misma acción: por eso la dinámica es
+          una <em>conjunta</em> sobre el par y no dos cosas separadas. Y fíjate en que la meta, al ser
+          terminal absorbente, tiene una dinámica trivial: $p(s', r \mid \text{meta}, a)$ vale $1$ para
+          quedarse ahí con recompensa $0$, pase lo que pase.
+        </p>
+        <p>
+          Después viene la trayectoria, y verás que la política aleatoria
           vaga sin rumbo: a veces se queda pegada a un muro (la acción no la deja avanzar y el
           estado no cambia) y de vez en cuando el resbalón la manda a una casilla inesperada. Como
           cada paso cuesta $-1$ y tarda mucho en llegar, el <strong>retorno medio es marcadamente
@@ -766,10 +997,20 @@ if __name__ == "__main__":
           <div class="callout-title">🧪 Experimenta</div>
           <p>
             Cambia <code>slip=0.1</code> a <code>slip=0.0</code> (suelo sin resbalones) y vuelve a
-            ejecutar: la dinámica se vuelve <strong>determinista</strong>, es decir,
-            $p(s' \mid s, a) \in \{0, 1\}$. Prueba también a subir $\gamma$ a $0{,}99$: al valorar
-            más el futuro, el retorno se hace aún más negativo, porque el castigo de cada paso
-            perdido pesa casi como si no se descontara.
+            ejecutar. Míralo en la primera tabla: las tres líneas se quedan en <strong>una sola</strong>,
+            <code>p(s'= 1, r= -1 | s=0, a=E) = 1.00</code>. Eso es exactamente lo que significa que
+            la dinámica sea <strong>determinista</strong>: toda la masa de probabilidad cae en un
+            único par $(s', r)$, o sea $p(s' \mid s, a) \in \{0, 1\}$. El determinismo no es otro
+            marco, es este mismo con las probabilidades puestas al extremo.
+          </p>
+          <p>
+            Prueba también a subir $\gamma$ a $0{,}99$ (la variable <code>gamma</code> del bloque
+            final): al valorar más el futuro, el retorno medio se desploma de $-18{,}3$ a
+            $-57{,}2$, y su desviación pasa de $3{,}3$ a $25{,}2$. Con $\gamma = 0{,}95$ el horizonte
+            son unos $20$ pasos y los paseos largos apenas se notan; con $0{,}99$ son unos $100$, así
+            que cada paso perdido pesa casi como si no se descontara y la diferencia entre un
+            episodio corto y uno largo se vuelve enorme. Ahí tienes las dos lecturas de $\gamma$ en
+            un solo número.
           </p>
         </div>
 
@@ -788,7 +1029,18 @@ if __name__ == "__main__":
 
 <span class="comment"># 3) ejecuta el ejemplo</span>
 <span class="prompt">$</span> python code/03-mdp/mdp_gridworld.py
-<span class="comment">=== Una trayectoria bajo política aleatoria pi(a|s) uniforme ===
+<span class="comment">=== La dinámica p(s', r | s, a), con números ===
+Desde la casilla 0, hacia el Este:
+  p(s'= 1, r= -1 | s=0, a=E) = 0.90
+  p(s'= 0, r= -1 | s=0, a=E) = 0.05
+  p(s'= 5, r= -1 | s=0, a=E) = 0.05
+  suma = 1.00
+Desde la casilla 23, hacia el Este (la meta está al lado):
+  p(s'=24, r= 10 | s=23, a=E) = 0.90
+  p(s'=23, r= -1 | s=23, a=E) = 0.10
+  suma = 1.00
+
+=== Una trayectoria bajo política aleatoria pi(a|s) uniforme ===
 t=0  s=0  a=O r= -1  ->  s'=0
 ...
 === Retorno medio por Monte Carlo (política aleatoria) ===
@@ -807,6 +1059,7 @@ Retorno medio G_0 ≈ -18.28   (desviación 3.25)</span></pre>
             <li>Un <strong>estado</strong> introduce la idea de «dónde estoy»: la mejor acción depende de él (a diferencia del bandido, de un solo estado).</li>
             <li>La <strong>propiedad de Markov</strong> dice que «el presente resume el pasado»: el futuro depende solo de $S_t$ y $A_t$, no de todo el historial.</li>
             <li>Un <strong>MDP</strong> es la tupla $(\mathcal{S}, \mathcal{A}, P, R, \gamma)$. Su núcleo es la dinámica $p(s', r \mid s, a)$, de la que se derivan $p(s' \mid s, a)$ y $r(s, a)$.</li>
+            <li>Ser markoviano es una propiedad <strong>del estado</strong>, no del mundo: si solo ves una <em>observación</em> parcial estás en un <strong>POMDP</strong>, y el remedio es fabricarte un estado mejor (apilar historia o recordar).</li>
             <li>Una <strong>política</strong> $\pi(a \mid s)$ describe cómo decide el agente; puede ser estocástica o determinista.</li>
             <li>El <strong>retorno</strong> $G_t = \sum_{k} \gamma^k R_{t+k+1}$ es lo que se maximiza; el descuento $\gamma &lt; 1$ lo mantiene finito en tareas continuas y cumple $G_t = R_{t+1} + \gamma\,G_{t+1}$.</li>
           </ul>

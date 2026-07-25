@@ -80,12 +80,30 @@
             <rect x="390" y="90" width="180" height="60" rx="12" fill="#0ea5e9" />
             <text x="480" y="126" text-anchor="middle" fill="#fff" font-size="20" font-family="sans-serif" font-weight="700">Entorno</text>
             <path d="M250,105 C320,105 320,105 388,105" fill="none" stroke="#4f46e5" stroke-width="2.5" marker-end="url(#arrow)" />
-            <text x="319" y="96" text-anchor="middle" fill="#4a5568" font-size="14" font-family="sans-serif">acción $A_t$</text>
+            <text x="319" y="96" text-anchor="middle" fill="#4a5568" font-size="14" font-family="sans-serif">acción <tspan font-style="italic">A</tspan><tspan font-size="10" dy="3">t</tspan></text>
             <path d="M390,135 C320,135 320,135 252,135" fill="none" stroke="#0ea5e9" stroke-width="2.5" marker-end="url(#arrow)" />
-            <text x="319" y="170" text-anchor="middle" fill="#4a5568" font-size="14" font-family="sans-serif">estado $S_{t+1}$, recompensa $R_{t+1}$</text>
+            <text x="319" y="170" text-anchor="middle" fill="#4a5568" font-size="14" font-family="sans-serif">estado <tspan font-style="italic">S</tspan><tspan font-size="10" dy="3">t+1</tspan><tspan font-size="14" dy="-3">, recompensa </tspan><tspan font-style="italic">R</tspan><tspan font-size="10" dy="3">t+1</tspan></text>
           </svg>
           <figcaption>El bucle de interacción: el agente actúa, el entorno reacciona. Aprender es cerrar bien este bucle.</figcaption>
         </figure>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧠 ¿Por qué $R_{t+1}$ y no $R_t$?</div>
+          <p>
+            Es el detalle de notación que más despista al principio, y tiene una razón sencilla: la
+            recompensa no la produces tú al decidir, la produce el <strong>entorno</strong> al
+            responderte. Llega <em>después</em> de la acción, en el mismo paquete que el estado
+            nuevo. Por eso una trayectoria se escribe limpiamente así:
+          </p>
+          <p>$$S_0,\; A_0,\; R_1,\; S_1,\; A_1,\; R_2,\; S_2,\; \dots$$</p>
+          <p>
+            y todo lo que comparte subíndice ocurre a la vez: $R_1$ y $S_1$ son las dos mitades de
+            la misma respuesta del entorno. <strong>Única excepción en todo el manual</strong>: en el
+            <a href="02-bandido-multibrazo.html#matematicas">capítulo 2</a> no hay estados y no
+            existe «el paso siguiente», así que allí escribiremos $\mathbb{E}[R_t \mid A_t = a]$. Es
+            la misma recompensa, medida con otro reloj.
+          </p>
+        </div>
 
         <p>El agente persigue un objetivo: no maximizar la recompensa <em>inmediata</em>, sino la
         recompensa <strong>acumulada a largo plazo</strong>. A veces conviene sacrificar premio
@@ -102,6 +120,86 @@
             <li><strong>Recompensa</strong> $R_{t+1}$: la señal numérica que define qué es «bueno».</li>
           </ul>
         </div>
+
+        <div class="callout key">
+          <div class="callout-title">🔑 Las tres piezas de un agente</div>
+          <p>
+            Casi cualquier agente de RL se construye con tres componentes. No todos llevan los tres,
+            y saber cuáles lleva cada método es la mejor forma de no perderse:
+          </p>
+          <ul>
+            <li><strong>Política</strong> $\pi$: la regla que convierte el estado en una acción. Es
+              lo único imprescindible; un agente sin política no actúa.</li>
+            <li><strong>Función de valor</strong>: una estimación de lo bueno que es cada estado (o
+              cada par estado–acción) a largo plazo. Es la memoria de lo aprendido, y lo que permite
+              preferir un premio grande y lejano a uno pequeño e inmediato.</li>
+            <li><strong>Modelo</strong>: una réplica interna del entorno que predice qué estado y qué
+              recompensa vendrán. Sirve para <em>planificar</em>, es decir, para ensayar por dentro
+              sin gastar experiencia real.</li>
+          </ul>
+          <p>
+            El recorrido del manual sigue ese orden: primero los métodos que estiman
+            <strong>valor</strong> (<a href="04-retornos-y-valor.html">capítulos 4</a> al 13), luego
+            los que optimizan la <strong>política</strong> directamente (14 al 17) y después los
+            que se construyen un <strong>modelo</strong>
+            (<a href="18-model-based.html#sin-y-con-modelo">capítulo 18</a>). Los últimos capítulos
+            ya mezclan las tres piezas con libertad.
+          </p>
+        </div>
+
+        <h2 id="vs-supervisado">RL frente a los otros dos aprendizajes</h2>
+        <p>
+          El aprendizaje automático se suele repartir en tres familias. La tercera —la nuestra— no
+          es una variante de las otras dos: lo que cambia es la <em>naturaleza de la señal</em> con
+          la que se aprende.
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th></th><th>Supervisado</th><th>No supervisado</th><th>Por refuerzo</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><strong>Qué recibe</strong></td>
+                <td>Pares (entrada, etiqueta correcta)</td>
+                <td>Solo entradas, sin etiquetas</td>
+                <td>Estados y una recompensa por lo que hace</td>
+              </tr>
+              <tr>
+                <td><strong>Qué le dice la señal</strong></td>
+                <td><strong>Instructiva</strong>: cuál era la respuesta correcta</td>
+                <td>Nada sobre acierto o error</td>
+                <td><strong>Evaluativa</strong>: cuánto valió <em>lo que hiciste</em></td>
+              </tr>
+              <tr>
+                <td><strong>De dónde salen los datos</strong></td>
+                <td>De un conjunto fijo, dado de antemano</td>
+                <td>De un conjunto fijo, dado de antemano</td>
+                <td>Los <strong>genera el propio agente</strong> al actuar</td>
+              </tr>
+              <tr>
+                <td><strong>Objetivo</strong></td>
+                <td>Predecir bien datos nuevos</td>
+                <td>Encontrar estructura (grupos, factores)</td>
+                <td>Maximizar la recompensa acumulada</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          La diferencia de fondo cabe en una palabra: <strong>evaluativo</strong> frente a
+          <strong>instructivo</strong>. Si un clasificador dice «gato» y era «perro», el aprendizaje
+          supervisado le indica exactamente cuál era la respuesta correcta: la corrección lleva
+          incorporada la dirección en la que mejorar. Si nuestro agente va a la izquierda y cobra
+          $-1$, nadie le dice que debía haber ido a la derecha; solo sabe que <em>eso</em> valió
+          $-1$. Para averiguar si $-1$ es bueno o malo tiene que <strong>probar otra cosa y
+          comparar</strong>.
+        </p>
+        <p>
+          De esa asimetría nace toda la necesidad de <strong>explorar</strong>, que es el tema del
+          <a href="02-bandido-multibrazo.html#explorar-explotar">capítulo 2</a>, y es la razón de
+          que el RL no sea «aprendizaje supervisado con otro nombre».
+        </p>
 
         <h2 id="matematicas">Un primer vistazo a las matemáticas</h2>
         <p>
@@ -196,13 +294,66 @@ for nombre, pol in [("Al azar", politica_azar), ("Siempre derecha", politica_der
         </p>
 
         <div class="callout intuition">
-          <div class="callout-title">🧪 Experimenta</div>
+          <div class="callout-title">🧠 Comprueba los dos números a mano</div>
           <p>
-            Cambia la recompensa de cada paso de $-1$ a $0$ y vuelve a ejecutar. ¿Por qué ahora
-            la política aleatoria ya no parece tan mala en recompensa total? (Pista: sin castigo
-            por paso, tardar no penaliza.) Jugar con las recompensas es <em>diseñar</em> el problema.
+            El <strong>7,00</strong> no tiene ni un decimal de azar: ir siempre a la derecha son
+            exactamente cuatro pasos, siempre los mismos, y $-1-1-1+10 = +7$. Fíjate bien en el
+            código: al llegar a la meta se cobra el $+10$ <em>en lugar</em> del $-1$, no además.
+          </p>
+          <p>
+            El $-7{,}83$ del azar es más interesante de lo que parece. El paseo aleatorio que
+            <em>llega</em> tarda 16,6 pasos de media, pero es que además <strong>25 de las 500
+            partidas</strong> no llegan dentro del tope de 50 pasos y se quedan con $-50$ limpios.
+            Esas 25 solas ya restan $2{,}5$ a la media: casi un tercio del $-7{,}83$. Un agente
+            malo en RL no es solo lento; a veces sencillamente <em>no termina</em>.
           </p>
         </div>
+
+        <div class="callout intuition">
+          <div class="callout-title">🧪 Experimenta</div>
+          <p>
+            Cambia la recompensa de cada paso de $-1$ a $0$ y vuelve a ejecutar. Saldrá
+            <strong>9,50</strong> para el azar frente a <strong>10,00</strong> para la política
+            sensata: de una diferencia de casi 15 puntos a un empate técnico. Sin castigo por paso,
+            tardar deja de penalizar y las 25 partidas que no llegan se quedan en $0$ en vez de en
+            $-50$; el pasillo ha dejado de ser un problema de <em>llegar rápido</em> para ser uno de
+            <em>llegar, cuando sea</em>. Jugar con las recompensas no es afinar un parámetro: es
+            <em>diseñar</em> el problema.
+          </p>
+        </div>
+
+        <h2 id="por-que-dificil">Por qué esto es difícil</h2>
+        <p>
+          Con el pasillo delante ya podemos nombrar las tres dificultades que convierten al RL en un
+          problema distinto —y bastante más duro— que ajustar un clasificador.
+        </p>
+        <p>
+          <strong>1. La asignación de crédito.</strong> En el pasillo, el $+10$ llega en el último
+          paso. ¿Cuál de los cuatro movimientos se lo merece? Los cuatro: sin el primero no habría
+          habido cuarto. Repartir el mérito de un premio tardío entre las decisiones que lo hicieron
+          posible es el <strong>problema de la asignación de crédito</strong>, y repartirlo bien es,
+          literalmente, lo que hacen las funciones de valor
+          (<a href="04-retornos-y-valor.html#funciones-valor">capítulo 4</a>), el
+          <em>bootstrapping</em> de TD (<a href="07-td-aprendizaje.html#idea">capítulo 7</a>) y las
+          trazas de elegibilidad (<a href="10-td-lambda.html#vista-atras">capítulo 10</a>). En un
+          pasillo de cuatro pasos es casi un juego; en una partida de ajedrez de ochenta jugadas que
+          termina en derrota, es el problema entero.
+        </p>
+        <p>
+          <strong>2. La señal es escasa.</strong> Durante tres de los cuatro pasos, lo único que el
+          agente recibe es un $-1$ idéntico tanto si se acerca a la meta como si se aleja: cero
+          información. Toda la señal que de verdad orienta está concentrada en el último instante.
+          En problemas reales ese instante puede tardar miles de pasos en llegar, y entre medias hay
+          que decidir a ciegas.
+        </p>
+        <p>
+          <strong>3. Tú te fabricas tus propios datos.</strong> Un clasificador recibe su conjunto
+          de entrenamiento hecho; un agente recoge el suyo con sus propias acciones, y por tanto una
+          mala política produce malos datos, que producen una política aún peor. Si el robot nunca
+          va a la derecha, jamás verá el $+10$ y jamás tendrá motivo para ir a la derecha. Ese
+          círculo vicioso es exactamente lo que rompe la exploración
+          (<a href="02-bandido-multibrazo.html#explorar-explotar">capítulo 2</a>).
+        </p>
 
         <h2 id="terminal">Ejecutarlo en tu terminal</h2>
         <p>
@@ -243,6 +394,33 @@ Siempre derecha  -> recompensa media =   7.00</span></pre>
           </table>
         </div>
 
+        <div class="callout warn">
+          <div class="callout-title">⚠️ Cuándo NO usar RL</div>
+          <p>
+            La lista de arriba impresiona, y por eso conviene leerla con su reverso. Antes de
+            montar un agente, hazte estas cuatro preguntas:
+          </p>
+          <ul>
+            <li><strong>¿Tienes ya las respuestas correctas etiquetadas?</strong> Entonces usa
+              aprendizaje supervisado. Es el error número uno del principiante: envolver en un bucle
+              de recompensas un problema que venía con etiquetas y quedarse voluntariamente con una
+              señal mucho más pobre.</li>
+            <li><strong>¿Puedes interactuar de verdad con el entorno?</strong> El RL necesita probar,
+              y probar en una fábrica, en un hospital o con dinero real puede ser carísimo o
+              directamente inaceptable. Si solo tienes registros de lo que ya pasó, lo que buscas
+              se llama <em>RL offline</em> (<a href="22-panorama.html#panorama">capítulo 22</a>),
+              o necesitas un simulador fiable.</li>
+            <li><strong>¿Sabes escribir la recompensa?</strong> Si no consigues poner en números qué
+              es «hacerlo bien», el agente optimizará lo que <em>sí</em> escribiste, no lo que
+              querías. Eso tiene nombre —<em>reward hacking</em>— y un capítulo entero donde muerde
+              de verdad (<a href="21-rlhf.html#objetivo-kl">capítulo 21</a>).</li>
+            <li><strong>¿Cada decisión es independiente de las anteriores?</strong> Si lo que haces
+              hoy no cambia la situación de mañana, no te hace falta toda la maquinaria: tienes un
+              <strong>bandido</strong> (<a href="02-bandido-multibrazo.html">capítulo 2</a>) y te
+              ahorras el 90 % de la dificultad.</li>
+          </ul>
+        </div>
+
         <div class="callout key">
           <div class="callout-title">🔑 Resumen del capítulo</div>
           <ul>
@@ -252,6 +430,10 @@ Siempre derecha  -> recompensa media =   7.00</span></pre>
             <li>Una <strong>política</strong> $\pi$ es la estrategia para elegir acciones. Aprender = mejorar la política.</li>
           </ul>
         </div>
+
+        <p>Sobre el equipaje: te bastará con Python y <code>numpy</code> básicos, probabilidad de
+        primer curso y, a partir de la Parte 2, saber qué es un gradiente. Todo lo demás se
+        construye aquí desde cero.</p>
 
         <p>En el próximo capítulo atacamos el dilema más famoso del RL con el problema más
         pequeño que lo contiene: el <strong>bandido multibrazo</strong>. Ahí sí empezará a

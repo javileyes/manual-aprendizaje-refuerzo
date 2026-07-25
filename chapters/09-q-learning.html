@@ -203,15 +203,31 @@
           <ul>
             <li>Todo par estado-acción se visita <strong>infinitas veces</strong> (por eso hace
             falta seguir explorando: $\varepsilon &gt; 0$).</li>
-            <li>Las tasas de aprendizaje cumplen las condiciones de Robbins-Monro:
-            $\sum_t \alpha_t = \infty$ y $\sum_t \alpha_t^2 &lt; \infty$ (por ejemplo,
-            $\alpha_t \to 0$ despacio).</li>
+            <li>Las tasas de aprendizaje cumplen las condiciones de
+            <strong>Robbins-Monro</strong>: $\sum_t \alpha_t = \infty$ y
+            $\sum_t \alpha_t^2 &lt; \infty$.</li>
           </ul>
+          <p>
+            Esas dos condiciones dicen algo muy concreto, y conviene traducirlas. La primera —que
+            la suma de los pasos sea infinita— garantiza que <em>puedes llegar a cualquier sitio</em>:
+            por mala que fuera la estimación de partida, queda «recorrido» suficiente para
+            corregirla entera. La segunda —que la suma de los cuadrados sea finita— obliga a que
+            los pasos <em>se apaguen</em> lo bastante deprisa como para que el ruido de cada muestra
+            acabe promediándose en vez de zarandear la estimación para siempre. El ejemplo canónico
+            es $\alpha_t = 1/t$, la media aritmética de toda la vida, la misma que ya usaste en el
+            <a href="02-bandido-multibrazo.html">capítulo 2</a>. Un $\alpha$ constante como el
+            $0{,}5$ del programa de más abajo incumple la segunda: estrictamente no converge, se
+            queda dando saltitos alrededor de $Q^\ast$. Y aun así lo usaremos casi siempre, porque
+            esos saltitos son exactamente lo que hace falta cuando el entorno puede cambiar.
+          </p>
           <p class="math-note">
             Y aquí lo notable: converge a $Q^\ast$ <strong>sea cual sea la política de
             comportamiento</strong>, con tal de que explore lo suficiente. SARSA, en cambio,
             converge al valor de la política $\varepsilon$-greedy que usa; solo alcanza $Q^\ast$ si
-            reducimos $\varepsilon \to 0$ gradualmente (una política «GLIE»).
+            reducimos $\varepsilon \to 0$ gradualmente (una política <strong>GLIE</strong>,
+            <em>greedy in the limit with infinite exploration</em>: exploradora durante todo el
+            camino, codiciosa en el límite, tal como la definimos en el
+            <a href="06-monte-carlo.html">capítulo 6</a>).
           </p>
         </div>
 
@@ -244,6 +260,18 @@
           vuelve a elegir libremente. Es un detalle sutil pero cómodo: el objetivo de Q-Learning no
           depende de lo que decidamos hacer después.
         </p>
+        <p>
+          Una advertencia sobre el código de más abajo, para que no te chirríe al leerlo: verás que
+          allí Q-Learning también elige $A'$ <em>antes</em> de actualizar, igual que SARSA. No es un
+          despiste, es una decisión experimental. Como el programa compara los dos algoritmos,
+          queremos que <strong>recojan exactamente la misma experiencia</strong> ante la misma
+          semilla; si Q-Learning sorteara su acción después de actualizar, las dos trayectorias se
+          separarían por motivos que nada tienen que ver con el objetivo TD y la comparación dejaría
+          de ser limpia. En una implementación suelta de Q-Learning —y en el pseudocódigo de
+          arriba— lo natural es al revés: actualizas primero y eliges después, ya con la $Q$
+          corregida. Q-Learning te lo permite; SARSA no, porque su objetivo necesita conocer $A'$ de
+          antemano.
+        </p>
 
         <h2 id="sesgo-max">La trampa del max: el sesgo de maximización</h2>
         <p>
@@ -261,11 +289,36 @@
           <p>$$\mathbb{E}\Big[\max_a \hat{Q}(a)\Big] \;\ge\; \max_a \mathbb{E}\big[\hat{Q}(a)\big].$$</p>
           <p>
             Imagina un estado donde el valor verdadero de todas las acciones es exactamente $0$,
-            pero tus estimaciones tienen ruido: algunas salen $+0.3$, otras $-0.2$… Al quedarte con
+            pero tus estimaciones tienen ruido: algunas salen $+0{,}3$, otras $-0{,}2$… Al quedarte con
             el máximo, casi siempre escoges una que <em>por azar</em> salió alta. En promedio,
             $\max_a \hat{Q}(a) &gt; 0$, cuando la verdad es $0$. Ese error positivo se propaga hacia
             atrás con el <em>bootstrapping</em> y hace que Q-Learning sea <strong>optimista</strong>
             sobre acciones que no lo merecen.
+          </p>
+          <p>
+            Y no es una preocupación teórica: el sesgo se puede medir. Coge ese estado en el que
+            todas las acciones valen exactamente $0$, dale a cada estimación un ruido gaussiano
+            independiente de media cero y desviación típica $1$, y mira cuánto vale de media el
+            $\max$:
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Nº de acciones</th><th>Valor verdadero de $\max_a Q$</th><th>$\mathbb{E}\big[\max_a \hat{Q}(a)\big]$ medido</th></tr></thead>
+              <tbody>
+                <tr><td>$2$</td><td>$0$</td><td>$+0{,}56$</td></tr>
+                <tr><td>$4$</td><td>$0$</td><td>$+1{,}03$</td></tr>
+                <tr><td>$10$</td><td>$0$</td><td>$+1{,}54$</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            (Dos millones de repeticiones por fila; con dos acciones el valor exacto es
+            $1/\sqrt{\pi} \approx 0{,}564$.) Con las cuatro acciones de Cliff Walking ya te estás
+            inventando <strong>una unidad entera de valor</strong> que no existe, y el sesgo
+            <strong>crece con el número de acciones</strong>: cuantas más opciones tengas, más
+            probable es que alguna haya tenido suerte. Como el sesgo es proporcional al ruido de
+            tus estimaciones, empeora justo donde más duele: al principio del entrenamiento, y
+            sobre todo cuando dejemos las tablas y pasemos a redes neuronales.
           </p>
         </div>
 
@@ -363,13 +416,27 @@
         <h3>El experimento</h3>
         <p>
           Vamos a comprobarlo. El siguiente programa entrena Q-Learning y SARSA sobre exactamente el
-          mismo Cliff Walking, con los mismos hiperparámetros ($\alpha = 0.5$, $\gamma = 1$,
-          $\varepsilon = 0.1$), promedia la recompensa por episodio sobre varias semillas para que
+          mismo Cliff Walking, con los mismos hiperparámetros ($\alpha = 0{,}5$, $\gamma = 1$,
+          $\varepsilon = 0{,}1$), promedia la recompensa por episodio sobre varias semillas para que
           las curvas queden limpias, y al final dibuja las <strong>dos políticas greedy
           resultantes</strong> sobre la rejilla, para que veas con tus ojos el camino que ha
           aprendido cada uno. Fíjate en el código en que <strong>lo único que cambia entre ambos es
           la línea del <em>bootstrap</em></strong>: $Q(S', A')$ para SARSA, $\max_a Q(S', a)$ para
           Q-Learning.
+        </p>
+        <p>
+          Dos detalles del código que conviene no pasar por alto. El primero, el factor
+          <code>(0.0 if fin else 1.0)</code> que multiplica al <em>bootstrap</em>: es la forma de
+          escribir en Python que $V(\text{terminal}) = 0$. Cuando el episodio acaba no queda futuro
+          que estimar, así que el objetivo se reduce a la recompensa a secas —la única cifra
+          <em>real</em>, sin estimaciones, que entra en todo el proceso, como vimos en el
+          <a href="07-td-aprendizaje.html">capítulo 7</a>—. Volverás a encontrarte la misma
+          condición con otra grafía (<code>(1.0 - term)</code>) cuando lleguemos al
+          <a href="12-dqn.html">DQN</a>. El segundo, que la función <code>entrena</code> admite una
+          tercera rama, <code>"expected-sarsa"</code>, que sustituye $Q(S', A')$ por su esperanza
+          bajo la política $\varepsilon$-greedy: es la
+          <a href="08-sarsa.html#expected-sarsa">variante del capítulo 8</a>, aquí lista para que la
+          compares con las otras dos cambiando una cadena de texto.
         </p>
 
         <div class="code-example" data-packages="numpy,matplotlib">
@@ -393,6 +460,9 @@ del Capitulo 9 del Manual de RL sobre el mismo problema:
     forma OPTIMA, aunque durante el entrenamiento explore.
   * SARSA: control TD *on-policy*. En el objetivo usa Q(S', A'), donde A' es la
     accion que realmente tomara la politica exploratoria (epsilon-greedy).
+  * Expected SARSA (la variante del Capitulo 8): tambien on-policy, pero en vez
+    de muestrear A' promedia Q(S', .) bajo la politica epsilon-greedy. Se activa
+    llamando a entrena() con algoritmo="expected-sarsa".
 
 La leccion clasica (Sutton &amp; Barto, ejemplo 6.6): Q-Learning aprende el camino
 OPTIMO pegado al acantilado (recompensa -13), pero durante el entrenamiento se
@@ -455,7 +525,10 @@ def epsilon_greedy(Q, estado, epsilon, rng):
 
 
 def entrena(algoritmo, n_episodios, alpha, gamma, epsilon, semilla, max_pasos=1000):
-    """Entrena 'q-learning' o 'sarsa'. Devuelve (Q, recompensa_por_episodio)."""
+    """Entrena 'q-learning', 'sarsa' o 'expected-sarsa'.
+
+    Devuelve (Q, recompensa_por_episodio).
+    """
     rng = np.random.default_rng(semilla)
     Q = np.zeros((N_ESTADOS, N_ACCIONES))
     retornos = np.zeros(n_episodios)
@@ -465,13 +538,28 @@ def entrena(algoritmo, n_episodios, alpha, gamma, epsilon, semilla, max_pasos=10
         total = 0.0
         for _ in range(max_pasos):
             s2, r, fin = paso(estado, accion)
-            # Misma politica de comportamiento en ambos: la accion que se tomara en s2.
+            # Misma politica de comportamiento en todos: la accion que se tomara en s2.
+            # SARSA NECESITA sortearla ahora, porque su objetivo la usa. Q-Learning
+            # podria actualizar primero y elegir despues (es lo que dice su
+            # pseudocodigo), pero aqui la sorteamos antes a proposito: asi los dos
+            # algoritmos consumen la misma secuencia de numeros aleatorios y recogen
+            # la misma experiencia, que es lo que hace limpia la comparacion.
             a2 = epsilon_greedy(Q, s2, epsilon, rng)
-            # La UNICA diferencia entre SARSA y Q-Learning esta en el objetivo TD:
+            # La UNICA diferencia entre los tres algoritmos esta en el objetivo TD:
             if algoritmo == "sarsa":
                 bootstrap = Q[s2, a2]        # on-policy: Q(S', A') con la accion real
+            elif algoritmo == "expected-sarsa":
+                # on-policy sin muestrear: media de Q(S', .) ponderada por la
+                # probabilidad que la politica epsilon-greedy da a cada accion.
+                q2 = Q[s2]
+                mejores = np.flatnonzero(q2 == q2.max())
+                pi = np.full(N_ACCIONES, epsilon / N_ACCIONES)
+                pi[mejores] += (1.0 - epsilon) / len(mejores)
+                bootstrap = float(pi @ q2)
             else:                            # q-learning
                 bootstrap = Q[s2].max()      # off-policy: max_a Q(S', a), la MEJOR accion
+            # El factor (0.0 if fin else 1.0) es V(terminal) = 0: si el episodio ha
+            # acabado no queda futuro que estimar y el objetivo es solo la recompensa.
             objetivo = r + gamma * bootstrap * (0.0 if fin else 1.0)
             Q[estado, accion] += alpha * (objetivo - Q[estado, accion])
             estado, accion = s2, a2
@@ -603,8 +691,10 @@ if __name__ == "__main__":
         <p>
           Pulsa <strong>▶ Ejecutar</strong> (la primera vez tarda unos segundos en descargar el
           intérprete). Verás dos gráficas y un resumen. La curva de recompensa cuenta la historia de
-          un vistazo: <strong>SARSA queda por encima de Q-Learning</strong> durante todo el
-          entrenamiento (se cae menos), aunque ambas se mantienen por debajo del $-13$ óptimo por
+          un vistazo: en cuanto los dos empiezan a aprender de verdad, <strong>SARSA queda por
+          encima de Q-Learning</strong> —unos $18$ puntos de recompensa por episodio de media—
+          porque se cae menos; solo en los primerísimos episodios, con las dos tablas todavía a
+          cero, van empatados y se cruzan. Aun así ninguna de las dos llega al $-13$ óptimo, por
           culpa de la exploración. Y las dos rejillas de flechas revelan lo esencial: la política de
           Q-Learning avanza por la fila pegada al acantilado (una hilera de flechas «→»), mientras
           que la de SARSA empuja hacia arriba («↑»), alejándose del borde. El camino greedy resulta
@@ -615,11 +705,26 @@ if __name__ == "__main__":
         <div class="callout intuition">
           <div class="callout-title">🧪 Experimenta</div>
           <p>
-            Baja $\varepsilon$ de $0.1$ a $0.01$ y vuelve a ejecutar. Con muy poca exploración, el
-            precipicio deja de ser peligroso y las dos curvas se acercan: SARSA también se atreve a
-            caminar por el borde, porque ya casi no se cae. Es la mejor forma de <em>sentir</em> que
-            la diferencia entre ambos vive por completo en la exploración. Prueba también a subir
-            $\varepsilon$ a $0.25$: la brecha se ensancha y SARSA se aleja aún más del acantilado.
+            Baja $\varepsilon$ de $0{,}1$ a $0{,}01$ y vuelve a ejecutar. Con casi nada de
+            exploración, acercarse al borde deja de dar miedo y las dos curvas se juntan:
+            $-16{,}4$ de recompensa media para Q-Learning y $-16{,}2$ para SARSA, prácticamente
+            empatados. Y fíjate en el camino greedy de SARSA: baja de $17$ pasos a $15$, una fila
+            más cerca del acantilado. Nadie ha tocado el entorno; solo hemos cambiado con cuánta
+            torpeza lo recorremos. Es la mejor forma de <em>sentir</em> que la diferencia entre
+            ambos vive por completo en la exploración.
+          </p>
+          <p>
+            Prueba ahora lo contrario, $\varepsilon = 0{,}25$: la brecha se dispara. Q-Learning se
+            desploma hasta unos $-154$ por episodio mientras SARSA aguanta en torno a $-43$. Y sin
+            embargo el camino greedy de SARSA sigue siendo el mismo de $17$ pasos que con
+            $\varepsilon = 0{,}1$: no puede alejarse más del acantilado porque ya va por la fila de
+            arriba del todo, que es lo más lejos que se puede estar en una rejilla de cuatro filas.
+            Lo que ha cambiado no es la política que aprende SARSA, sino <em>cuánto le cuesta a
+            Q-Learning</em> insistir en la suya. Quédate con esa conclusión: la política de
+            Q-Learning es la misma con $\varepsilon = 0{,}01$ que con $\varepsilon = 0{,}25$
+            —siempre $13$ pasos, siempre la óptima—, mientras que la de SARSA cambia con
+            $\varepsilon$ ($15$ pasos con $0{,}01$, $17$ con $0{,}1$). Eso <em>es</em> la diferencia
+            entre off-policy y on-policy, medida en pasos.
           </p>
         </div>
 
@@ -642,7 +747,11 @@ if __name__ == "__main__":
 ------------------------------------------------------------------
                   recompensa media     camino greedy
 Q-Learning                   -50.7           13 pasos
-SARSA                        -27.4           17 pasos</span></pre>
+SARSA                        -27.4           17 pasos
+------------------------------------------------------------------
+Q-Learning encuentra el camino mas corto (pegado al acantilado) pero,
+al explorar, se cae mas durante el entrenamiento. SARSA aprende un
+camino mas seguro y logra mejor recompensa mientras aprende.</span></pre>
         </div>
         <p class="pyodide-banner">
           💡 Este ejemplo usa solo <code>numpy</code> y <code>matplotlib</code>, así que corre
