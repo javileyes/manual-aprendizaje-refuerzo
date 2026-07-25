@@ -152,12 +152,28 @@ botón **💾 Mis cambios** de la barra lateral puedes:
 > así, insertar o quitar contenido en un capítulo no descoloca lo que hayas anotado más
 > abajo. Los ejemplos de código van por su **nombre de fichero** (`ppo_desde_cero.py`), de
 > modo que un renumerado de capítulos tampoco los deja huérfanos. Los títulos de sección,
-> por su **`id`**, que es lo más estable del capítulo y es a donde apuntan los enlaces del
-> propio manual. Las fórmulas, por su **código LaTeX**: su texto renderizado no distingue
+> por su **`id`**. Las fórmulas, por su **código LaTeX**: su texto renderizado no distingue
 > una fórmula de otra, así que las 223 compartirían clave. Y los párrafos, listas y
 > recuadros, por una **huella de su texto**. Además se guarda una huella del original, de
 > forma que si el manual cambia después ese ejemplo o ese párrafo se te avisa, en vez de
 > aplicar tu versión sobre otra base o perderla en silencio.
+
+**Qué aguantan tus notas si el manual se edita.** Medido sobre un capítulo real con una
+nota en cada uno de sus 112 elementos anotables (`test_estabilidad.mjs`):
+
+| Edición del manual | Notas que siguen en su sitio |
+|---|---|
+| Añadir párrafos —al principio, en medio, dentro de un recuadro— | 112/112 |
+| Añadir una sección entera nueva | 112/112 |
+| Reordenar secciones | 112/112 |
+| Corregir una errata en otro párrafo | 112/112 |
+| Cambiar el LaTeX de una fórmula sin nota | 112/112 |
+| Borrar un párrafo | 111/112 — solo la suya |
+| Editar el texto de un párrafo anotado | 111/112 — solo la suya |
+| Cambiar el `id` de un título anotado | 111/112 — solo la suya |
+
+Una nota que se desengancha **no se pierde**: sigue en «💾 Mis cambios», con su texto y con
+el aviso «el párrafo ha cambiado», para que puedas releerla y volver a colocarla.
 
 ### Dos familias de ejemplos
 

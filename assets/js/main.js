@@ -500,10 +500,13 @@
 
       if (el.classList.contains("callout")) {
         // Recuadro completo. Muchos comparten título («🧠 Intuición»), así que la
-        // clave mira también su contenido.
+        // clave mira también su contenido. NO mira el apartado: medido sobre los
+        // 23 capítulos, título + contenido ya distingue los 413 sin una sola
+        // colisión, así que meter el apartado solo añadiría una dependencia —y
+        // renombrar el id de una sección desengancharía sus notas sin motivo.
         const tit = (el.querySelector(":scope > .callout-title").textContent || "").trim();
         tipo = "recuadro";
-        clave = "c/" + unica(huella(sec + "|" + tit + "|" + t.slice(0, 240)));
+        clave = "c/" + unica(huella(tit + "|" + t.slice(0, 240)));
         extracto = tit + (t ? " — " + corta(t, 90) : "");
       } else if (/^H[23]$/.test(el.nodeName)) {
         // Título de sección: si tiene id lo usamos tal cual, que es lo más estable
@@ -520,9 +523,12 @@
         clave = unica(huella(t));                 // sin prefijo: es el caso original
         extracto = corta(t, 110);
       } else {
-        // Fórmula suelta: la clave sale de su LaTeX, más el apartado en que está.
+        // Fórmula suelta: la clave sale SOLO de su LaTeX. Llevaba también el
+        // apartado, pero medido sobre los 23 capítulos eso no evitaba ninguna
+        // colisión —de ellas se encarga unica()— y sí hacía que renombrar el id
+        // de una sección desenganchara todas las fórmulas de dentro.
         tipo = "formula";
-        clave = "f/" + unica(huella("f|" + sec + "|" + el.dataset.tex));
+        clave = "f/" + unica(huella("f|" + el.dataset.tex));
         extracto = corta(el.dataset.tex, 160);
       }
 
